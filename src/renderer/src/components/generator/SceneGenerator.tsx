@@ -164,7 +164,6 @@ export const SceneGenerator: React.FC = () => {
 
   // -- Step 3: Batch generation --
   const [generatingAll, setGeneratingAll] = useState(false);
-  const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 0 });
 
   // -- Cloudflare config (for image generation) --
   const [cloudflareConfig] = useState<CloudflareConfig>(loadCloudflareConfig);
@@ -359,13 +358,11 @@ export const SceneGenerator: React.FC = () => {
   const handleGenerateAll = useCallback(async () => {
     if (scenes.length === 0) return;
     setGeneratingAll(true);
-    setGenerationProgress({ current: 0, total: scenes.length });
 
     const updated = [...scenes];
 
     for (let i = 0; i < updated.length; i++) {
       if (updated[i].status === 'done') {
-        setGenerationProgress({ current: i + 1, total: updated.length });
         continue;
       }
 
@@ -390,7 +387,6 @@ export const SceneGenerator: React.FC = () => {
       }
 
       setScenes([...updated]);
-      setGenerationProgress({ current: i + 1, total: updated.length });
     }
 
     // Assemble timeline
@@ -726,6 +722,19 @@ export const SceneGenerator: React.FC = () => {
               <Trash2 size={10} />
               Reset
             </button>
+            <button
+              onClick={handleUnloadGpu}
+              disabled={unloadingGpu || aiSettings.provider !== 'ollama'}
+              className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium text-red-400 border border-red-500/30 hover:bg-red-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Unload model from GPU — frees all VRAM for transcription or rendering"
+            >
+              {unloadingGpu ? (
+                <Loader2 size={10} className="animate-spin" />
+              ) : (
+                <ArrowDownToLine size={10} />
+              )}
+              Unload GPU
+            </button>
           </div>
         </div>
 
@@ -749,26 +758,6 @@ export const SceneGenerator: React.FC = () => {
             </React.Fragment>
           ))}
         </div>
-
-        {/* Model loading progress bar — visible during AI breakdown */}
-        {modelLoading && (
-          <div className="mt-3 flex items-center gap-3">
-            <div className="flex-1">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[9px] text-amber-400 font-medium flex items-center gap-1">
-                  <Loader2 size={9} className="animate-spin" />
-                  Loading {aiSettings.ollamaModel} to GPU...
-                </span>
-                <span className="text-[8px] text-slate-500 font-mono">{formatElapsed(elapsedMs)}</span>
-              </div>
-              <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-amber-500 to-orange-400 rounded-full animate-pulse"
-                  style={{ width: '50%' }} />
-              </div>
-              <p className="text-[8px] text-slate-600 mt-0.5">First token arrives after model loads into VRAM (~30-60s)</p>
-            </div>
-          </div>
-        )}
 
         {/* Top VRAM Status Bar — persistent, compact */}
         {aiSettings.provider === 'ollama' && (
@@ -803,35 +792,6 @@ export const SceneGenerator: React.FC = () => {
                 <span className="text-[9px] text-slate-600">VRAM idle</span>
               </div>
             ) : null}
-
-            {/* Model loading progress mini-bar */}
-            {modelLoading && (
-              <div className="flex-1 min-w-[100px] max-w-[200px]">
-                <div className="w-full bg-slate-800 rounded-full h-1 overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-amber-500 to-orange-400 rounded-full animate-pulse"
-                    style={{ width: '50%' }} />
-                </div>
-              </div>
-            )}
-
-            {/* Unload GPU button */}
-            {vramModel && !modelLoading && (
-              <button
-                onClick={handleUnloadGpu}
-                disabled={unloadingGpu}
-                className="flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-medium
-                  bg-red-500/10 text-red-400 border border-red-500/20
-                  hover:bg-red-500/20 hover:text-red-300 transition-colors disabled:opacity-50"
-                title="Unload model from GPU — frees all VRAM for transcription or rendering"
-              >
-                {unloadingGpu ? (
-                  <Loader2 size={8} className="animate-spin" />
-                ) : (
-                  <ArrowDownToLine size={8} />
-                )}
-                Unload GPU
-              </button>
-            )}
           </div>
         )}
       </div>
@@ -1291,19 +1251,9 @@ export const SceneGenerator: React.FC = () => {
                   className="w-full justify-center gap-2 px-3 py-2.5 text-[11px] bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 border-0"
                 >
                   {generatingAll
-                    ? `Generating ${generationProgress.current}/${generationProgress.total}...`
+                    ? 'Generating...'
                     : 'Batch Generate All & Build Video'}
                 </Button>
-                {generatingAll && (
-                  <div className="mt-2">
-                    <div className="w-full bg-slate-700/50 rounded-full h-1.5 overflow-hidden">
-                      <div
-                        className="h-full bg-indigo-500 rounded-full transition-all duration-300"
-                        style={{ width: `${(generationProgress.current / generationProgress.total) * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -1458,9 +1408,7 @@ export const SceneGenerator: React.FC = () => {
         active={inspectorStatus === 'thinking' || inspectorStatus === 'loading_model' || inspectorStatus === 'generating'}
         thinkingLog={thinkingLog}
         liveOutput={liveOutput}
-        elapsedMs={elapsedMs}
         status={inspectorStatus}
-        progress={generatingAll ? generationProgress : undefined}
         modelName={aiSettings.provider === 'ollama' ? aiSettings.ollamaModel : aiSettings.provider}
         onOffload={handleOffloadModel}
         onVramUpdate={handleVramUpdate}

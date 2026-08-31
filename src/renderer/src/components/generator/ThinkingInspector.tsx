@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Cpu, Activity, ChevronRight, ChevronLeft, Loader2, Clock,
-  Thermometer, HardDrive, Zap, Trash2, MonitorDot, Send,
+  Cpu, Activity, ChevronRight, ChevronLeft, Loader2,
+  Thermometer, HardDrive, Zap, MonitorDot, Send,
   Brain, Gauge, ChevronDown,
 } from 'lucide-react';
 import { fetchOllamaPs, offloadModel, type OllamaPsModel } from '../../services/aiService';
@@ -16,9 +16,7 @@ export interface ThinkingInspectorProps {
   active: boolean;
   thinkingLog: string;
   liveOutput: string;
-  elapsedMs: number;
   status: 'idle' | 'loading_model' | 'thinking' | 'generating' | 'done' | 'error';
-  progress?: { current: number; total: number };
   modelName?: string;
   onOffload?: () => void;
   onVramUpdate?: (model: OllamaPsModel | null, totalVram: number) => void;
@@ -38,13 +36,6 @@ function formatBytes(bytes: number): string {
   const units = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${units[i]}`;
-}
-
-function formatElapsed(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  const m = Math.floor(s / 60);
-  const ss = s % 60;
-  return m > 0 ? `${m}m ${ss}s` : `${ss}s`;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,16 +90,6 @@ const VRAMMonitor: React.FC<{
               <Cpu size={10} className="text-amber-400 shrink-0" />
               <span className="text-[10px] text-white font-medium truncate">{model.name}</span>
             </div>
-            <button
-              onClick={() => onOffload(model.name)}
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-medium
-                bg-red-500/10 text-red-400 border border-red-500/20
-                hover:bg-red-500/20 hover:text-red-300 transition-colors shrink-0"
-              title="Unload model from GPU memory"
-            >
-              <Trash2 size={8} />
-              Offload
-            </button>
           </div>
 
           <div className="space-y-1">
@@ -143,97 +124,6 @@ const VRAMMonitor: React.FC<{
           <span className="text-[9px] text-slate-500">No model loaded in VRAM</span>
         </div>
       ) : null}
-    </div>
-  );
-};
-
-// ---------------------------------------------------------------------------
-// Progress Indicator
-// ---------------------------------------------------------------------------
-
-const ProgressIndicator: React.FC<{
-  status: string;
-  elapsedMs: number;
-  progress?: { current: number; total: number };
-}> = ({ status, elapsedMs, progress }) => {
-  const isActive = status === 'thinking' || status === 'generating' || status === 'loading_model';
-  const pct = progress && progress.total > 0
-    ? Math.round((progress.current / progress.total) * 100)
-    : status === 'thinking' || status === 'loading_model' ? -1 : 0;
-
-  const statusLabel = (() => {
-    switch (status) {
-      case 'idle': return 'Waiting to start';
-      case 'loading_model': return 'Loading model to GPU...';
-      case 'thinking': return 'AI is reasoning...';
-      case 'generating': return progress ? `Generating scene ${progress.current}/${progress.total}` : 'Generating...';
-      case 'done': return 'Complete';
-      case 'error': return 'Error occurred';
-      default: return 'Unknown';
-    }
-  })();
-
-  const statusColor = (() => {
-    switch (status) {
-      case 'thinking': return 'text-amber-300';
-      case 'loading_model': return 'text-orange-300';
-      case 'generating': return 'text-sky-300';
-      case 'done': return 'text-emerald-300';
-      case 'error': return 'text-red-300';
-      default: return 'text-slate-500';
-    }
-  })();
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-          <Activity size={9} />
-          Progress
-        </span>
-        {isActive && (
-          <span className="text-[9px] text-slate-500 font-mono flex items-center gap-1">
-            <Clock size={8} />
-            {formatElapsed(elapsedMs)}
-          </span>
-        )}
-      </div>
-
-      <div className="bg-slate-900/60 rounded-lg border border-white/5 p-2.5 space-y-2">
-        <div className="flex items-center gap-2">
-          {isActive ? (
-            <Loader2 size={10} className="text-amber-400 animate-spin shrink-0" />
-          ) : status === 'done' ? (
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0" />
-          ) : status === 'error' ? (
-            <span className="w-2.5 h-2.5 rounded-full bg-red-400 shrink-0" />
-          ) : (
-            <span className="w-2.5 h-2.5 rounded-full bg-slate-600 shrink-0" />
-          )}
-          <span className={`text-[10px] font-medium ${statusColor}`}>{statusLabel}</span>
-        </div>
-
-        {isActive && (
-          <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-            {pct === -1 ? (
-              <div className="h-full rounded-full animate-pulse bg-gradient-to-r from-amber-500/60 to-orange-400/60"
-                style={{ width: '40%' }} />
-            ) : (
-              <div
-                className="h-full bg-gradient-to-r from-indigo-500 to-cyan-400 rounded-full transition-all duration-500"
-                style={{ width: `${pct}%` }}
-              />
-            )}
-          </div>
-        )}
-
-        {progress && progress.total > 0 && (
-          <div className="flex justify-between">
-            <span className="text-[8px] text-slate-600">{progress.current} / {progress.total} scenes</span>
-            <span className="text-[8px] text-slate-500 font-mono">{Math.round((progress.current / progress.total) * 100)}%</span>
-          </div>
-        )}
-      </div>
     </div>
   );
 };
@@ -450,9 +340,7 @@ export const ThinkingInspector: React.FC<ThinkingInspectorProps> = ({
   active,
   thinkingLog,
   liveOutput,
-  elapsedMs,
   status,
-  progress,
   modelName,
   onOffload,
   onVramUpdate,
@@ -536,8 +424,6 @@ export const ThinkingInspector: React.FC<ThinkingInspectorProps> = ({
               onOffload={handleOffload}
               modelLoading={modelLoading}
             />
-            <div className="h-px bg-white/5" />
-            <ProgressIndicator status={status} elapsedMs={elapsedMs} progress={progress} />
             <div className="h-px bg-white/5" />
             <LiveOutputConsole output={liveOutput} active={active} />
             <div className="h-px bg-white/5" />

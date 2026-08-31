@@ -108,11 +108,11 @@ docuflow-desktop/
 | **AI Image Generator** | ✅ Active | Cloudflare Workers (FLUX/SD Schnell) with batch generation |
 | **Local GPU Whisper Transcriber** | ✅ Active | Python-based, supports tiny/base/small/medium/large-v3 |
 | **AI Scene Breakdown Engine** | ✅ Active | Ollama (local) + OpenRouter + Gemini providers, streaming with `<think>` tag extraction |
-| **Thinking Inspector / VRAM Telemetry** | ✅ Active | 350px collapsible sidebar with real-time VRAM monitor, progress bar, live reasoning console, GPU auto-detect, model offload button, live token streaming, interactive AI chat input |
+| **Thinking Inspector / VRAM Telemetry** | ✅ Active | 350px collapsible sidebar with real-time VRAM monitor, live reasoning console, GPU auto-detect, live token streaming, interactive AI chat input |
 | **Asset Management** | ✅ Active | Drag-drop import, asset library, protocol-based local file serving |
 | **Video Preview (Remotion)** | ✅ Active | Real-time preview with playhead, track visibility toggles |
 | **Voiceover Panel** | ✅ Active | Audio role assignment (voiceover, music, SFX, ambient) |
-| **Top VRAM Status Bar** | ✅ Active | Persistent compact bar: active model badge, real-time VRAM usage pill, model loading progress, red "Unload GPU" button for instant VRAM flush |
+| **Top VRAM Status Bar** | ✅ Active | Persistent compact bar: active model badge, real-time VRAM usage pill |
 | **Interactive AI Chat** | ✅ Active | In-inspector chat input for direct Ollama model interaction, streaming responses, prompt tweaking |
 | **Custom Title Bar** | ✅ Active | Frameless window with minimize/maximize/close IPC |
 | **Voiceover Transcription** | ✅ Active | Audio-to-text via local Whisper, segment-level timestamps |
@@ -152,7 +152,8 @@ npm run build:linux  # Linux
 - **Live token streaming** — tokens appear on screen as they arrive
 - **Model loading progress bar** — shows when model is loading to GPU
 - **Interactive chat** — chat directly with loaded model from inspector sidebar
-- **Top VRAM status bar** — persistent model badge, VRAM usage, unload button
+- **Top VRAM status bar** — persistent model badge, VRAM usage pill
+- **GPU unload button** — header action button next to Reset, instantly frees VRAM
 
 ### OpenRouter (Cloud, Free tier)
 - Endpoint: `https://openrouter.ai/api/v1/chat/completions`
@@ -168,6 +169,7 @@ npm run build:linux  # Linux
 
 | Date | Change | Files |
 |------|--------|-------|
+| 2026-09-01 | Removed all progress bar UI (header, VRAM bar, batch generate, inspector), relocated GPU unload button to header action group next to Reset, stripped `generationProgress` state, removed `ProgressIndicator` component | `SceneGenerator.tsx`, `ThinkingInspector.tsx` |
 | 2026-09-01 | Added 350px collapsible inspector sidebar, top VRAM status bar (model badge + VRAM pill + unload button), interactive AI chat panel, collapsible reasoning box, `chatWithModel` streaming function | `SceneGenerator.tsx`, `ThinkingInspector.tsx`, `aiService.ts` |
 | 2026-09-01 | Fixed flex layout across all tabs: `w-full h-full` on App root, `flex-col` → `flex-row` split on EditorLayout/ImageGenerator, left/right panel sizing on SceneGenerator, fixed right panel resize handle positioning | `App.tsx`, `EditorLayout.tsx`, `ImageGenerator.tsx`, `SceneGenerator.tsx` |
 | 2026-09-01 | Added GPU auto-detection, model offload button, live token streaming (`onToken` callback), model loading state callbacks | `src/renderer/src/services/aiService.ts` |
