@@ -11,6 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Asset } from '../../types/assets';
 import { Command } from '../../engine/commands/types';
 import { generateLogicalId } from '../../engine/media/findAsset';
+import { compileSceneDSL, type SceneDSL, type CompileContext } from '../../engine/sceneDSL';
 import { generateWithCloudflare, CLOUDFLARE_MODELS, CloudflareConfig } from '../../utils/cloudflareApi';
 import {
   generateScenesStream, fetchOllamaModels, offloadModel, chatWithModel,
@@ -389,39 +390,83 @@ export const SceneGenerator: React.FC = () => {
       setScenes([...updated]);
     }
 
-    // Assemble timeline
+    // Assemble timeline using Scene DSL compiler
     try {
-      const currentAssets = useDocuFlowStore.getState().assets;
-      const newAssets: Asset[] = [];
-      const newCommands: Command[] = [];
+      const store = useDocuFlowStore.getState();
+      const currentAssets = store.assets;
+      const sceneImages = new Map<number, string>();
+      const completedScenes: StoryboardScene[] = [];
 
       for (const sc of updated) {
-        if (sc.status !== 'done' || !sc.imageUrl) continue;
-        const logicalId = generateLogicalId('image', [...currentAssets, ...newAssets]);
+        if (sc.status === 'done' && sc.imageUrl) {
+          sceneImages.set(sc.sceneId - 1, `scene-${sc.sceneId}.png`);
+          completedScenes.push(sc);
+        }
+      }
+
+      if (completedScenes.length === 0) {
+        setToast({ message: 'No completed scenes to build timeline', type: 'error' });
+        return;
+      }
+
+      // Build SceneDSL array from completed storyboard scenes
+      const dslScenes: SceneDSL[] = completedScenes.map((sc) => ({
+        text: sc.transcriptChunk,
+        visual: sc.visualDescription,
+        motion: sc.cameraMotion === 'static' ? 'none'
+          : sc.cameraMotion === 'zoom_in' ? 'slow_zoom'
+          : sc.cameraMotion === 'zoom_out' ? 'slow_zoom_out'
+          : sc.cameraMotion === 'pan_left' ? 'slow_pan_left'
+          : sc.cameraMotion === 'pan_right' ? 'slow_pan_right'
+          : 'none',
+        transition: 'cut',
+        duration: `${(sc.endTime - sc.startTime).toFixed(1)}s`,
+      }));
+
+      // Use compiler to generate commands with proper motion animations
+      const fps = store.settings.fps || 30;
+      const context: CompileContext = {
+        fps,
+        width: store.settings.width || 1920,
+        height: store.settings.height || 1080,
+      };
+
+      const compiled = compileSceneDSL(dslScenes, context, sceneImages);
+
+      // Map compiled assets to DocuFlow Asset objects
+      const newAssets: Asset[] = [];
+      const assetMapByFilename = new Map<string, { logicalId: string }>();
+
+      for (const [filename, assetInfo] of compiled.assetMap) {
+        const sceneIdx = parseInt(filename.replace('scene-', '').replace('.png', ''), 10) - 1;
+        const sc = completedScenes[sceneIdx];
+        if (!sc?.imageUrl) continue;
+
+        const assetId = uuidv4();
         newAssets.push({
-          id: uuidv4(),
-          logicalId,
-          filename: `scene-${sc.sceneId}.png`,
+          id: assetId,
+          logicalId: assetInfo.logicalId,
+          filename,
           type: 'image',
           mimeType: 'image/png',
           url: sc.imageUrl,
         });
-        newCommands.push({
-          id: uuidv4(),
-          type: 'show',
-          asset: logicalId,
-          start: sc.startTime,
-          duration: sc.endTime - sc.startTime,
-        } as Command);
+        assetMapByFilename.set(filename, { logicalId: assetInfo.logicalId });
       }
 
-      const store = useDocuFlowStore.getState();
+      // Convert compiler commands to DocuFlow commands
+      const newCommands: Command[] = compiled.allCommands.map((cmd) => ({
+        ...cmd,
+        id: uuidv4(),
+      })) as Command[];
+
+      // Commit to store
       store.beginBatch();
       newAssets.forEach((a) => store.addAsset(a));
       newCommands.forEach((c) => store.addCommand(c));
       store.endBatch();
 
-      setToast({ message: `Timeline built: ${newAssets.length} scenes`, type: 'success' });
+      setToast({ message: `Timeline built: ${newAssets.length} scenes, ${newCommands.length} commands`, type: 'success' });
       setActiveTab('studio');
     } catch (err) {
       setToast({ message: `Timeline error: ${err instanceof Error ? err.message : String(err)}`, type: 'error' });

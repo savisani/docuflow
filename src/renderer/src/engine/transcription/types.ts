@@ -10,12 +10,15 @@ export interface TranscriptSegment {
   start: number;
   end: number;
   words?: TranscriptWord[];
+  originalText?: string;
+  originalLanguage?: string;
 }
 
 export interface Transcript {
   language: string;
   text: string;
   segments: TranscriptSegment[];
+  translated?: boolean;
 }
 
 export type TranscriptionStatus = 'idle' | 'processing' | 'complete' | 'error';

@@ -32,12 +32,15 @@ export interface ProjectTranscriptSegment {
   start: number;
   end: number;
   words?: { text: string; start: number; end: number }[];
+  originalText?: string;
+  originalLanguage?: string;
 }
 
 export interface ProjectTranscript {
   language: string;
   text: string;
   segments: ProjectTranscriptSegment[];
+  translated?: boolean;
 }
 
 export interface ProjectSceneMarker {

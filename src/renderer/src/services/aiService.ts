@@ -5,7 +5,7 @@
 export type AIProvider = 'ollama' | 'openrouter' | 'gemini';
 
 export interface AISceneRequest {
-  transcriptionSegments: Array<{ start: number; end: number; text: string }>;
+  transcriptionSegments: Array<{ start: number; end: number; text: string; originalText?: string; originalLanguage?: string }>;
   fullScript?: string;
   provider: AIProvider;
   model?: string;
@@ -24,17 +24,64 @@ export interface SceneItem {
   visualDescription: string;
   imagePrompt: string;
   cameraMotion: 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right' | 'static';
-}
-
-interface AISceneResponse {
-  scenes: SceneItem[];
+  reasoning?: string;
 }
 
 // ---------------------------------------------------------------------------
-// System prompt
+// Scene DSL system prompt — AI produces simple key-value blocks, NOT JSON
 // ---------------------------------------------------------------------------
 
-const SYSTEM_PROMPT = `You are an expert video director and storyboard artist.
+const SCENE_DSL_SYSTEM_PROMPT = `You are an expert video director and storyboard artist.
+
+Given audio timestamped transcript segments, group them into coherent visual scenes (3-6 seconds each).
+
+OUTPUT FORMAT: For each scene, output a simple key-value block. Separate scenes with a blank line followed by --- followed by a blank line.
+
+Each scene MUST include:
+- text: The transcript text for this scene
+- visual: A highly descriptive visual prompt for image generation (cinematic, detailed, lighting, composition, mood)
+- motion: Camera motion (must be exactly one of: none, slow_zoom, medium_zoom, fast_zoom, slow_zoom_out, medium_zoom_out, fast_zoom_out, slow_pan_left, slow_pan_right, slow_pan_up, slow_pan_down, medium_pan_left, medium_pan_right, fast_pan_left, fast_pan_right, dolly_in, dolly_out, orbit_left, orbit_right, tilt_up, tilt_down, crane_up, crane_down, handheld, parallax)
+- transition: How this scene transitions to the next (must be exactly one of: cut, crossfade, slide_left, slide_right, slide_up, slide_down, wipe_left, wipe_right, wipe_up, wipe_down, zoom_in, zoom_out, dissolve, fade)
+- style: Visual style (must be exactly one of: natural, cinematic, documentary, vintage, dramatic, minimal, none)
+- duration: Approximate duration in seconds (e.g. "4s")
+
+Optional fields:
+- layers: Comma-separated additional visual elements
+- extras: Comma-separated additional notes
+- reasoning: Why you chose this visual and motion
+
+EXAMPLE OUTPUT:
+text: The ancient temple stood atop the misty mountain peak
+visual: Ancient stone temple with intricate carvings, morning mist swirling around weathered columns, golden sunlight filtering through carved windows, dramatic mountain landscape in background, cinematic composition with temple centered, volumetric lighting
+motion: slow_zoom
+transition: crossfade
+style: cinematic
+duration: 5s
+reasoning: Slow zoom builds reverence and scale for the temple introduction
+
+---
+
+text: Monks in orange robes walked silently through the corridors
+visual: Buddhist monks in flowing orange robes walking through stone corridor, soft morning light streaming through archways, incense smoke drifting through air, warm earth tones, documentary style composition with leading lines from corridor perspective
+motion: slow_pan_right
+transition: cut
+style: documentary
+duration: 4s
+reasoning: Pan right follows the monks' movement through the space
+
+IMPORTANT RULES:
+1. Use EXACTLY the values listed above for motion, transition, and style — no variations
+2. Output plain text only — no markdown fences, no JSON, no backticks
+3. Each scene block starts with "text:" on its own line
+4. Separate scenes with a blank line, three dashes, blank line
+5. Keep visual descriptions detailed but concise (1-2 sentences)
+6. Group transcript segments that form a single visual idea (aim for 3-6 second scenes)`;
+
+// ---------------------------------------------------------------------------
+// Legacy JSON system prompt — used as fallback
+// ---------------------------------------------------------------------------
+
+const LEGACY_SYSTEM_PROMPT = `You are an expert video director and storyboard artist.
 
 Given audio timestamped transcript segments, group them into coherent visual scenes (3-6 seconds each). For each scene:
 1. Combine adjacent segments that form a single visual idea.
@@ -60,40 +107,161 @@ Output STRICTLY valid JSON matching this exact schema — no markdown fences, no
 cameraMotion MUST be one of: zoom_in, zoom_out, pan_left, pan_right, static.`;
 
 // ---------------------------------------------------------------------------
-// JSON extraction / cleanup
+// Scene DSL text parser — converts AI plain text output to SceneDSL[]
 // ---------------------------------------------------------------------------
 
-function extractJSON(raw: string): AISceneResponse {
-  let cleaned = raw.trim();
+interface SceneDSL {
+  text: string;
+  visual?: string;
+  motion?: string;
+  transition?: string;
+  style?: string;
+  duration?: string;
+  layers?: string[];
+  extras?: string[];
+  reasoning?: string;
+}
 
-  // Strip markdown code fences
+const MOTION_ALIASES: Record<string, string> = {
+  'none': 'none', 'no': 'none', 'static': 'none', 'still': 'none',
+  'slow zoom in': 'slow_zoom', 'slow zoom': 'slow_zoom', 'slowzoom': 'slow_zoom',
+  'medium zoom in': 'medium_zoom', 'medium zoom': 'medium_zoom', 'mediumzoom': 'medium_zoom',
+  'fast zoom in': 'fast_zoom', 'fast zoom': 'fast_zoom', 'fastzoom': 'fast_zoom',
+  'slow zoom out': 'slow_zoom_out', 'slowzoomout': 'slow_zoom_out',
+  'medium zoom out': 'medium_zoom_out', 'mediumzoomout': 'medium_zoom_out',
+  'fast zoom out': 'fast_zoom_out', 'fastzoomout': 'fast_zoom_out',
+  'slow pan left': 'slow_pan_left', 'slowpanleft': 'slow_pan_left',
+  'slow pan right': 'slow_pan_right', 'slowpanright': 'slow_pan_right',
+  'slow pan up': 'slow_pan_up', 'slowpanup': 'slow_pan_up',
+  'slow pan down': 'slow_pan_down', 'slowpandown': 'slow_pan_down',
+  'medium pan left': 'medium_pan_left', 'mediumpanleft': 'medium_pan_left',
+  'medium pan right': 'medium_pan_right', 'mediumpanright': 'medium_pan_right',
+  'fast pan left': 'fast_pan_left', 'fastpanleft': 'fast_pan_left',
+  'fast pan right': 'fast_pan_right', 'fastpanright': 'fast_pan_right',
+  'dolly in': 'dolly_in', 'dollyin': 'dolly_in',
+  'dolly out': 'dolly_out', 'dollyout': 'dolly_out',
+  'orbit left': 'orbit_left', 'orbitleft': 'orbit_left',
+  'orbit right': 'orbit_right', 'orbitright': 'orbit_right',
+  'tilt up': 'tilt_up', 'tiltup': 'tilt_up',
+  'tilt down': 'tilt_down', 'tiltdown': 'tilt_down',
+  'crane up': 'crane_up', 'craneup': 'crane_up',
+  'crane down': 'crane_down', 'cranedown': 'crane_down',
+  'handheld': 'handheld', 'hand': 'handheld', 'parallax': 'parallax',
+};
+
+const VALID_MOTIONS = new Set([
+  'none', 'slow_zoom', 'medium_zoom', 'fast_zoom',
+  'slow_zoom_out', 'medium_zoom_out', 'fast_zoom_out',
+  'slow_pan_left', 'slow_pan_right', 'slow_pan_up', 'slow_pan_down',
+  'medium_pan_left', 'medium_pan_right', 'fast_pan_left', 'fast_pan_right',
+  'dolly_in', 'dolly_out', 'orbit_left', 'orbit_right',
+  'tilt_up', 'tilt_down', 'crane_up', 'crane_down', 'handheld', 'parallax',
+]);
+
+function normalizeMotion(raw: string): string {
+  const lower = raw.toLowerCase().trim();
+  if (MOTION_ALIASES[lower]) return MOTION_ALIASES[lower];
+  const snake = lower.replace(/\s+/g, '_');
+  if (VALID_MOTIONS.has(snake)) return snake;
+  for (const [alias, normalized] of Object.entries(MOTION_ALIASES)) {
+    if (alias.includes(lower) || lower.includes(alias)) return normalized;
+  }
+  return 'none';
+}
+
+function normalizeTransition(raw: string): string {
+  const lower = raw.toLowerCase().trim().replace(/\s+/g, '_');
+  const valid = new Set(['cut', 'crossfade', 'slide_left', 'slide_right', 'slide_up', 'slide_down', 'wipe_left', 'wipe_right', 'wipe_up', 'wipe_down', 'zoom_in', 'zoom_out', 'dissolve', 'fade']);
+  if (valid.has(lower)) return lower;
+  const aliases: Record<string, string> = {
+    'cross-fade': 'crossfade', 'cross fade': 'crossfade', 'hard': 'cut', 'jump': 'cut',
+  };
+  return aliases[lower] || 'cut';
+}
+
+function normalizeStyle(raw: string): string {
+  const lower = raw.toLowerCase().trim().replace(/\s+/g, '_');
+  const valid = new Set(['natural', 'cinematic', 'documentary', 'vintage', 'dramatic', 'minimal', 'none']);
+  if (valid.has(lower)) return lower;
+  const aliases: Record<string, string> = {
+    'real': 'natural', 'realistic': 'natural', 'movie': 'cinematic', 'film': 'cinematic',
+    'docu': 'documentary', 'retro': 'vintage', 'old': 'vintage', 'classic': 'vintage',
+    'epic': 'dramatic', 'intense': 'dramatic', 'simple': 'minimal', 'clean': 'minimal',
+  };
+  return aliases[lower] || 'natural';
+}
+
+function parseSceneDSLBlock(block: string): SceneDSL | null {
+  const lines = block.split('\n').filter(l => l.trim());
+  const scene: SceneDSL = { text: '' };
+
+  for (const line of lines) {
+    const colonIdx = line.indexOf(':');
+    if (colonIdx === -1) continue;
+    const key = line.substring(0, colonIdx).trim().toLowerCase();
+    const value = line.substring(colonIdx + 1).trim();
+    if (!value) continue;
+
+    switch (key) {
+      case 'text': scene.text = value; break;
+      case 'visual': case 'image': case 'description': scene.visual = value; break;
+      case 'motion': case 'camera': case 'movement': scene.motion = normalizeMotion(value); break;
+      case 'transition': case 'trans': scene.transition = normalizeTransition(value); break;
+      case 'style': case 'look': scene.style = normalizeStyle(value); break;
+      case 'duration': case 'dur': case 'len': case 'length': scene.duration = value; break;
+      case 'layers': case 'layer': scene.layers = value.split(',').map(l => l.trim()).filter(Boolean); break;
+      case 'extras': case 'extra': scene.extras = value.split(',').map(e => e.trim()).filter(Boolean); break;
+      case 'reasoning': case 'reason': case 'thought': scene.reasoning = value; break;
+    }
+  }
+
+  return scene.text ? scene : null;
+}
+
+function parseSceneDSLText(text: string): SceneDSL[] {
+  const blocks = text.split(/\n\s*---\s*\n/).filter(b => b.trim());
+  return blocks.map(parseSceneDSLBlock).filter((s): s is SceneDSL => s !== null);
+}
+
+function durationToSeconds(duration?: string): number {
+  if (!duration) return 5;
+  const match = duration.match(/^(\d+(?:\.\d+)?)(s|ms)?$/);
+  if (!match) return 5;
+  const value = parseFloat(match[1]);
+  const unit = match[2] || 's';
+  return unit === 'ms' ? value / 1000 : value;
+}
+
+// ---------------------------------------------------------------------------
+// JSON extraction / cleanup (legacy fallback)
+// ---------------------------------------------------------------------------
+
+function extractJSON(raw: string): { scenes: SceneItem[] } {
+  let cleaned = raw.trim();
   cleaned = cleaned.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
 
-  // Try direct parse first
   try {
     const parsed = JSON.parse(cleaned);
-    if (parsed && Array.isArray(parsed.scenes)) return parsed as AISceneResponse;
+    if (parsed && Array.isArray(parsed.scenes)) return parsed;
   } catch { /* continue */ }
 
-  // Find the first { ... } block that contains "scenes"
   const jsonStart = cleaned.indexOf('{');
   const jsonEnd = cleaned.lastIndexOf('}');
   if (jsonStart !== -1 && jsonEnd > jsonStart) {
     const slice = cleaned.slice(jsonStart, jsonEnd + 1);
     try {
       const parsed = JSON.parse(slice);
-      if (parsed && Array.isArray(parsed.scenes)) return parsed as AISceneResponse;
+      if (parsed && Array.isArray(parsed.scenes)) return parsed;
     } catch { /* continue */ }
   }
 
-  // Last resort: find the first [ ... ] array
   const arrStart = cleaned.indexOf('[');
   const arrEnd = cleaned.lastIndexOf(']');
   if (arrStart !== -1 && arrEnd > arrStart) {
     const slice = cleaned.slice(arrStart, arrEnd + 1);
     try {
       const parsed = JSON.parse(slice);
-      if (Array.isArray(parsed)) return { scenes: parsed as SceneItem[] };
+      if (Array.isArray(parsed)) return { scenes: parsed };
     } catch { /* continue */ }
   }
 
@@ -174,7 +342,6 @@ export async function detectGpu(): Promise<GpuInfo | null> {
   try {
     const resp = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(2000) });
     if (!resp.ok) return null;
-    // Ollama doesn't expose GPU directly — use a best-effort approach via /api/ps
     const ps = await fetchOllamaPs();
     if (ps.models.length > 0) {
       const m = ps.models[0];
@@ -224,6 +391,47 @@ export async function offloadModel(modelName: string): Promise<{ success: boolea
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Translation — translate non-English transcripts to English for AI reasoning
+// ---------------------------------------------------------------------------
+
+export async function translateToEnglish(
+  segments: Array<{ text: string; start: number; end: number }>,
+  provider: AIProvider,
+  model?: string,
+  apiKey?: string,
+  geminiApiKey?: string,
+): Promise<Array<{ text: string; start: number; end: number; originalText: string }>> {
+  const combined = segments.map((s, i) => `[${i}] ${s.text}`).join('\n');
+  const prompt = `Translate each line below from its source language to English. Keep the [N] index prefix on each line. Output ONLY the translations, one per line, no explanations.
+
+${combined}`;
+
+  let raw: string;
+
+  if (provider === 'ollama') {
+    raw = await callOllamaStreaming(prompt, model || 'llama3.2');
+  } else if (provider === 'gemini' && geminiApiKey) {
+    raw = await callGemini(prompt, geminiApiKey, 'gemini-2.5-flash', 0.1, 2048);
+  } else if (provider === 'openrouter' && apiKey) {
+    raw = await callOpenRouter(prompt, apiKey, model || 'openrouter/free');
+  } else {
+    return segments.map(s => ({ text: s.text, start: s.start, end: s.end, originalText: s.text }));
+  }
+
+  const lines = raw.split('\n').filter(l => l.trim());
+  return segments.map((s, i) => {
+    const translatedLine = lines[i] || s.text;
+    const translated = translatedLine.replace(/^\[\d+\]\s*/, '').trim();
+    return {
+      text: translated || s.text,
+      start: s.start,
+      end: s.end,
+      originalText: s.text,
+    };
+  });
 }
 
 export interface StreamingCallbacks {
@@ -347,6 +555,7 @@ async function callOpenRouter(
   prompt: string,
   apiKey: string,
   model = 'openrouter/free',
+  systemPrompt?: string,
 ): Promise<string> {
   const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -357,12 +566,11 @@ async function callOpenRouter(
     body: JSON.stringify({
       model,
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: systemPrompt || SCENE_DSL_SYSTEM_PROMPT },
         { role: 'user', content: prompt },
       ],
       temperature: 0.3,
       max_tokens: 4096,
-      response_format: { type: 'json_object' },
     }),
     signal: AbortSignal.timeout(120_000),
   });
@@ -401,15 +609,21 @@ async function callGemini(
   model = 'gemini-2.5-flash',
   temperature = 0.3,
   maxOutputTokens = 8192,
+  systemInstruction?: string,
 ): Promise<string> {
-  const body = {
+  const body: Record<string, unknown> = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: {
       temperature,
       maxOutputTokens,
-      responseMimeType: 'application/json',
     },
   };
+
+  if (systemInstruction) {
+    (body as Record<string, unknown>).systemInstruction = {
+      parts: [{ text: systemInstruction }],
+    };
+  }
 
   const url = `${GEMINI_API_BASE}/models/${model}:generateContent?key=${apiKey}`;
 
@@ -447,7 +661,12 @@ async function callGemini(
 
 function buildUserPrompt(req: AISceneRequest): string {
   const lines = req.transcriptionSegments.map(
-    (s) => `[${s.start.toFixed(2)}s - ${s.end.toFixed(2)}s] ${s.text}`,
+    (s) => {
+      const text = s.originalText && s.originalLanguage && s.originalLanguage !== 'en'
+        ? `${s.originalText} (English: ${s.text})`
+        : s.text;
+      return `[${s.start.toFixed(2)}s - ${s.end.toFixed(2)}s] ${text}`;
+    },
   );
 
   let prompt = `Timestamped Transcript:\n${lines.join('\n')}`;
@@ -546,49 +765,30 @@ export async function chatWithModel(
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// Public API — Non-streaming
 // ---------------------------------------------------------------------------
 
 export async function generateScenes(req: AISceneRequest): Promise<SceneItem[]> {
   const userPrompt = buildUserPrompt(req);
-  const fullPrompt = `${SYSTEM_PROMPT}\n\n---\n\n${userPrompt}`;
+  const fullPrompt = `${SCENE_DSL_SYSTEM_PROMPT}\n\n---\n\n${userPrompt}`;
 
   let raw: string;
 
   if (req.provider === 'ollama') {
     raw = await callOllamaStreaming(fullPrompt, req.model || 'llama3.2');
   } else if (req.provider === 'gemini') {
-    if (!req.geminiApiKey) {
-      throw new Error('Gemini API key is required');
-    }
+    if (!req.geminiApiKey) throw new Error('Gemini API key is required');
     raw = await callGemini(
-      userPrompt,
-      req.geminiApiKey,
-      req.geminiModel || 'gemini-2.5-flash',
-      req.geminiTemperature ?? 0.3,
-      req.geminiMaxOutputTokens ?? 8192,
+      userPrompt, req.geminiApiKey, req.geminiModel || 'gemini-2.5-flash',
+      req.geminiTemperature ?? 0.3, req.geminiMaxOutputTokens ?? 8192,
+      SCENE_DSL_SYSTEM_PROMPT,
     );
   } else {
-    if (!req.openRouterApiKey) {
-      throw new Error('OpenRouter API key is required');
-    }
-    raw = await callOpenRouter(userPrompt, req.openRouterApiKey, req.model || 'openrouter/free');
+    if (!req.openRouterApiKey) throw new Error('OpenRouter API key is required');
+    raw = await callOpenRouter(userPrompt, req.openRouterApiKey, req.model || 'openrouter/free', SCENE_DSL_SYSTEM_PROMPT);
   }
 
-  const parsed = extractJSON(raw);
-
-  // Validate & normalise
-  return parsed.scenes.map((s, i) => ({
-    sceneId: s.sceneId ?? i + 1,
-    startTime: Number(s.startTime) || 0,
-    endTime: Number(s.endTime) || 0,
-    transcriptChunk: s.transcriptChunk || '',
-    visualDescription: s.visualDescription || '',
-    imagePrompt: s.imagePrompt || s.visualDescription || '',
-    cameraMotion: ['zoom_in', 'zoom_out', 'pan_left', 'pan_right', 'static'].includes(s.cameraMotion)
-      ? s.cameraMotion
-      : 'static',
-  }));
+  return convertAIResponseToSceneItems(raw, req.transcriptionSegments);
 }
 
 // ---------------------------------------------------------------------------
@@ -600,43 +800,91 @@ export async function generateScenesStream(
   callbacks?: StreamingCallbacks,
 ): Promise<SceneItem[]> {
   const userPrompt = buildUserPrompt(req);
-  const fullPrompt = `${SYSTEM_PROMPT}\n\n---\n\n${userPrompt}`;
+  const fullPrompt = `${SCENE_DSL_SYSTEM_PROMPT}\n\n---\n\n${userPrompt}`;
 
   let raw: string;
 
   if (req.provider === 'ollama') {
     raw = await callOllamaStreaming(fullPrompt, req.model || 'llama3.2', callbacks);
   } else if (req.provider === 'gemini') {
-    if (!req.geminiApiKey) {
-      throw new Error('Gemini API key is required');
-    }
+    if (!req.geminiApiKey) throw new Error('Gemini API key is required');
     callbacks?.onProgress?.(0);
     raw = await callGemini(
-      userPrompt,
-      req.geminiApiKey,
-      req.geminiModel || 'gemini-2.5-flash',
-      req.geminiTemperature ?? 0.3,
-      req.geminiMaxOutputTokens ?? 8192,
+      userPrompt, req.geminiApiKey, req.geminiModel || 'gemini-2.5-flash',
+      req.geminiTemperature ?? 0.3, req.geminiMaxOutputTokens ?? 8192,
+      SCENE_DSL_SYSTEM_PROMPT,
     );
   } else {
-    if (!req.openRouterApiKey) {
-      throw new Error('OpenRouter API key is required');
-    }
+    if (!req.openRouterApiKey) throw new Error('OpenRouter API key is required');
     callbacks?.onProgress?.(0);
-    raw = await callOpenRouter(userPrompt, req.openRouterApiKey, req.model || 'openrouter/free');
+    raw = await callOpenRouter(userPrompt, req.openRouterApiKey, req.model || 'openrouter/free', SCENE_DSL_SYSTEM_PROMPT);
   }
 
-  const parsed = extractJSON(raw);
+  return convertAIResponseToSceneItems(raw, req.transcriptionSegments);
+}
 
-  return parsed.scenes.map((s, i) => ({
-    sceneId: s.sceneId ?? i + 1,
-    startTime: Number(s.startTime) || 0,
-    endTime: Number(s.endTime) || 0,
-    transcriptChunk: s.transcriptChunk || '',
-    visualDescription: s.visualDescription || '',
-    imagePrompt: s.imagePrompt || s.visualDescription || '',
-    cameraMotion: ['zoom_in', 'zoom_out', 'pan_left', 'pan_right', 'static'].includes(s.cameraMotion)
-      ? s.cameraMotion
-      : 'static',
-  }));
+// ---------------------------------------------------------------------------
+// Unified converter — handles both Scene DSL text and legacy JSON fallback
+// ---------------------------------------------------------------------------
+
+function convertAIResponseToSceneItems(
+  raw: string,
+  segments: Array<{ start: number; end: number; text: string }>,
+): SceneItem[] {
+  // Try Scene DSL first
+  const dslScenes = parseSceneDSLText(raw);
+
+  if (dslScenes.length > 0) {
+    let cumulativeTime = 0;
+    return dslScenes.map((scene, i) => {
+      const duration = durationToSeconds(scene.duration);
+      const startTime = segments[i]?.start ?? cumulativeTime;
+      const endTime = segments[Math.min(i + 1, segments.length - 1)]?.end ?? startTime + duration;
+      cumulativeTime = endTime;
+
+      const motionMap: Record<string, SceneItem['cameraMotion']> = {
+        'none': 'static',
+        'slow_zoom': 'zoom_in', 'medium_zoom': 'zoom_in', 'fast_zoom': 'zoom_in',
+        'slow_zoom_out': 'zoom_out', 'medium_zoom_out': 'zoom_out', 'fast_zoom_out': 'zoom_out',
+        'slow_pan_left': 'pan_left', 'slow_pan_right': 'pan_right',
+        'medium_pan_left': 'pan_left', 'medium_pan_right': 'pan_right',
+        'fast_pan_left': 'pan_left', 'fast_pan_right': 'pan_right',
+        'dolly_in': 'zoom_in', 'dolly_out': 'zoom_out',
+        'orbit_left': 'pan_left', 'orbit_right': 'pan_right',
+        'tilt_up': 'zoom_out', 'tilt_down': 'zoom_in',
+        'crane_up': 'zoom_out', 'crane_down': 'zoom_in',
+        'handheld': 'static', 'parallax': 'pan_right',
+      };
+
+      return {
+        sceneId: i + 1,
+        startTime,
+        endTime,
+        transcriptChunk: scene.text,
+        visualDescription: scene.visual || scene.text,
+        imagePrompt: scene.visual || scene.text,
+        cameraMotion: motionMap[scene.motion || 'none'] || 'static',
+        reasoning: scene.reasoning,
+      };
+    });
+  }
+
+  // Fallback: try legacy JSON
+  try {
+    const parsed = extractJSON(raw);
+    return parsed.scenes.map((s, i) => ({
+      sceneId: s.sceneId ?? i + 1,
+      startTime: Number(s.startTime) || 0,
+      endTime: Number(s.endTime) || 0,
+      transcriptChunk: s.transcriptChunk || '',
+      visualDescription: s.visualDescription || '',
+      imagePrompt: s.imagePrompt || s.visualDescription || '',
+      cameraMotion: ['zoom_in', 'zoom_out', 'pan_left', 'pan_right', 'static'].includes(s.cameraMotion)
+        ? s.cameraMotion
+        : 'static',
+      reasoning: s.reasoning,
+    }));
+  } catch {
+    throw new Error('AI response could not be parsed as Scene DSL or JSON. Please try again.');
+  }
 }

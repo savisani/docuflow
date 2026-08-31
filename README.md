@@ -69,12 +69,17 @@ docuflow-desktop/
 │           │   └── ui/              # Reusable primitives (Button, Dialog, Slider, etc.)
 │           ├── engine/              # Core logic
 │           │   ├── commands/        # DSL parser, validator, NLU parser
+│           │   ├── sceneDSL/        # Scene DSL: AI intent → DocuFlow commands
+│           │   │   ├── types.ts     # SceneDSL types, motion/transition/style enums
+│           │   │   ├── parser.ts    # Scene DSL text parser
+│           │   │   ├── compiler.ts  # Deterministic compiler → DocuFlow commands
+│           │   │   └── index.ts     # Barrel export
 │           │   ├── timeline/        # Timeline builder & resolver
 │           │   ├── media/           # Asset loader, findAsset
 │           │   ├── animation/       # Interpolation, easing
 │           │   └── transcription/   # Whisper local provider, auto-register
 │           ├── services/
-│           │   └── aiService.ts     # Ollama / OpenRouter / Gemini AI providers
+│           │   └── aiService.ts     # Ollama / OpenRouter / Gemini, Scene DSL prompt, translation
 │           ├── utils/               # cloudflareApi, geminiApi, format, configStorage
 │           ├── types/               # TypeScript types (assets, project, timeline)
 │           ├── design/              # Design tokens, global CSS
@@ -105,15 +110,17 @@ docuflow-desktop/
 | Subsystem | Status | Description |
 |-----------|--------|-------------|
 | **Timeline Studio** | ✅ Active | Multi-track editor with drag-and-drop, undo/redo, command DSL |
+| **Scene DSL Pipeline** | ✅ Active | AI generates simple key-value Scene DSL → deterministic compiler → DocuFlow commands. Separates AI intent from execution. 25 motion types, 14 transitions, 7 styles |
+| **AI Scene Breakdown Engine** | ✅ Active | Ollama (local) + OpenRouter + Gemini providers, streaming with `<think>` tag extraction, Scene DSL output format |
+| **AI Translation** | ✅ Active | Non-English transcripts auto-translated to English for AI visual reasoning, original text preserved |
+| **Thinking Inspector / VRAM Telemetry** | ✅ Active | 350px collapsible sidebar with real-time VRAM monitor, live reasoning console, GPU auto-detect, live token streaming, interactive AI chat input |
+| **Top VRAM Status Bar** | ✅ Active | Persistent compact bar: active model badge, real-time VRAM usage pill |
+| **Interactive AI Chat** | ✅ Active | In-inspector chat input for direct Ollama model interaction, streaming responses, prompt tweaking |
 | **AI Image Generator** | ✅ Active | Cloudflare Workers (FLUX/SD Schnell) with batch generation |
 | **Local GPU Whisper Transcriber** | ✅ Active | Python-based, supports tiny/base/small/medium/large-v3 |
-| **AI Scene Breakdown Engine** | ✅ Active | Ollama (local) + OpenRouter + Gemini providers, streaming with `<think>` tag extraction |
-| **Thinking Inspector / VRAM Telemetry** | ✅ Active | 350px collapsible sidebar with real-time VRAM monitor, live reasoning console, GPU auto-detect, live token streaming, interactive AI chat input |
 | **Asset Management** | ✅ Active | Drag-drop import, asset library, protocol-based local file serving |
 | **Video Preview (Remotion)** | ✅ Active | Real-time preview with playhead, track visibility toggles |
 | **Voiceover Panel** | ✅ Active | Audio role assignment (voiceover, music, SFX, ambient) |
-| **Top VRAM Status Bar** | ✅ Active | Persistent compact bar: active model badge, real-time VRAM usage pill |
-| **Interactive AI Chat** | ✅ Active | In-inspector chat input for direct Ollama model interaction, streaming responses, prompt tweaking |
 | **Custom Title Bar** | ✅ Active | Frameless window with minimize/maximize/close IPC |
 | **Voiceover Transcription** | ✅ Active | Audio-to-text via local Whisper, segment-level timestamps |
 
@@ -169,6 +176,9 @@ npm run build:linux  # Linux
 
 | Date | Change | Files |
 |------|--------|-------|
+| 2026-09-01 | **Scene DSL Architecture** — Introduced intermediate Scene DSL between AI output and DocuFlow commands. AI now generates simple key-value text blocks (not JSON) with `text`, `visual`, `motion`, `transition`, `style`, `duration`. Deterministic compiler converts DSL to DocuFlow Command[] with proper motion animations (25 types) and transitions (14 types). Parser normalizes aliases. 117 tests passing. | `engine/sceneDSL/types.ts`, `parser.ts`, `compiler.ts`, `index.ts` |
+| 2026-09-01 | **Multi-language Transcript Support** — Added `originalText` and `originalLanguage` fields to TranscriptSegment and ProjectTranscriptSegment types. Added `translated` flag to Transcript. Added `translateToEnglish()` function for non-English transcripts. AI prompt sends both original + English translation for visual reasoning. | `engine/transcription/types.ts`, `types/project.ts`, `services/aiService.ts` |
+| 2026-09-01 | **SceneGenerator Refactored** — Timeline assembly now uses Scene DSL compiler instead of manual ShowCommand creation. Supports motion animations and transitions in generated timelines. | `components/generator/SceneGenerator.tsx` |
 | 2026-09-01 | Removed all progress bar UI (header, VRAM bar, batch generate, inspector), relocated GPU unload button to header action group next to Reset, stripped `generationProgress` state, removed `ProgressIndicator` component | `SceneGenerator.tsx`, `ThinkingInspector.tsx` |
 | 2026-09-01 | Added 350px collapsible inspector sidebar, top VRAM status bar (model badge + VRAM pill + unload button), interactive AI chat panel, collapsible reasoning box, `chatWithModel` streaming function | `SceneGenerator.tsx`, `ThinkingInspector.tsx`, `aiService.ts` |
 | 2026-09-01 | Fixed flex layout across all tabs: `w-full h-full` on App root, `flex-col` → `flex-row` split on EditorLayout/ImageGenerator, left/right panel sizing on SceneGenerator, fixed right panel resize handle positioning | `App.tsx`, `EditorLayout.tsx`, `ImageGenerator.tsx`, `SceneGenerator.tsx` |
