@@ -243,9 +243,9 @@ function App() {
   }, [handleDragEnter, handleDragLeave, handleDragOver, handleDrop]);
 
   return (
-    <div className="h-screen max-h-screen w-screen overflow-hidden flex flex-col bg-slate-950 text-white">
+    <div className="w-full h-screen flex flex-col overflow-hidden bg-slate-950 text-white">
       <TitleBar />
-      <div className="flex-1 min-h-0 flex flex-row overflow-hidden">
+      <div className="flex-1 w-full h-full overflow-hidden flex flex-row">
         {activeTab === 'studio' ? <EditorLayout /> : activeTab === 'scenes' ? <SceneGenerator /> : <ImageGenerator />}
       </div>
       <DropZone visible={dropVisible} fileCount={dropFileCount} />

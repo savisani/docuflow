@@ -104,8 +104,8 @@ export const EditorLayout: React.FC = () => {
   const anyVisible = panelVisibility.assets || panelVisibility.assetPreview || panelVisibility.timelinePreview || panelVisibility.timeline;
 
   return (
-    <div className="h-full flex flex-col bg-slate-950 text-white overflow-hidden overscroll-none">
-      <div className="flex-1 flex overflow-hidden min-h-0">
+    <div className="w-full h-full flex flex-col bg-slate-950 text-white overflow-hidden">
+      <div className="flex-1 w-full h-full flex flex-row overflow-hidden">
         {/* Assets Panel - always rendered, transitions width */}
         <div
           className="bg-slate-900/60 backdrop-blur-xl flex flex-col overflow-hidden shrink-0 border-r border-white/5 transition-all duration-200"
@@ -188,7 +188,7 @@ export const EditorLayout: React.FC = () => {
         )}
 
         <div
-          className="bg-slate-900/60 backdrop-blur-xl border-l border-white/5 flex flex-col overflow-hidden shrink-0 transition-all duration-200"
+          className="bg-slate-900/60 backdrop-blur-xl border-l border-white/5 flex flex-col overflow-hidden shrink-0 transition-all duration-200 relative"
           style={{ width: rightPanelVisible ? rightPanelWidth : 0 }}
         >
           {rightPanelVisible && (

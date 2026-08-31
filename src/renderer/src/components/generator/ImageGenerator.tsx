@@ -279,7 +279,7 @@ export const ImageGenerator: React.FC = () => {
   }, [addToTimeline]);
 
   return (
-    <div className="h-full flex flex-col bg-slate-950 text-white overflow-hidden">
+    <div className="w-full h-full flex flex-col bg-slate-950 text-white overflow-hidden">
       {/* Toast Notification */}
       {toast && (
         <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-lg shadow-lg backdrop-blur-sm transition-all ${
@@ -326,8 +326,8 @@ export const ImageGenerator: React.FC = () => {
       )}
 
       {/* Compact Control Panel */}
-      <div className="shrink-0 border-b border-white/5 bg-slate-900/40">
-        <div className="px-4 py-3">
+      <div className="w-full shrink-0 border-b border-white/5 bg-slate-900/40">
+        <div className="w-full px-4 py-3">
           {/* Header row */}
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -613,7 +613,7 @@ export const ImageGenerator: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 w-full">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 w-full">
             {generatedImages.map((image) => (
               <div
                 key={image.id}

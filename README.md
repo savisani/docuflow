@@ -164,6 +164,7 @@ npm run build:linux  # Linux
 
 | Date | Change | Files |
 |------|--------|-------|
+| 2026-09-01 | Fixed flex layout across all tabs: `w-full h-full` on App root, `flex-col` → `flex-row` split on EditorLayout/ImageGenerator, left/right panel sizing on SceneGenerator, fixed right panel resize handle positioning | `App.tsx`, `EditorLayout.tsx`, `ImageGenerator.tsx`, `SceneGenerator.tsx` |
 | 2026-09-01 | Added GPU auto-detection, model offload button, live token streaming (`onToken` callback), model loading state callbacks | `src/renderer/src/services/aiService.ts` |
 | 2026-09-01 | Rewrote ThinkingInspector: GPU/VRAM monitor with live polling, model offload button, model loading progress bar, live output stream console, thinking console | `src/renderer/src/components/generator/ThinkingInspector.tsx` |
 | 2026-09-01 | Wired up `generateScenesStream` with streaming callbacks, added model loading progress bar in header, inspector toggle button, live output state | `src/renderer/src/components/generator/SceneGenerator.tsx` |

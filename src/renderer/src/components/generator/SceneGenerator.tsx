@@ -574,7 +574,7 @@ export const SceneGenerator: React.FC = () => {
   // -----------------------------------------------------------------------
 
   return (
-    <div className="h-full flex flex-col bg-slate-950 text-white overflow-hidden relative">
+    <div className="w-full h-full flex flex-col bg-slate-950 text-white overflow-hidden relative">
       {/* Toast */}
       {toast && (
         <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-lg shadow-lg backdrop-blur-sm transition-all ${
