@@ -435,12 +435,158 @@ ${combined}`;
 }
 
 export interface StreamingCallbacks {
+  /** @deprecated Use onOutputToken for new code */
   onToken?: (token: string, fullText: string) => void;
+  /** @deprecated Use onThinkingToken for new code */
   onThinkingChunk?: (chunk: string) => void;
+  onThinkingToken?: (token: string, fullThinking: string) => void;
+  onOutputToken?: (token: string, fullOutput: string) => void;
   onThinkingComplete?: (fullThinking: string) => void;
-  onProgress?: (elapsed: number) => void;
   onModelLoading?: (loading: boolean) => void;
   onModelLoaded?: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Streaming Thinking Parser
+// Supports: (A) Ollama native `thinking` field, (B) <think>...</think> tag parsing
+// Handles chunk boundaries for tag splitting
+// ---------------------------------------------------------------------------
+
+export class StreamingThinkingParser {
+  private thinking = '';
+  private output = '';
+  private mode: 'auto' | 'thinking' | 'output' = 'auto';
+  private tagBuffer = '';
+
+  constructor(private preferNativeThinking = true) {}
+
+  feedNativeThinking(token: string): void {
+    if (token) {
+      this.thinking += token;
+      this.mode = 'thinking';
+    }
+  }
+
+  feedNativeResponse(token: string): void {
+    if (token) {
+      if (this.mode === 'thinking') this.mode = 'output';
+      this.output += token;
+    }
+  }
+
+  feedToken(token: string): { thinkingDelta: string; outputDelta: string } {
+    if (this.mode === 'output') {
+      this.output += token;
+      return { thinkingDelta: '', outputDelta: token };
+    }
+
+    if (this.mode === 'thinking') {
+      this.thinking += token;
+      return { thinkingDelta: token, outputDelta: '' };
+    }
+
+    // auto mode: detect <think> tags across chunk boundaries
+    this.tagBuffer += token;
+    let thinkingDelta = '';
+    let outputDelta = '';
+
+    while (this.tagBuffer.length > 0) {
+      if (this.mode === 'auto') {
+        const openIdx = this.tagBuffer.indexOf('<think>');
+        if (openIdx === -1) {
+          const safeEnd = this.findSafeEnd(this.tagBuffer, '...');
+          if (safeEnd > 0) {
+            this.output += this.tagBuffer.slice(0, safeEnd);
+            outputDelta += this.tagBuffer.slice(0, safeEnd);
+            this.tagBuffer = this.tagBuffer.slice(safeEnd);
+          } else if (this.tagBuffer.length > 3) {
+            const safe = this.tagBuffer.slice(0, -3);
+            if (safe) {
+              this.output += safe;
+              outputDelta += safe;
+            }
+            this.tagBuffer = this.tagBuffer.slice(-3);
+          } else {
+            break;
+          }
+        } else {
+          if (openIdx > 0) {
+            this.output += this.tagBuffer.slice(0, openIdx);
+            outputDelta += this.tagBuffer.slice(0, openIdx);
+          }
+          this.tagBuffer = this.tagBuffer.slice(openIdx);
+          if (this.tagBuffer.startsWith('<think>') && this.tagBuffer.length >= 7) {
+            this.tagBuffer = this.tagBuffer.slice(7);
+            this.mode = 'thinking';
+          } else {
+            break;
+          }
+        }
+      } else if (this.mode === 'thinking') {
+        const closeIdx = this.tagBuffer.indexOf('</think>');
+        if (closeIdx === -1) {
+          const safeEnd = this.findSafeEnd(this.tagBuffer, '</');
+          if (safeEnd > 0) {
+            this.thinking += this.tagBuffer.slice(0, safeEnd);
+            thinkingDelta += this.tagBuffer.slice(0, safeEnd);
+            this.tagBuffer = this.tagBuffer.slice(safeEnd);
+          } else if (this.tagBuffer.length > 4) {
+            const safe = this.tagBuffer.slice(0, -4);
+            if (safe) {
+              this.thinking += safe;
+              thinkingDelta += safe;
+            }
+            this.tagBuffer = this.tagBuffer.slice(-4);
+          } else {
+            break;
+          }
+        } else {
+          if (closeIdx > 0) {
+            this.thinking += this.tagBuffer.slice(0, closeIdx);
+            thinkingDelta += this.tagBuffer.slice(0, closeIdx);
+          }
+          this.tagBuffer = this.tagBuffer.slice(closeIdx);
+          if (this.tagBuffer.startsWith('</think>') && this.tagBuffer.length >= 8) {
+            this.tagBuffer = this.tagBuffer.slice(8);
+            this.mode = 'output';
+          } else {
+            break;
+          }
+        }
+      }
+    }
+
+    return { thinkingDelta, outputDelta };
+  }
+
+  private findSafeEnd(buffer: string, lookahead: string): number {
+    for (let i = buffer.length - lookahead.length; i >= 0; i--) {
+      if (lookahead.startsWith(buffer[i])) {
+        let matches = true;
+        for (let j = 0; j < lookahead.length && i + j < buffer.length; j++) {
+          if (buffer[i + j] !== lookahead[j]) { matches = false; break; }
+        }
+        if (matches) return i;
+      }
+    }
+    return 0;
+  }
+
+  flush(): { thinkingDelta: string; outputDelta: string } {
+    const remaining = this.tagBuffer;
+    this.tagBuffer = '';
+    if (this.mode === 'thinking') {
+      this.thinking += remaining;
+      return { thinkingDelta: remaining, outputDelta: '' };
+    }
+    this.output += remaining;
+    return { thinkingDelta: '', outputDelta: remaining };
+  }
+
+  getThinking(): string { return this.thinking; }
+  getOutput(): string { return this.output; }
+  isInsideThinking(): boolean { return this.mode === 'thinking'; }
+  reset(): void { this.thinking = ''; this.output = ''; this.mode = 'auto'; this.tagBuffer = ''; }
 }
 
 function extractThinkingTags(text: string): { thinking: string; response: string } {
@@ -448,6 +594,98 @@ function extractThinkingTags(text: string): { thinking: string; response: string
   const thinking = thinkingMatch ? thinkingMatch[1].trim() : '';
   const response = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
   return { thinking, response };
+}
+
+// ---------------------------------------------------------------------------
+// AI Context — structured information for the model
+// ---------------------------------------------------------------------------
+
+export interface AIContextProject {
+  name: string;
+  totalScenes: number;
+  existingScenes: number;
+}
+
+export interface AIContextModel {
+  provider: AIProvider;
+  name: string;
+  thinkingSupported: boolean;
+}
+
+export interface AIContextTask {
+  type: 'scene_generation' | 'translation' | 'chat';
+  status: 'starting' | 'loading_model' | 'processing' | 'complete' | 'error';
+  sceneIndex?: number;
+  totalScenes?: number;
+}
+
+export interface AIContextTranscript {
+  language: string;
+  segmentCount: number;
+  currentSegment?: { text: string; start: number; end: number };
+}
+
+export interface AIContextEditor {
+  fps: number;
+  width: number;
+  height: number;
+}
+
+export interface AIContext {
+  project: AIContextProject;
+  model: AIContextModel;
+  task: AIContextTask;
+  transcript: AIContextTranscript;
+  editor: AIContextEditor;
+}
+
+export function buildAIContext(params: {
+  provider: AIProvider;
+  model: string;
+  transcriptLanguage?: string;
+  transcriptSegmentCount?: number;
+  currentSegment?: { text: string; start: number; end: number };
+  fps: number;
+  width: number;
+  height: number;
+  sceneCount: number;
+  existingSceneCount: number;
+  taskType?: AIContextTask['type'];
+  taskStatus?: AIContextTask['status'];
+  sceneIndex?: number;
+}): AIContext {
+  const thinkingModels = ['qwen3', 'qwen3.5', 'deepseek-r1', 'deepseek-r1:'];
+  const thinkingSupported = params.provider === 'ollama' &&
+    thinkingModels.some(m => params.model.toLowerCase().includes(m.toLowerCase()));
+
+  return {
+    project: {
+      name: 'DocuFlow Project',
+      totalScenes: params.sceneCount,
+      existingScenes: params.existingSceneCount,
+    },
+    model: {
+      provider: params.provider,
+      name: params.model,
+      thinkingSupported,
+    },
+    task: {
+      type: params.taskType || 'scene_generation',
+      status: params.taskStatus || 'processing',
+      sceneIndex: params.sceneIndex,
+      totalScenes: params.sceneCount || undefined,
+    },
+    transcript: {
+      language: params.transcriptLanguage || 'en',
+      segmentCount: params.transcriptSegmentCount || 0,
+      currentSegment: params.currentSegment,
+    },
+    editor: {
+      fps: params.fps,
+      width: params.width,
+      height: params.height,
+    },
+  };
 }
 
 async function callOllamaStreaming(
@@ -462,6 +700,7 @@ async function callOllamaStreaming(
     model,
     prompt,
     stream: true,
+    think: true,
     keep_alive: '15m',
     options: {
       temperature: 0.3,
@@ -492,12 +731,10 @@ async function callOllamaStreaming(
     const decoder = new TextDecoder();
     let buffer = '';
     let fullResponse = '';
+    let fullThinking = '';
     let firstTokenReceived = false;
-
-    const startTime = Date.now();
-    const progressInterval = setInterval(() => {
-      callbacks?.onProgress?.(Date.now() - startTime);
-    }, 1000);
+    const parser = new StreamingThinkingParser(true);
+    let hasNativeThinking = false;
 
     try {
       while (true) {
@@ -513,34 +750,83 @@ async function callOllamaStreaming(
           if (!trimmed) continue;
           try {
             const chunk = JSON.parse(trimmed);
-            if (chunk.response) {
+
+            // Native Ollama thinking field (qwen3, deepseek-r1, etc.)
+            if (chunk.thinking !== undefined && chunk.thinking !== null && chunk.thinking !== '') {
+              hasNativeThinking = true;
+              fullThinking += chunk.thinking;
+              parser.feedNativeThinking(chunk.thinking);
               if (!firstTokenReceived) {
                 firstTokenReceived = true;
                 callbacks?.onModelLoading?.(false);
                 callbacks?.onModelLoaded?.();
               }
-              fullResponse += chunk.response;
+              callbacks?.onThinkingToken?.(chunk.thinking, fullThinking);
+              // Also fire deprecated callback for backward compat
+              callbacks?.onThinkingChunk?.(chunk.thinking);
+            }
+
+            // Response field
+            if (chunk.response !== undefined && chunk.response !== null && chunk.response !== '') {
+              if (!firstTokenReceived) {
+                firstTokenReceived = true;
+                callbacks?.onModelLoading?.(false);
+                callbacks?.onModelLoaded?.();
+              }
+
+              if (hasNativeThinking) {
+                fullResponse += chunk.response;
+                parser.feedNativeResponse(chunk.response);
+              } else {
+                // Fallback: parse <think> tags from response field
+                const { thinkingDelta, outputDelta } = parser.feedToken(chunk.response);
+                if (thinkingDelta) {
+                  fullThinking += thinkingDelta;
+                  callbacks?.onThinkingToken?.(thinkingDelta, fullThinking);
+                  callbacks?.onThinkingChunk?.(thinkingDelta);
+                }
+                if (outputDelta) {
+                  fullResponse += outputDelta;
+                }
+              }
+
               callbacks?.onToken?.(chunk.response, fullResponse);
-              callbacks?.onThinkingChunk?.(chunk.response);
+              callbacks?.onOutputToken?.(chunk.response, fullResponse);
             }
           } catch {
             // skip malformed lines
           }
         }
       }
+
+      // Flush any remaining tag buffer
+      const { thinkingDelta, outputDelta } = parser.flush();
+      if (thinkingDelta) {
+        fullThinking += thinkingDelta;
+        callbacks?.onThinkingToken?.(thinkingDelta, fullThinking);
+        callbacks?.onThinkingChunk?.(thinkingDelta);
+      }
+      if (outputDelta) {
+        fullResponse += outputDelta;
+      }
     } finally {
-      clearInterval(progressInterval);
       reader.releaseLock();
     }
 
-    // Final parse: extract thinking tags vs response
-    const { thinking, response } = extractThinkingTags(fullResponse);
-    if (thinking) {
-      callbacks?.onThinkingComplete?.(thinking);
+    // Final fallback: if parser didn't find native thinking, try regex extraction
+    if (!fullThinking && !hasNativeThinking) {
+      const { thinking, response } = extractThinkingTags(fullResponse);
+      if (thinking) {
+        fullThinking = thinking;
+        fullResponse = response;
+        callbacks?.onThinkingComplete?.(thinking);
+      }
+    } else if (fullThinking) {
+      callbacks?.onThinkingComplete?.(fullThinking);
     }
 
     callbacks?.onModelLoading?.(false);
-    return response || fullResponse;
+    return fullResponse;
   } finally {
     clearTimeout(timeoutId);
     callbacks?.onModelLoading?.(false);
@@ -684,7 +970,7 @@ export async function chatWithModel(
   message: string,
   model = 'llama3.2',
   callbacks?: StreamingCallbacks,
-): Promise<string> {
+): Promise<{ thinking: string; response: string }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 300_000);
 
@@ -692,6 +978,7 @@ export async function chatWithModel(
     model,
     prompt: message,
     stream: true,
+    think: true,
     keep_alive: '15m',
     options: {
       temperature: 0.7,
@@ -722,7 +1009,10 @@ export async function chatWithModel(
     const decoder = new TextDecoder();
     let buffer = '';
     let fullResponse = '';
+    let fullThinking = '';
     let firstTokenReceived = false;
+    const parser = new StreamingThinkingParser(true);
+    let hasNativeThinking = false;
 
     try {
       while (true) {
@@ -738,26 +1028,69 @@ export async function chatWithModel(
           if (!trimmed) continue;
           try {
             const chunk = JSON.parse(trimmed);
-            if (chunk.response) {
+
+            if (chunk.thinking !== undefined && chunk.thinking !== null && chunk.thinking !== '') {
+              hasNativeThinking = true;
+              fullThinking += chunk.thinking;
+              parser.feedNativeThinking(chunk.thinking);
               if (!firstTokenReceived) {
                 firstTokenReceived = true;
                 callbacks?.onModelLoading?.(false);
                 callbacks?.onModelLoaded?.();
               }
-              fullResponse += chunk.response;
+              callbacks?.onThinkingToken?.(chunk.thinking, fullThinking);
+            }
+
+            if (chunk.response !== undefined && chunk.response !== null && chunk.response !== '') {
+              if (!firstTokenReceived) {
+                firstTokenReceived = true;
+                callbacks?.onModelLoading?.(false);
+                callbacks?.onModelLoaded?.();
+              }
+
+              if (hasNativeThinking) {
+                fullResponse += chunk.response;
+                parser.feedNativeResponse(chunk.response);
+              } else {
+                const { thinkingDelta, outputDelta } = parser.feedToken(chunk.response);
+                if (thinkingDelta) {
+                  fullThinking += thinkingDelta;
+                  callbacks?.onThinkingToken?.(thinkingDelta, fullThinking);
+                }
+                if (outputDelta) {
+                  fullResponse += outputDelta;
+                }
+              }
+
               callbacks?.onToken?.(chunk.response, fullResponse);
+              callbacks?.onOutputToken?.(chunk.response, fullResponse);
             }
           } catch {
             // skip malformed lines
           }
         }
       }
+
+      const { thinkingDelta, outputDelta } = parser.flush();
+      if (thinkingDelta) fullThinking += thinkingDelta;
+      if (outputDelta) fullResponse += outputDelta;
     } finally {
       reader.releaseLock();
     }
 
+    if (fullThinking) {
+      callbacks?.onThinkingComplete?.(fullThinking);
+    } else if (!hasNativeThinking) {
+      const { thinking, response } = extractThinkingTags(fullResponse);
+      if (thinking) {
+        fullThinking = thinking;
+        fullResponse = response;
+        callbacks?.onThinkingComplete?.(thinking);
+      }
+    }
+
     callbacks?.onModelLoading?.(false);
-    return fullResponse;
+    return { thinking: fullThinking, response: fullResponse };
   } finally {
     clearTimeout(timeoutId);
     callbacks?.onModelLoading?.(false);
@@ -808,7 +1141,6 @@ export async function generateScenesStream(
     raw = await callOllamaStreaming(fullPrompt, req.model || 'llama3.2', callbacks);
   } else if (req.provider === 'gemini') {
     if (!req.geminiApiKey) throw new Error('Gemini API key is required');
-    callbacks?.onProgress?.(0);
     raw = await callGemini(
       userPrompt, req.geminiApiKey, req.geminiModel || 'gemini-2.5-flash',
       req.geminiTemperature ?? 0.3, req.geminiMaxOutputTokens ?? 8192,
@@ -816,7 +1148,6 @@ export async function generateScenesStream(
     );
   } else {
     if (!req.openRouterApiKey) throw new Error('OpenRouter API key is required');
-    callbacks?.onProgress?.(0);
     raw = await callOpenRouter(userPrompt, req.openRouterApiKey, req.model || 'openrouter/free', SCENE_DSL_SYSTEM_PROMPT);
   }
 

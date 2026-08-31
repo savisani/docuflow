@@ -1,22 +1,21 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   Wand2, Upload, FileText, Mic, Loader2, X, CheckCircle, AlertCircle,
   Film, Clock, Image as ImageIcon, Clapperboard, Sparkles,
-  Trash2, Settings, Globe, Cpu, Key, ChevronDown, ChevronRight,
-  Brain, MonitorDot, HardDrive, ArrowDownToLine,
+  Trash2, Settings, Globe, Key, ChevronDown, ChevronRight,
+  Brain, ArrowDownToLine, MonitorDot, Cpu, Zap,
 } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { Button } from '../ui';
 import { v4 as uuidv4 } from 'uuid';
 import { Asset } from '../../types/assets';
 import { Command } from '../../engine/commands/types';
-import { generateLogicalId } from '../../engine/media/findAsset';
 import { compileSceneDSL, type SceneDSL, type CompileContext } from '../../engine/sceneDSL';
 import { generateWithCloudflare, CLOUDFLARE_MODELS, CloudflareConfig } from '../../utils/cloudflareApi';
 import {
   generateScenesStream, fetchOllamaModels, offloadModel, chatWithModel,
-  fetchOllamaPs, clearGpuCache,
-  type AIProvider, type SceneItem, type OllamaModel, type OllamaPsModel,
+  clearGpuCache,
+  type AIProvider, type SceneItem, type OllamaModel,
 } from '../../services/aiService';
 import {
   loadGeminiConfig,
@@ -110,13 +109,6 @@ const CAMERA_MOTIONS = [
   { value: 'static', label: 'Static' },
 ] as const;
 
-function formatElapsed(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  const m = Math.floor(s / 60);
-  const ss = s % 60;
-  return m > 0 ? `${m}m ${ss}s` : `${ss}s`;
-}
-
 // ---------------------------------------------------------------------------
 // SceneGenerator
 // ---------------------------------------------------------------------------
@@ -142,12 +134,10 @@ export const SceneGenerator: React.FC = () => {
 
   // -- AI Inspector state --
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [inspectorStatus, setInspectorStatus] = useState<'idle' | 'loading_model' | 'thinking' | 'generating' | 'done' | 'error'>('idle');
-  const [liveOutput, setLiveOutput] = useState('');
-  const [thinkingLog, setThinkingLog] = useState('');
-  const [elapsedMs, setElapsedMs] = useState(0);
+  const [inspectorStatus, setInspectorStatus] = useState<'idle' | 'loading_model' | 'thinking' | 'done' | 'error'>('idle');
+  const [thinkingText, setThinkingText] = useState('');
+  const [outputText, setOutputText] = useState('');
   const [modelLoading, setModelLoading] = useState(false);
-  const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // -- AI Provider settings --
   const [aiSettings, setAISettings] = useState(loadAIProviderSettings);
@@ -174,13 +164,11 @@ export const SceneGenerator: React.FC = () => {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // -- Interactive Chat state --
-  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string }>>([]);
+  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; thinking?: string; text: string }>>([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
 
-  // -- VRAM status for top bar --
-  const [vramModel, setVramModel] = useState<OllamaPsModel | null>(null);
-  const [totalVram] = useState(4 * 1024 * 1024 * 1024);
+  // -- GPU unload --
   const [unloadingGpu, setUnloadingGpu] = useState(false);
 
   // -- Derived --
@@ -243,17 +231,10 @@ export const SceneGenerator: React.FC = () => {
     setBreakingScenes(true);
     setSceneError(null);
     setScenes([]);
-    setLiveOutput('');
-    setThinkingLog('');
-    setElapsedMs(0);
+    setOutputText('');
+    setThinkingText('');
     setInspectorStatus('loading_model');
     setInspectorOpen(true);
-
-    // Start elapsed timer
-    const startTime = Date.now();
-    elapsedRef.current = setInterval(() => {
-      setElapsedMs(Date.now() - startTime);
-    }, 100);
 
     try {
       const segments = transcription.segments.map((s) => ({
@@ -275,15 +256,14 @@ export const SceneGenerator: React.FC = () => {
           geminiMaxOutputTokens: geminiConfig.maxOutputTokens,
         },
         {
-          onToken: (_token, fullText) => {
-            setLiveOutput(fullText);
-            setInspectorStatus('thinking');
+          onThinkingToken: (_token, fullThinking) => {
+            setThinkingText(fullThinking);
           },
-          onThinkingChunk: (chunk) => {
-            setThinkingLog((prev) => prev + chunk);
+          onOutputToken: (_token, fullOutput) => {
+            setOutputText(fullOutput);
           },
           onThinkingComplete: (thinking) => {
-            setThinkingLog(thinking);
+            setThinkingText(thinking);
           },
           onModelLoading: (loading) => {
             setModelLoading(loading);
@@ -292,9 +272,6 @@ export const SceneGenerator: React.FC = () => {
           onModelLoaded: () => {
             setModelLoading(false);
             setInspectorStatus('thinking');
-          },
-          onProgress: (elapsed) => {
-            setElapsedMs(elapsed);
           },
         },
       );
@@ -312,10 +289,6 @@ export const SceneGenerator: React.FC = () => {
       setInspectorStatus('error');
     } finally {
       setBreakingScenes(false);
-      if (elapsedRef.current) {
-        clearInterval(elapsedRef.current);
-        elapsedRef.current = null;
-      }
     }
   }, [transcription, scriptText, aiSettings, geminiConfig]);
 
@@ -555,10 +528,9 @@ export const SceneGenerator: React.FC = () => {
     setTranscriptionError(null);
     setScenes([]);
     setSceneError(null);
-    setLiveOutput('');
-    setThinkingLog('');
+    setOutputText('');
+    setThinkingText('');
     setInspectorStatus('idle');
-    setElapsedMs(0);
   }, []);
 
   const handleOffloadModel = useCallback(async () => {
@@ -577,7 +549,6 @@ export const SceneGenerator: React.FC = () => {
     try {
       const result = await offloadModel(aiSettings.ollamaModel);
       if (result.success) {
-        setVramModel(null);
         clearGpuCache();
         setToast({ message: `GPU unloaded: ${aiSettings.ollamaModel} VRAM freed`, type: 'success' });
       } else {
@@ -591,13 +562,6 @@ export const SceneGenerator: React.FC = () => {
   }, [aiSettings]);
 
   // -----------------------------------------------------------------------
-  // VRAM update callback from ThinkingInspector
-  // -----------------------------------------------------------------------
-
-  const handleVramUpdate = useCallback((model: OllamaPsModel | null, total: number) => {
-    setVramModel(model);
-  }, []);
-
   // -----------------------------------------------------------------------
   // Interactive Chat with loaded Ollama model
   // -----------------------------------------------------------------------
@@ -616,30 +580,45 @@ export const SceneGenerator: React.FC = () => {
     setChatLoading(true);
 
     try {
-      const response = await chatWithModel(msg, aiSettings.ollamaModel, {
-        onToken: (_token, fullText) => {
-          // Update the last assistant message in real-time
+      const result = await chatWithModel(msg, aiSettings.ollamaModel, {
+        onThinkingToken: (_token, fullThinking) => {
           setChatMessages((prev) => {
             const updated = [...prev];
             const lastIdx = updated.length - 1;
             if (lastIdx >= 0 && updated[lastIdx].role === 'assistant') {
-              updated[lastIdx] = { ...updated[lastIdx], text: fullText };
+              updated[lastIdx] = { ...updated[lastIdx], thinking: fullThinking };
             } else {
-              updated.push({ role: 'assistant', text: fullText });
+              updated.push({ role: 'assistant', thinking: fullThinking, text: '' });
+            }
+            return updated;
+          });
+        },
+        onOutputToken: (_token, fullOutput) => {
+          setChatMessages((prev) => {
+            const updated = [...prev];
+            const lastIdx = updated.length - 1;
+            if (lastIdx >= 0 && updated[lastIdx].role === 'assistant') {
+              updated[lastIdx] = { ...updated[lastIdx], text: fullOutput };
+            } else {
+              updated.push({ role: 'assistant', text: fullOutput });
             }
             return updated;
           });
         },
       });
 
-      // Ensure final message is set
+      // Ensure final message is set with complete data
       setChatMessages((prev) => {
         const updated = [...prev];
         const lastIdx = updated.length - 1;
         if (lastIdx >= 0 && updated[lastIdx].role === 'assistant') {
-          updated[lastIdx] = { ...updated[lastIdx], text: response };
+          updated[lastIdx] = {
+            ...updated[lastIdx],
+            thinking: result.thinking || updated[lastIdx].thinking,
+            text: result.response || updated[lastIdx].text,
+          };
         } else {
-          updated.push({ role: 'assistant', text: response });
+          updated.push({ role: 'assistant', thinking: result.thinking, text: result.response });
         }
         return updated;
       });
@@ -658,13 +637,6 @@ export const SceneGenerator: React.FC = () => {
       return () => clearTimeout(t);
     }
   }, [toast]);
-
-  // Cleanup elapsed timer on unmount
-  React.useEffect(() => {
-    return () => {
-      if (elapsedRef.current) clearInterval(elapsedRef.current);
-    };
-  }, []);
 
   // Fetch Ollama models when panel opens or provider switches to ollama
   React.useEffect(() => {
@@ -760,26 +732,28 @@ export const SceneGenerator: React.FC = () => {
               <Settings size={10} />
               AI Settings
             </button>
-            <button
-              onClick={handleClearAll}
-              className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-slate-800/60 text-slate-400 border border-white/5 hover:text-white hover:border-white/10 transition-all"
-            >
-              <Trash2 size={10} />
-              Reset
-            </button>
-            <button
-              onClick={handleUnloadGpu}
-              disabled={unloadingGpu || aiSettings.provider !== 'ollama'}
-              className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium text-red-400 border border-red-500/30 hover:bg-red-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              title="Unload model from GPU — frees all VRAM for transcription or rendering"
-            >
-              {unloadingGpu ? (
-                <Loader2 size={10} className="animate-spin" />
-              ) : (
-                <ArrowDownToLine size={10} />
-              )}
-              Unload GPU
-            </button>
+            <div className="flex flex-col gap-1">
+              <button
+                onClick={handleClearAll}
+                className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-slate-800/60 text-slate-400 border border-white/5 hover:text-white hover:border-white/10 transition-all"
+              >
+                <Trash2 size={10} />
+                Reset
+              </button>
+              <button
+                onClick={handleUnloadGpu}
+                disabled={unloadingGpu || aiSettings.provider !== 'ollama'}
+                className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium text-red-400 border border-red-500/30 hover:bg-red-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Unload model from GPU — frees all VRAM for transcription or rendering"
+              >
+                {unloadingGpu ? (
+                  <Loader2 size={10} className="animate-spin" />
+                ) : (
+                  <ArrowDownToLine size={10} />
+                )}
+                Offload
+              </button>
+            </div>
           </div>
         </div>
 
@@ -803,42 +777,6 @@ export const SceneGenerator: React.FC = () => {
             </React.Fragment>
           ))}
         </div>
-
-        {/* Top VRAM Status Bar — persistent, compact */}
-        {aiSettings.provider === 'ollama' && (
-          <div className="mt-2 flex items-center gap-2 flex-wrap">
-            {/* Active Model badge */}
-            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800/60 border border-white/5">
-              <Cpu size={9} className="text-amber-400" />
-              <span className="text-[9px] font-medium text-slate-300 font-mono truncate max-w-[140px]">
-                {aiSettings.ollamaModel}
-              </span>
-            </div>
-
-            {/* VRAM Usage pill */}
-            {vramModel ? (
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800/60 border border-white/5">
-                <HardDrive size={9} className="text-sky-400" />
-                <span className="text-[9px] font-mono text-sky-300">
-                  {(() => {
-                    const used = vramModel.size_vram;
-                    const usedGB = (used / (1024 * 1024 * 1024)).toFixed(1);
-                    const totalGB = (totalVram / (1024 * 1024 * 1024)).toFixed(1);
-                    return `${usedGB} GB / ${totalGB} GB VRAM`;
-                  })()}
-                </span>
-                {modelLoading && (
-                  <Loader2 size={8} className="text-amber-400 animate-spin" />
-                )}
-              </div>
-            ) : !modelLoading ? (
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800/60 border border-white/5">
-                <HardDrive size={9} className="text-slate-600" />
-                <span className="text-[9px] text-slate-600">VRAM idle</span>
-              </div>
-            ) : null}
-          </div>
-        )}
       </div>
 
       {/* AI Settings Panel */}
@@ -1450,18 +1388,17 @@ export const SceneGenerator: React.FC = () => {
       <ThinkingInspector
         open={inspectorOpen}
         onToggle={() => setInspectorOpen(!inspectorOpen)}
-        active={inspectorStatus === 'thinking' || inspectorStatus === 'loading_model' || inspectorStatus === 'generating'}
-        thinkingLog={thinkingLog}
-        liveOutput={liveOutput}
+        active={inspectorStatus === 'thinking' || inspectorStatus === 'loading_model'}
+        thinkingText={thinkingText}
+        outputText={outputText}
         status={inspectorStatus}
         modelName={aiSettings.provider === 'ollama' ? aiSettings.ollamaModel : aiSettings.provider}
-        onOffload={handleOffloadModel}
-        onVramUpdate={handleVramUpdate}
         chatMessages={chatMessages}
         chatInput={chatInput}
         chatLoading={chatLoading}
         onChatInputChange={setChatInput}
         onChatSend={handleChatSend}
+        onClearChat={() => setChatMessages([])}
       />
       </div>
     </div>
