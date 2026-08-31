@@ -108,7 +108,7 @@ docuflow-desktop/
 | **AI Image Generator** | ✅ Active | Cloudflare Workers (FLUX/SD Schnell) with batch generation |
 | **Local GPU Whisper Transcriber** | ✅ Active | Python-based, supports tiny/base/small/medium/large-v3 |
 | **AI Scene Breakdown Engine** | ✅ Active | Ollama (local) + OpenRouter + Gemini providers, streaming with `<think>` tag extraction |
-| **Thinking Inspector / VRAM Telemetry** | ✅ Active | Real-time Ollama `/api/ps` VRAM monitor, progress bar, live reasoning console |
+| **Thinking Inspector / VRAM Telemetry** | ✅ Active | Real-time Ollama `/api/ps` VRAM monitor, progress bar, live reasoning console, GPU auto-detect, model offload button, live token streaming |
 | **Asset Management** | ✅ Active | Drag-drop import, asset library, protocol-based local file serving |
 | **Video Preview (Remotion)** | ✅ Active | Real-time preview with playhead, track visibility toggles |
 | **Voiceover Panel** | ✅ Active | Audio role assignment (voiceover, music, SFX, ambient) |
@@ -143,8 +143,12 @@ npm run build:linux  # Linux
 - Endpoint: `http://localhost:11434`
 - Auto-starts Ollama if not running
 - Streaming with `stream: true`, `keep_alive: "15m"`, `num_ctx: 2048`
-- 5-minute timeout per request
-- VRAM monitor polls `/api/ps` every 3s during generation
+- 5-minute timeout per request (AbortController)
+- VRAM monitor polls `/api/ps` every 2s during generation
+- **Model offload** button to unload from GPU memory (`keep_alive: 0`)
+- **GPU auto-detection** via Ollama's `/api/ps` endpoint
+- **Live token streaming** — tokens appear on screen as they arrive
+- **Model loading progress bar** — shows when model is loading to GPU
 
 ### OpenRouter (Cloud, Free tier)
 - Endpoint: `https://openrouter.ai/api/v1/chat/completions`
@@ -160,6 +164,9 @@ npm run build:linux  # Linux
 
 | Date | Change | Files |
 |------|--------|-------|
+| 2026-09-01 | Added GPU auto-detection, model offload button, live token streaming (`onToken` callback), model loading state callbacks | `src/renderer/src/services/aiService.ts` |
+| 2026-09-01 | Rewrote ThinkingInspector: GPU/VRAM monitor with live polling, model offload button, model loading progress bar, live output stream console, thinking console | `src/renderer/src/components/generator/ThinkingInspector.tsx` |
+| 2026-09-01 | Wired up `generateScenesStream` with streaming callbacks, added model loading progress bar in header, inspector toggle button, live output state | `src/renderer/src/components/generator/SceneGenerator.tsx` |
 | 2026-09-01 | Added streaming Ollama support with `keep_alive`, `num_ctx: 2048`, 5min timeout, `<think>` tag extraction, and `/api/ps` VRAM telemetry | `src/renderer/src/services/aiService.ts` |
 | 2026-09-01 | Created ThinkingInspector panel with VRAM monitor, progress indicator, and live AI reasoning console | `src/renderer/src/components/generator/ThinkingInspector.tsx` |
 | 2026-09-01 | Fixed Electron window not showing on startup (added `did-finish-load` fallback) | `src/main/index.ts` |

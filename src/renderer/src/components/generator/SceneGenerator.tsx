@@ -1,9 +1,9 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   Wand2, Upload, FileText, Mic, Loader2, X, CheckCircle, AlertCircle,
   Film, Clock, Image as ImageIcon, Clapperboard, Sparkles,
   Trash2, Settings, Globe, Cpu, Key, ChevronDown, ChevronRight,
-  Brain, Zap,
+  Brain, Zap, MonitorDot,
 } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { Button } from '../ui';
@@ -12,7 +12,7 @@ import { Asset } from '../../types/assets';
 import { Command } from '../../engine/commands/types';
 import { generateLogicalId } from '../../engine/media/findAsset';
 import { generateWithCloudflare, CLOUDFLARE_MODELS, CloudflareConfig } from '../../utils/cloudflareApi';
-import { generateScenes, fetchOllamaModels, type AIProvider, type SceneItem, type OllamaModel } from '../../services/aiService';
+import { generateScenesStream, fetchOllamaModels, offloadModel, type AIProvider, type SceneItem, type OllamaModel } from '../../services/aiService';
 import {
   loadGeminiConfig,
   saveGeminiConfig,
@@ -23,6 +23,7 @@ import {
   type GeminiProviderConfig,
   type GeminiConnectionTestResult,
 } from '../../utils/geminiApi';
+import { ThinkingInspector } from './ThinkingInspector';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -104,6 +105,13 @@ const CAMERA_MOTIONS = [
   { value: 'static', label: 'Static' },
 ] as const;
 
+function formatElapsed(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const ss = s % 60;
+  return m > 0 ? `${m}m ${ss}s` : `${ss}s`;
+}
+
 // ---------------------------------------------------------------------------
 // SceneGenerator
 // ---------------------------------------------------------------------------
@@ -126,6 +134,15 @@ export const SceneGenerator: React.FC = () => {
   const [scenes, setScenes] = useState<StoryboardScene[]>([]);
   const [breakingScenes, setBreakingScenes] = useState(false);
   const [sceneError, setSceneError] = useState<string | null>(null);
+
+  // -- AI Inspector state --
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [inspectorStatus, setInspectorStatus] = useState<'idle' | 'loading_model' | 'thinking' | 'generating' | 'done' | 'error'>('idle');
+  const [liveOutput, setLiveOutput] = useState('');
+  const [thinkingLog, setThinkingLog] = useState('');
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [modelLoading, setModelLoading] = useState(false);
+  const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // -- AI Provider settings --
   const [aiSettings, setAISettings] = useState(loadAIProviderSettings);
@@ -212,6 +229,17 @@ export const SceneGenerator: React.FC = () => {
     setBreakingScenes(true);
     setSceneError(null);
     setScenes([]);
+    setLiveOutput('');
+    setThinkingLog('');
+    setElapsedMs(0);
+    setInspectorStatus('loading_model');
+    setInspectorOpen(true);
+
+    // Start elapsed timer
+    const startTime = Date.now();
+    elapsedRef.current = setInterval(() => {
+      setElapsedMs(Date.now() - startTime);
+    }, 100);
 
     try {
       const segments = transcription.segments.map((s) => ({
@@ -220,17 +248,42 @@ export const SceneGenerator: React.FC = () => {
         text: s.text,
       }));
 
-      const sceneItems = await generateScenes({
-        transcriptionSegments: segments,
-        fullScript: scriptText.trim() || undefined,
-        provider: aiSettings.provider,
-        model: aiSettings.provider === 'ollama' ? aiSettings.ollamaModel : aiSettings.openRouterModel,
-        openRouterApiKey: aiSettings.openRouterApiKey || undefined,
-        geminiApiKey: geminiConfig.apiKey || undefined,
-        geminiModel: aiSettings.geminiModel || geminiConfig.model,
-        geminiTemperature: geminiConfig.temperature,
-        geminiMaxOutputTokens: geminiConfig.maxOutputTokens,
-      });
+      const sceneItems = await generateScenesStream(
+        {
+          transcriptionSegments: segments,
+          fullScript: scriptText.trim() || undefined,
+          provider: aiSettings.provider,
+          model: aiSettings.provider === 'ollama' ? aiSettings.ollamaModel : aiSettings.openRouterModel,
+          openRouterApiKey: aiSettings.openRouterApiKey || undefined,
+          geminiApiKey: geminiConfig.apiKey || undefined,
+          geminiModel: aiSettings.geminiModel || geminiConfig.model,
+          geminiTemperature: geminiConfig.temperature,
+          geminiMaxOutputTokens: geminiConfig.maxOutputTokens,
+        },
+        {
+          onToken: (_token, fullText) => {
+            setLiveOutput(fullText);
+            setInspectorStatus('thinking');
+          },
+          onThinkingChunk: (chunk) => {
+            setThinkingLog((prev) => prev + chunk);
+          },
+          onThinkingComplete: (thinking) => {
+            setThinkingLog(thinking);
+          },
+          onModelLoading: (loading) => {
+            setModelLoading(loading);
+            if (loading) setInspectorStatus('loading_model');
+          },
+          onModelLoaded: () => {
+            setModelLoading(false);
+            setInspectorStatus('thinking');
+          },
+          onProgress: (elapsed) => {
+            setElapsedMs(elapsed);
+          },
+        },
+      );
 
       const storyboard: StoryboardScene[] = sceneItems.map((s) => ({
         ...s,
@@ -238,13 +291,19 @@ export const SceneGenerator: React.FC = () => {
       }));
 
       setScenes(storyboard);
+      setInspectorStatus('done');
       setToast({ message: `AI breakdown complete: ${storyboard.length} scenes`, type: 'success' });
     } catch (err) {
       setSceneError(err instanceof Error ? err.message : String(err));
+      setInspectorStatus('error');
     } finally {
       setBreakingScenes(false);
+      if (elapsedRef.current) {
+        clearInterval(elapsedRef.current);
+        elapsedRef.current = null;
+      }
     }
-  }, [transcription, scriptText, aiSettings]);
+  }, [transcription, scriptText, aiSettings, geminiConfig]);
 
   // -----------------------------------------------------------------------
   // Step 3: Single image generation
@@ -441,7 +500,17 @@ export const SceneGenerator: React.FC = () => {
     setTranscriptionError(null);
     setScenes([]);
     setSceneError(null);
+    setLiveOutput('');
+    setThinkingLog('');
+    setInspectorStatus('idle');
+    setElapsedMs(0);
   }, []);
+
+  const handleOffloadModel = useCallback(async () => {
+    if (aiSettings.provider === 'ollama' && aiSettings.ollamaModel) {
+      await offloadModel(aiSettings.ollamaModel);
+    }
+  }, [aiSettings]);
 
   // Toast auto-dismiss
   React.useEffect(() => {
@@ -450,6 +519,13 @@ export const SceneGenerator: React.FC = () => {
       return () => clearTimeout(t);
     }
   }, [toast]);
+
+  // Cleanup elapsed timer on unmount
+  React.useEffect(() => {
+    return () => {
+      if (elapsedRef.current) clearInterval(elapsedRef.current);
+    };
+  }, []);
 
   // Fetch Ollama models when panel opens or provider switches to ollama
   React.useEffect(() => {
@@ -498,7 +574,7 @@ export const SceneGenerator: React.FC = () => {
   // -----------------------------------------------------------------------
 
   return (
-    <div className="h-full flex flex-col bg-slate-950 text-white overflow-hidden">
+    <div className="h-full flex flex-col bg-slate-950 text-white overflow-hidden relative">
       {/* Toast */}
       {toast && (
         <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-lg shadow-lg backdrop-blur-sm transition-all ${
@@ -522,6 +598,18 @@ export const SceneGenerator: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-1.5">
+            {/* Inspector toggle */}
+            <button
+              onClick={() => setInspectorOpen(!inspectorOpen)}
+              className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all ${
+                inspectorOpen
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                  : 'bg-slate-800/60 text-slate-400 border border-white/5 hover:text-white hover:border-white/10'
+              }`}
+            >
+              <MonitorDot size={10} />
+              Inspector
+            </button>
             <button
               onClick={() => setShowAISettings(!showAISettings)}
               className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all ${
@@ -563,6 +651,26 @@ export const SceneGenerator: React.FC = () => {
             </React.Fragment>
           ))}
         </div>
+
+        {/* Model loading progress bar — visible during AI breakdown */}
+        {modelLoading && (
+          <div className="mt-3 flex items-center gap-3">
+            <div className="flex-1">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[9px] text-amber-400 font-medium flex items-center gap-1">
+                  <Loader2 size={9} className="animate-spin" />
+                  Loading {aiSettings.ollamaModel} to GPU...
+                </span>
+                <span className="text-[8px] text-slate-500 font-mono">{formatElapsed(elapsedMs)}</span>
+              </div>
+              <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-amber-500 to-orange-400 rounded-full animate-pulse"
+                  style={{ width: '50%' }} />
+              </div>
+              <p className="text-[8px] text-slate-600 mt-0.5">First token arrives after model loads into VRAM (~30-60s)</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* AI Settings Panel */}
@@ -1177,6 +1285,20 @@ export const SceneGenerator: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Thinking Inspector Panel — slides in from right */}
+      <ThinkingInspector
+        open={inspectorOpen}
+        onToggle={() => setInspectorOpen(!inspectorOpen)}
+        active={inspectorStatus === 'thinking' || inspectorStatus === 'loading_model' || inspectorStatus === 'generating'}
+        thinkingLog={thinkingLog}
+        liveOutput={liveOutput}
+        elapsedMs={elapsedMs}
+        status={inspectorStatus}
+        progress={generatingAll ? generationProgress : undefined}
+        modelName={aiSettings.provider === 'ollama' ? aiSettings.ollamaModel : aiSettings.provider}
+        onOffload={handleOffloadModel}
+      />
     </div>
   );
 };

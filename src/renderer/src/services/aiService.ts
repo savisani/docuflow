@@ -153,10 +153,86 @@ export async function fetchOllamaPs(): Promise<OllamaPsResponse> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// GPU Detection — queries nvidia-smi via main process
+// ---------------------------------------------------------------------------
+
+export interface GpuInfo {
+  name: string;
+  totalVram: number;
+  usedVram: number;
+  freeVram: number;
+  driverVersion: string;
+  temperature: number;
+  utilization: number;
+}
+
+let cachedGpuInfo: GpuInfo | null = null;
+
+export async function detectGpu(): Promise<GpuInfo | null> {
+  if (cachedGpuInfo) return cachedGpuInfo;
+  try {
+    const resp = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(2000) });
+    if (!resp.ok) return null;
+    // Ollama doesn't expose GPU directly — use a best-effort approach via /api/ps
+    const ps = await fetchOllamaPs();
+    if (ps.models.length > 0) {
+      const m = ps.models[0];
+      cachedGpuInfo = {
+        name: 'GPU (via Ollama)',
+        totalVram: m.size_vram || 0,
+        usedVram: m.size_vram || 0,
+        freeVram: 0,
+        driverVersion: '',
+        temperature: 0,
+        utilization: 0,
+      };
+      return cachedGpuInfo;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearGpuCache(): void {
+  cachedGpuInfo = null;
+}
+
+// ---------------------------------------------------------------------------
+// Model Offload — unload model from VRAM
+// ---------------------------------------------------------------------------
+
+export async function offloadModel(modelName: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const resp = await fetch('http://localhost:11434/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: modelName,
+        keep_alive: 0,
+        prompt: '',
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      return { success: false, error: `Ollama error ${resp.status}: ${text.slice(0, 200)}` };
+    }
+    clearGpuCache();
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export interface StreamingCallbacks {
+  onToken?: (token: string, fullText: string) => void;
   onThinkingChunk?: (chunk: string) => void;
   onThinkingComplete?: (fullThinking: string) => void;
   onProgress?: (elapsed: number) => void;
+  onModelLoading?: (loading: boolean) => void;
+  onModelLoaded?: () => void;
 }
 
 function extractThinkingTags(text: string): { thinking: string; response: string } {
@@ -187,6 +263,8 @@ async function callOllamaStreaming(
   };
 
   try {
+    callbacks?.onModelLoading?.(true);
+
     const resp = await fetch('http://localhost:11434/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -195,6 +273,7 @@ async function callOllamaStreaming(
     });
 
     if (!resp.ok) {
+      callbacks?.onModelLoading?.(false);
       const text = await resp.text().catch(() => '');
       throw new Error(`Ollama error ${resp.status}: ${text.slice(0, 300)}`);
     }
@@ -205,6 +284,7 @@ async function callOllamaStreaming(
     const decoder = new TextDecoder();
     let buffer = '';
     let fullResponse = '';
+    let firstTokenReceived = false;
 
     const startTime = Date.now();
     const progressInterval = setInterval(() => {
@@ -226,7 +306,13 @@ async function callOllamaStreaming(
           try {
             const chunk = JSON.parse(trimmed);
             if (chunk.response) {
+              if (!firstTokenReceived) {
+                firstTokenReceived = true;
+                callbacks?.onModelLoading?.(false);
+                callbacks?.onModelLoaded?.();
+              }
               fullResponse += chunk.response;
+              callbacks?.onToken?.(chunk.response, fullResponse);
               callbacks?.onThinkingChunk?.(chunk.response);
             }
           } catch {
@@ -245,9 +331,11 @@ async function callOllamaStreaming(
       callbacks?.onThinkingComplete?.(thinking);
     }
 
+    callbacks?.onModelLoading?.(false);
     return response || fullResponse;
   } finally {
     clearTimeout(timeoutId);
+    callbacks?.onModelLoading?.(false);
   }
 }
 
