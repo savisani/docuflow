@@ -458,6 +458,94 @@ function buildUserPrompt(req: AISceneRequest): string {
 }
 
 // ---------------------------------------------------------------------------
+// Interactive Chat — streaming single-turn chat with a loaded Ollama model
+// ---------------------------------------------------------------------------
+
+export async function chatWithModel(
+  message: string,
+  model = 'llama3.2',
+  callbacks?: StreamingCallbacks,
+): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 300_000);
+
+  const body = {
+    model,
+    prompt: message,
+    stream: true,
+    keep_alive: '15m',
+    options: {
+      temperature: 0.7,
+      num_predict: 2048,
+      num_ctx: 2048,
+    },
+  };
+
+  try {
+    callbacks?.onModelLoading?.(true);
+
+    const resp = await fetch('http://localhost:11434/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!resp.ok) {
+      callbacks?.onModelLoading?.(false);
+      const text = await resp.text().catch(() => '');
+      throw new Error(`Ollama error ${resp.status}: ${text.slice(0, 300)}`);
+    }
+
+    const reader = resp.body?.getReader();
+    if (!reader) throw new Error('No response stream available');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let fullResponse = '';
+    let firstTokenReceived = false;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const chunk = JSON.parse(trimmed);
+            if (chunk.response) {
+              if (!firstTokenReceived) {
+                firstTokenReceived = true;
+                callbacks?.onModelLoading?.(false);
+                callbacks?.onModelLoaded?.();
+              }
+              fullResponse += chunk.response;
+              callbacks?.onToken?.(chunk.response, fullResponse);
+            }
+          } catch {
+            // skip malformed lines
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    callbacks?.onModelLoading?.(false);
+    return fullResponse;
+  } finally {
+    clearTimeout(timeoutId);
+    callbacks?.onModelLoading?.(false);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 

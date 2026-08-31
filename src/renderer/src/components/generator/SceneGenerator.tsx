@@ -3,7 +3,7 @@ import {
   Wand2, Upload, FileText, Mic, Loader2, X, CheckCircle, AlertCircle,
   Film, Clock, Image as ImageIcon, Clapperboard, Sparkles,
   Trash2, Settings, Globe, Cpu, Key, ChevronDown, ChevronRight,
-  Brain, Zap, MonitorDot,
+  Brain, MonitorDot, HardDrive, ArrowDownToLine,
 } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { Button } from '../ui';
@@ -12,7 +12,11 @@ import { Asset } from '../../types/assets';
 import { Command } from '../../engine/commands/types';
 import { generateLogicalId } from '../../engine/media/findAsset';
 import { generateWithCloudflare, CLOUDFLARE_MODELS, CloudflareConfig } from '../../utils/cloudflareApi';
-import { generateScenesStream, fetchOllamaModels, offloadModel, type AIProvider, type SceneItem, type OllamaModel } from '../../services/aiService';
+import {
+  generateScenesStream, fetchOllamaModels, offloadModel, chatWithModel,
+  fetchOllamaPs, clearGpuCache,
+  type AIProvider, type SceneItem, type OllamaModel, type OllamaPsModel,
+} from '../../services/aiService';
 import {
   loadGeminiConfig,
   saveGeminiConfig,
@@ -168,6 +172,16 @@ export const SceneGenerator: React.FC = () => {
 
   // -- UI state --
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  // -- Interactive Chat state --
+  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string }>>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+
+  // -- VRAM status for top bar --
+  const [vramModel, setVramModel] = useState<OllamaPsModel | null>(null);
+  const [totalVram] = useState(4 * 1024 * 1024 * 1024);
+  const [unloadingGpu, setUnloadingGpu] = useState(false);
 
   // -- Derived --
   const step1Done = transcription?.success === true && transcription.segments && transcription.segments.length > 0;
@@ -512,6 +526,90 @@ export const SceneGenerator: React.FC = () => {
     }
   }, [aiSettings]);
 
+  // -----------------------------------------------------------------------
+  // GPU Unload — instant VRAM flush
+  // -----------------------------------------------------------------------
+
+  const handleUnloadGpu = useCallback(async () => {
+    if (aiSettings.provider !== 'ollama' || !aiSettings.ollamaModel) return;
+    setUnloadingGpu(true);
+    try {
+      const result = await offloadModel(aiSettings.ollamaModel);
+      if (result.success) {
+        setVramModel(null);
+        clearGpuCache();
+        setToast({ message: `GPU unloaded: ${aiSettings.ollamaModel} VRAM freed`, type: 'success' });
+      } else {
+        setToast({ message: result.error || 'Failed to unload GPU', type: 'error' });
+      }
+    } catch {
+      setToast({ message: 'Failed to unload GPU', type: 'error' });
+    } finally {
+      setUnloadingGpu(false);
+    }
+  }, [aiSettings]);
+
+  // -----------------------------------------------------------------------
+  // VRAM update callback from ThinkingInspector
+  // -----------------------------------------------------------------------
+
+  const handleVramUpdate = useCallback((model: OllamaPsModel | null, total: number) => {
+    setVramModel(model);
+  }, []);
+
+  // -----------------------------------------------------------------------
+  // Interactive Chat with loaded Ollama model
+  // -----------------------------------------------------------------------
+
+  const handleChatSend = useCallback(async () => {
+    const msg = chatInput.trim();
+    if (!msg || chatLoading) return;
+    if (aiSettings.provider !== 'ollama') {
+      setToast({ message: 'Chat is only available with Ollama provider', type: 'error' });
+      return;
+    }
+
+    const userMessage = { role: 'user' as const, text: msg };
+    setChatMessages((prev) => [...prev, userMessage]);
+    setChatInput('');
+    setChatLoading(true);
+
+    try {
+      const response = await chatWithModel(msg, aiSettings.ollamaModel, {
+        onToken: (_token, fullText) => {
+          // Update the last assistant message in real-time
+          setChatMessages((prev) => {
+            const updated = [...prev];
+            const lastIdx = updated.length - 1;
+            if (lastIdx >= 0 && updated[lastIdx].role === 'assistant') {
+              updated[lastIdx] = { ...updated[lastIdx], text: fullText };
+            } else {
+              updated.push({ role: 'assistant', text: fullText });
+            }
+            return updated;
+          });
+        },
+      });
+
+      // Ensure final message is set
+      setChatMessages((prev) => {
+        const updated = [...prev];
+        const lastIdx = updated.length - 1;
+        if (lastIdx >= 0 && updated[lastIdx].role === 'assistant') {
+          updated[lastIdx] = { ...updated[lastIdx], text: response };
+        } else {
+          updated.push({ role: 'assistant', text: response });
+        }
+        return updated;
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Chat failed';
+      setChatMessages((prev) => [...prev, { role: 'assistant', text: `[Error: ${errorMsg}]` }]);
+    } finally {
+      setChatLoading(false);
+    }
+  }, [chatInput, chatLoading, aiSettings]);
+
   // Toast auto-dismiss
   React.useEffect(() => {
     if (toast) {
@@ -669,6 +767,71 @@ export const SceneGenerator: React.FC = () => {
               </div>
               <p className="text-[8px] text-slate-600 mt-0.5">First token arrives after model loads into VRAM (~30-60s)</p>
             </div>
+          </div>
+        )}
+
+        {/* Top VRAM Status Bar — persistent, compact */}
+        {aiSettings.provider === 'ollama' && (
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            {/* Active Model badge */}
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800/60 border border-white/5">
+              <Cpu size={9} className="text-amber-400" />
+              <span className="text-[9px] font-medium text-slate-300 font-mono truncate max-w-[140px]">
+                {aiSettings.ollamaModel}
+              </span>
+            </div>
+
+            {/* VRAM Usage pill */}
+            {vramModel ? (
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800/60 border border-white/5">
+                <HardDrive size={9} className="text-sky-400" />
+                <span className="text-[9px] font-mono text-sky-300">
+                  {(() => {
+                    const used = vramModel.size_vram;
+                    const usedGB = (used / (1024 * 1024 * 1024)).toFixed(1);
+                    const totalGB = (totalVram / (1024 * 1024 * 1024)).toFixed(1);
+                    return `${usedGB} GB / ${totalGB} GB VRAM`;
+                  })()}
+                </span>
+                {modelLoading && (
+                  <Loader2 size={8} className="text-amber-400 animate-spin" />
+                )}
+              </div>
+            ) : !modelLoading ? (
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800/60 border border-white/5">
+                <HardDrive size={9} className="text-slate-600" />
+                <span className="text-[9px] text-slate-600">VRAM idle</span>
+              </div>
+            ) : null}
+
+            {/* Model loading progress mini-bar */}
+            {modelLoading && (
+              <div className="flex-1 min-w-[100px] max-w-[200px]">
+                <div className="w-full bg-slate-800 rounded-full h-1 overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-amber-500 to-orange-400 rounded-full animate-pulse"
+                    style={{ width: '50%' }} />
+                </div>
+              </div>
+            )}
+
+            {/* Unload GPU button */}
+            {vramModel && !modelLoading && (
+              <button
+                onClick={handleUnloadGpu}
+                disabled={unloadingGpu}
+                className="flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-medium
+                  bg-red-500/10 text-red-400 border border-red-500/20
+                  hover:bg-red-500/20 hover:text-red-300 transition-colors disabled:opacity-50"
+                title="Unload model from GPU — frees all VRAM for transcription or rendering"
+              >
+                {unloadingGpu ? (
+                  <Loader2 size={8} className="animate-spin" />
+                ) : (
+                  <ArrowDownToLine size={8} />
+                )}
+                Unload GPU
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -986,8 +1149,10 @@ export const SceneGenerator: React.FC = () => {
         </div>
       )}
 
-      {/* Main content: 2-panel split */}
-      <div className="flex-1 flex min-h-0 overflow-hidden">
+      {/* Main content area with inline inspector sidebar */}
+      <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
+        {/* Main content: 2-panel split */}
+        <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* Left panel */}
         <div className="w-[380px] shrink-0 flex flex-col border-r border-white/5 overflow-hidden">
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -1286,7 +1451,7 @@ export const SceneGenerator: React.FC = () => {
         </div>
       </div>
 
-      {/* Thinking Inspector Panel — slides in from right */}
+      {/* Thinking Inspector — inline 350px collapsible sidebar */}
       <ThinkingInspector
         open={inspectorOpen}
         onToggle={() => setInspectorOpen(!inspectorOpen)}
@@ -1298,7 +1463,14 @@ export const SceneGenerator: React.FC = () => {
         progress={generatingAll ? generationProgress : undefined}
         modelName={aiSettings.provider === 'ollama' ? aiSettings.ollamaModel : aiSettings.provider}
         onOffload={handleOffloadModel}
+        onVramUpdate={handleVramUpdate}
+        chatMessages={chatMessages}
+        chatInput={chatInput}
+        chatLoading={chatLoading}
+        onChatInputChange={setChatInput}
+        onChatSend={handleChatSend}
       />
+      </div>
     </div>
   );
 };
