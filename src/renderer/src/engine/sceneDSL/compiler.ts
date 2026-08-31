@@ -247,12 +247,107 @@ function transitionToCommands(
 }
 
 function durationToSeconds(duration?: string): number {
-  if (!duration) return 5;
+  if (!duration) return 0;
   const match = duration.match(/^(\d+(?:\.\d+)?)(s|ms)?$/);
-  if (!match) return 5;
+  if (!match) return 0;
   const value = parseFloat(match[1]);
   const unit = match[2] || 's';
   return unit === 'ms' ? value / 1000 : value;
+}
+
+// ---------------------------------------------------------------------------
+// Normalize scene durations to fit audio duration
+// Uses transcript segments when available, falls back to even distribution
+// ---------------------------------------------------------------------------
+
+function normalizeSceneDurations(
+  scenes: SceneDSL[],
+  context: CompileContext,
+): number[] {
+  const totalAudioDuration = context.audioDuration ||
+    (context.transcriptSegments && context.transcriptSegments.length > 0
+      ? context.transcriptSegments[context.transcriptSegments.length - 1].end
+      : 0);
+
+  if (scenes.length === 0) return [];
+
+  // Check if any scene has explicit durations
+  const hasDurations = scenes.some(s => durationToSeconds(s.duration) > 0);
+
+  if (hasDurations) {
+    // Respect AI-provided durations but scale to fit audio if total exceeds it
+    let durations = scenes.map(s => {
+      const d = durationToSeconds(s.duration);
+      return d > 0 ? d : 3; // fallback for scenes without duration
+    });
+
+    if (totalAudioDuration > 0) {
+      const totalSceneDuration = durations.reduce((a, b) => a + b, 0);
+      if (totalSceneDuration > 0 && Math.abs(totalSceneDuration - totalAudioDuration) > 0.5) {
+        // Scale durations to match audio
+        const scale = totalAudioDuration / totalSceneDuration;
+        durations = durations.map(d => Math.max(0.5, d * scale));
+      }
+    }
+
+    return durations;
+  }
+
+  // No durations provided — derive from transcript segments
+  if (context.transcriptSegments && context.transcriptSegments.length > 0) {
+    // Match scenes to transcript segments by text overlap
+    const durations: number[] = [];
+    const segText = context.transcriptSegments.map(s => s.text.toLowerCase());
+
+    for (const scene of scenes) {
+      const sceneWords = new Set(scene.text.toLowerCase().split(/\s+/));
+      let bestStart = -1;
+      let bestEnd = -1;
+      let bestScore = 0;
+
+      for (let i = 0; i < context.transcriptSegments!.length; i++) {
+        for (let j = i; j < context.transcriptSegments!.length; j++) {
+          const combined = segText.slice(i, j + 1).join(' ');
+          const words = combined.split(/\s+/);
+          let matches = 0;
+          for (const w of words) {
+            if (sceneWords.has(w)) matches++;
+          }
+          const score = matches / Math.max(sceneWords.size, 1);
+          if (score > bestScore && score > 0.3) {
+            bestScore = score;
+            bestStart = i;
+            bestEnd = j;
+          }
+        }
+      }
+
+      if (bestStart >= 0) {
+        const start = context.transcriptSegments![bestStart].start;
+        const end = context.transcriptSegments![bestEnd].end;
+        durations.push(Math.max(0.5, end - start));
+      } else {
+        durations.push(3); // default fallback
+      }
+    }
+
+    // Normalize to fit total audio duration
+    if (totalAudioDuration > 0) {
+      const total = durations.reduce((a, b) => a + b, 0);
+      if (total > 0 && Math.abs(total - totalAudioDuration) > 0.5) {
+        const scale = totalAudioDuration / total;
+        return durations.map(d => Math.max(0.5, d * scale));
+      }
+    }
+
+    return durations;
+  }
+
+  // No transcript — even distribution across audio duration or 3s per scene
+  const fallbackDuration = totalAudioDuration > 0
+    ? totalAudioDuration / scenes.length
+    : 3;
+  return scenes.map(() => Math.max(0.5, fallbackDuration));
 }
 
 export interface CompileContext {
@@ -260,6 +355,8 @@ export interface CompileContext {
   width: number;
   height: number;
   existingAssets?: Array<{ logicalId: string; filename: string; type: 'image' | 'video' | 'audio' }>;
+  transcriptSegments?: Array<{ start: number; end: number; text: string }>;
+  audioDuration?: number;
 }
 
 export interface CompiledScene {
@@ -293,11 +390,14 @@ export function compileSceneDSL(
 
   const transitionDurationFrames = Math.round(0.5 * fps);
 
+  // Normalize all scene durations to fit audio
+  const normalizedDurations = normalizeSceneDurations(scenes, context);
+
   let currentFrame = 0;
 
   for (let i = 0; i < scenes.length; i++) {
     const scene = scenes[i];
-    const durationSec = durationToSeconds(scene.duration);
+    const durationSec = normalizedDurations[i];
     const durationFrames = Math.round(durationSec * fps);
     const startFrame = currentFrame;
     const endFrame = startFrame + durationFrames;
@@ -332,7 +432,7 @@ export function compileSceneDSL(
     sceneCommands.push(showCmd);
 
     if (scene.motion && scene.motion !== 'none') {
-      const motionCmds = motionToCommands(assetLogicalId, scene.motion, startFrame, durationFrames);
+      const motionCmds = motionToCommands(assetLogicalId, scene.motion as SupportedMotion, startFrame, durationFrames);
       sceneCommands.push(...motionCmds);
     }
 
@@ -356,7 +456,7 @@ export function compileSceneDSL(
         const transitionCmds = transitionToCommands(
           assetLogicalId,
           nextLogicalId,
-          effectiveTransition,
+          effectiveTransition as SupportedTransition,
           Math.max(startFrame, transitionStart),
           transitionDurationFrames,
         );

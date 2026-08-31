@@ -393,15 +393,23 @@ export const SceneGenerator: React.FC = () => {
           : sc.cameraMotion === 'pan_right' ? 'slow_pan_right'
           : 'none',
         transition: 'cut',
-        duration: `${(sc.endTime - sc.startTime).toFixed(1)}s`,
       }));
 
       // Use compiler to generate commands with proper motion animations
       const fps = store.settings.fps || 30;
+      const totalAudioDuration = transcription?.segments && transcription.segments.length > 0
+        ? transcription.segments[transcription.segments.length - 1].end
+        : undefined;
       const context: CompileContext = {
         fps,
         width: store.settings.width || 1920,
         height: store.settings.height || 1080,
+        transcriptSegments: transcription?.segments?.map(s => ({
+          start: s.start,
+          end: s.end,
+          text: s.text,
+        })),
+        audioDuration: totalAudioDuration,
       };
 
       const compiled = compileSceneDSL(dslScenes, context, sceneImages);

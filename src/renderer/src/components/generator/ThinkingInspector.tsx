@@ -97,11 +97,11 @@ const StreamingSection: React.FC<{
         <div
           ref={containerRef}
           className="bg-[#0a0e14] rounded-lg border border-white/5 overflow-hidden"
-          style={{ maxHeight: 200 }}
+          style={{ maxHeight: 400 }}
         >
           {text ? (
             <pre className={`p-2.5 text-[10px] font-mono ${colorClasses} whitespace-pre-wrap break-words leading-relaxed overflow-y-auto`}
-              style={{ maxHeight: 200, tabSize: 2 }}>
+              style={{ maxHeight: 400, tabSize: 2 }}>
               {text}
               {active && (
                 <span className={`inline-block w-1.5 h-3 animate-pulse ml-0.5 align-middle ${

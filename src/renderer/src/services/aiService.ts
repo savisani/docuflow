@@ -14,6 +14,7 @@ export interface AISceneRequest {
   geminiModel?: string;
   geminiTemperature?: number;
   geminiMaxOutputTokens?: number;
+  audioDuration?: number;
 }
 
 export interface SceneItem {
@@ -33,7 +34,7 @@ export interface SceneItem {
 
 const SCENE_DSL_SYSTEM_PROMPT = `You are an expert video director and storyboard artist.
 
-Given audio timestamped transcript segments, group them into coherent visual scenes (3-6 seconds each).
+Given audio timestamped transcript segments, group them into logical visual scenes. Focus on WHAT to show visually — the system handles timing automatically.
 
 OUTPUT FORMAT: For each scene, output a simple key-value block. Separate scenes with a blank line followed by --- followed by a blank line.
 
@@ -43,12 +44,14 @@ Each scene MUST include:
 - motion: Camera motion (must be exactly one of: none, slow_zoom, medium_zoom, fast_zoom, slow_zoom_out, medium_zoom_out, fast_zoom_out, slow_pan_left, slow_pan_right, slow_pan_up, slow_pan_down, medium_pan_left, medium_pan_right, fast_pan_left, fast_pan_right, dolly_in, dolly_out, orbit_left, orbit_right, tilt_up, tilt_down, crane_up, crane_down, handheld, parallax)
 - transition: How this scene transitions to the next (must be exactly one of: cut, crossfade, slide_left, slide_right, slide_up, slide_down, wipe_left, wipe_right, wipe_up, wipe_down, zoom_in, zoom_out, dissolve, fade)
 - style: Visual style (must be exactly one of: natural, cinematic, documentary, vintage, dramatic, minimal, none)
-- duration: Approximate duration in seconds (e.g. "4s")
 
 Optional fields:
 - layers: Comma-separated additional visual elements
 - extras: Comma-separated additional notes
 - reasoning: Why you chose this visual and motion
+
+DO NOT calculate durations or timings — the system uses transcript timestamps for that.
+DO NOT include a duration field — timing is handled automatically.
 
 EXAMPLE OUTPUT:
 text: The ancient temple stood atop the misty mountain peak
@@ -56,7 +59,6 @@ visual: Ancient stone temple with intricate carvings, morning mist swirling arou
 motion: slow_zoom
 transition: crossfade
 style: cinematic
-duration: 5s
 reasoning: Slow zoom builds reverence and scale for the temple introduction
 
 ---
@@ -66,7 +68,6 @@ visual: Buddhist monks in flowing orange robes walking through stone corridor, s
 motion: slow_pan_right
 transition: cut
 style: documentary
-duration: 4s
 reasoning: Pan right follows the monks' movement through the space
 
 IMPORTANT RULES:
@@ -75,7 +76,8 @@ IMPORTANT RULES:
 3. Each scene block starts with "text:" on its own line
 4. Separate scenes with a blank line, three dashes, blank line
 5. Keep visual descriptions detailed but concise (1-2 sentences)
-6. Group transcript segments that form a single visual idea (aim for 3-6 second scenes)`;
+6. Group transcript segments that form a single visual idea
+7. Do NOT include a duration field — timing is computed from transcript timestamps`;
 
 // ---------------------------------------------------------------------------
 // Legacy JSON system prompt — used as fallback
@@ -83,10 +85,11 @@ IMPORTANT RULES:
 
 const LEGACY_SYSTEM_PROMPT = `You are an expert video director and storyboard artist.
 
-Given audio timestamped transcript segments, group them into coherent visual scenes (3-6 seconds each). For each scene:
+Given audio timestamped transcript segments, group them into coherent visual scenes. For each scene:
 1. Combine adjacent segments that form a single visual idea.
 2. Write a highly descriptive visual prompt for FLUX / Stable Diffusion image generation (cinematic, detailed, lighting, composition, mood).
 3. Select a camera motion that matches the pacing.
+DO NOT calculate durations — timing is handled by the system from transcript timestamps.
 
 Output STRICTLY valid JSON matching this exact schema — no markdown fences, no prose, no explanation:
 
@@ -94,8 +97,6 @@ Output STRICTLY valid JSON matching this exact schema — no markdown fences, no
   "scenes": [
     {
       "sceneId": 1,
-      "startTime": 0.0,
-      "endTime": 4.2,
       "transcriptChunk": "...",
       "visualDescription": "...",
       "imagePrompt": "...",
@@ -104,7 +105,8 @@ Output STRICTLY valid JSON matching this exact schema — no markdown fences, no
   ]
 }
 
-cameraMotion MUST be one of: zoom_in, zoom_out, pan_left, pan_right, static.`;
+cameraMotion MUST be one of: zoom_in, zoom_out, pan_left, pan_right, static.
+Do NOT include startTime/endTime — the system computes timing from transcript timestamps.`;
 
 // ---------------------------------------------------------------------------
 // Scene DSL text parser — converts AI plain text output to SceneDSL[]
@@ -221,15 +223,6 @@ function parseSceneDSLBlock(block: string): SceneDSL | null {
 function parseSceneDSLText(text: string): SceneDSL[] {
   const blocks = text.split(/\n\s*---\s*\n/).filter(b => b.trim());
   return blocks.map(parseSceneDSLBlock).filter((s): s is SceneDSL => s !== null);
-}
-
-function durationToSeconds(duration?: string): number {
-  if (!duration) return 5;
-  const match = duration.match(/^(\d+(?:\.\d+)?)(s|ms)?$/);
-  if (!match) return 5;
-  const value = parseFloat(match[1]);
-  const unit = match[2] || 's';
-  return unit === 'ms' ? value / 1000 : value;
 }
 
 // ---------------------------------------------------------------------------
@@ -1166,47 +1159,111 @@ function convertAIResponseToSceneItems(
   const dslScenes = parseSceneDSLText(raw);
 
   if (dslScenes.length > 0) {
-    let cumulativeTime = 0;
-    return dslScenes.map((scene, i) => {
-      const duration = durationToSeconds(scene.duration);
-      const startTime = segments[i]?.start ?? cumulativeTime;
-      const endTime = segments[Math.min(i + 1, segments.length - 1)]?.end ?? startTime + duration;
-      cumulativeTime = endTime;
+    // Derive timing from transcript segments matched to scene text
+    const totalDuration = segments.length > 0 ? segments[segments.length - 1].end : 0;
 
-      const motionMap: Record<string, SceneItem['cameraMotion']> = {
-        'none': 'static',
-        'slow_zoom': 'zoom_in', 'medium_zoom': 'zoom_in', 'fast_zoom': 'zoom_in',
-        'slow_zoom_out': 'zoom_out', 'medium_zoom_out': 'zoom_out', 'fast_zoom_out': 'zoom_out',
-        'slow_pan_left': 'pan_left', 'slow_pan_right': 'pan_right',
-        'medium_pan_left': 'pan_left', 'medium_pan_right': 'pan_right',
-        'fast_pan_left': 'pan_left', 'fast_pan_right': 'pan_right',
-        'dolly_in': 'zoom_in', 'dolly_out': 'zoom_out',
-        'orbit_left': 'pan_left', 'orbit_right': 'pan_right',
-        'tilt_up': 'zoom_out', 'tilt_down': 'zoom_in',
-        'crane_up': 'zoom_out', 'crane_down': 'zoom_in',
-        'handheld': 'static', 'parallax': 'pan_right',
-      };
+    // Build a mapping: for each DSL scene, find which transcript segments it covers
+    // by matching scene.text against segment text
+    const sceneSegmentRanges: Array<{ startIdx: number; endIdx: number }> = [];
 
-      return {
-        sceneId: i + 1,
-        startTime,
-        endTime,
-        transcriptChunk: scene.text,
-        visualDescription: scene.visual || scene.text,
-        imagePrompt: scene.visual || scene.text,
-        cameraMotion: motionMap[scene.motion || 'none'] || 'static',
-        reasoning: scene.reasoning,
-      };
-    });
+    for (const scene of dslScenes) {
+      const sceneTextLower = scene.text.toLowerCase().trim();
+      let bestStart = -1;
+      let bestEnd = -1;
+      let bestScore = 0;
+
+      // Try to find consecutive segments that best match this scene's text
+      for (let startIdx = 0; startIdx < segments.length; startIdx++) {
+        for (let endIdx = startIdx; endIdx < segments.length; endIdx++) {
+          const combinedText = segments.slice(startIdx, endIdx + 1)
+            .map(s => s.text).join(' ').toLowerCase().trim();
+          // Simple overlap score: count matching words
+          const sceneWords = new Set(sceneTextLower.split(/\s+/));
+          const combinedWords = combinedText.split(/\s+/);
+          let matches = 0;
+          for (const w of combinedWords) {
+            if (sceneWords.has(w)) matches++;
+          }
+          const score = matches / Math.max(sceneWords.size, 1);
+          if (score > bestScore && score > 0.3) {
+            bestScore = score;
+            bestStart = startIdx;
+            bestEnd = endIdx;
+          }
+        }
+      }
+
+      if (bestStart >= 0) {
+        sceneSegmentRanges.push({ startIdx: bestStart, endIdx: bestEnd });
+      } else {
+        // No match found — will be assigned evenly later
+        sceneSegmentRanges.push({ startIdx: -1, endIdx: -1 });
+      }
+    }
+
+    // Assign timestamps: matched scenes get their segment times,
+    // unmatched scenes get evenly distributed across total duration
+    const unmatchedIndices: number[] = [];
+    const assignedStarts: number[] = new Array(dslScenes.length).fill(-1);
+    const assignedEnds: number[] = new Array(dslScenes.length).fill(-1);
+
+    for (let i = 0; i < dslScenes.length; i++) {
+      const range = sceneSegmentRanges[i];
+      if (range.startIdx >= 0) {
+        assignedStarts[i] = segments[range.startIdx].start;
+        assignedEnds[i] = segments[range.endIdx].end;
+      } else {
+        unmatchedIndices.push(i);
+      }
+    }
+
+    // Fill unmatched scenes with even distribution
+    if (unmatchedIndices.length > 0 && totalDuration > 0) {
+      const chunk = totalDuration / dslScenes.length;
+      for (let j = 0; j < unmatchedIndices.length; j++) {
+        const i = unmatchedIndices[j];
+        assignedStarts[i] = j * chunk;
+        assignedEnds[i] = (j + 1) * chunk;
+      }
+    }
+
+    const motionMap: Record<string, SceneItem['cameraMotion']> = {
+      'none': 'static',
+      'slow_zoom': 'zoom_in', 'medium_zoom': 'zoom_in', 'fast_zoom': 'zoom_in',
+      'slow_zoom_out': 'zoom_out', 'medium_zoom_out': 'zoom_out', 'fast_zoom_out': 'zoom_out',
+      'slow_pan_left': 'pan_left', 'slow_pan_right': 'pan_right',
+      'medium_pan_left': 'pan_left', 'medium_pan_right': 'pan_right',
+      'fast_pan_left': 'pan_left', 'fast_pan_right': 'pan_right',
+      'dolly_in': 'zoom_in', 'dolly_out': 'zoom_out',
+      'orbit_left': 'pan_left', 'orbit_right': 'pan_right',
+      'tilt_up': 'zoom_out', 'tilt_down': 'zoom_in',
+      'crane_up': 'zoom_out', 'crane_down': 'zoom_in',
+      'handheld': 'static', 'parallax': 'pan_right',
+    };
+
+    return dslScenes.map((scene, i) => ({
+      sceneId: i + 1,
+      startTime: assignedStarts[i],
+      endTime: assignedEnds[i],
+      transcriptChunk: scene.text,
+      visualDescription: scene.visual || scene.text,
+      imagePrompt: scene.visual || scene.text,
+      cameraMotion: motionMap[scene.motion || 'none'] || 'static',
+      reasoning: scene.reasoning,
+    }));
   }
 
   // Fallback: try legacy JSON
   try {
     const parsed = extractJSON(raw);
+    const totalDuration = segments.length > 0 ? segments[segments.length - 1].end : 0;
+    const n = parsed.scenes.length;
+    const chunk = n > 0 ? totalDuration / n : 3;
+
     return parsed.scenes.map((s, i) => ({
       sceneId: s.sceneId ?? i + 1,
-      startTime: Number(s.startTime) || 0,
-      endTime: Number(s.endTime) || 0,
+      startTime: s.startTime ?? i * chunk,
+      endTime: s.endTime ?? (i + 1) * chunk,
       transcriptChunk: s.transcriptChunk || '',
       visualDescription: s.visualDescription || '',
       imagePrompt: s.imagePrompt || s.visualDescription || '',
