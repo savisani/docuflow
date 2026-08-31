@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "settings": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "assets": [],
+  "commands": [
+    {
+      "id": "show-img1",
+      "type": "show",
+      "asset": "image1",
+      "start": 0,
+      "duration": 5
+    },
+    {
+      "id": "scale-img1",
+      "type": "scale",
+      "target": "show-img1",
+      "start": 0,
+      "duration": 5,
+      "from": 1,
+      "to": 1.15,
+      "easing": "easeInOut"
+    },
+    {
+      "id": "rotate-img1",
+      "type": "rotate",
+      "target": "show-img1",
+      "start": 3,
+      "duration": 2,
+      "from": 0,
+      "to": 180,
+      "easing": "easeInOut"
+    },
+    {
+      "id": "replace-img1",
+      "type": "replace",
+      "target": "show-img1",
+      "asset": "image2",
+      "start": 5
+    },
+    {
+      "id": "scale-img2",
+      "type": "scale",
+      "target": "show-img1",
+      "start": 5,
+      "duration": 4,
+      "from": 1,
+      "to": 1.2,
+      "easing": "easeOut"
+    },
+    {
+      "id": "show-img3",
+      "type": "show",
+      "asset": "image3",
+      "start": 9,
+      "duration": 3
+    },
+    {
+      "id": "sfx-whoosh",
+      "type": "sfx",
+      "asset": "sfx1",
+      "start": 9,
+      "volume": 0.7
+    }
+  ]
+}

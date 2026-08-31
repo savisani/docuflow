@@ -1,0 +1,208 @@
+{
+  "version": 1,
+  "settings": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "commands": [
+    {
+      "id": "img1",
+      "type": "show",
+      "asset": "image1",
+      "start": 0,
+      "duration": 6
+    },
+    {
+      "id": "img1-move",
+      "type": "move",
+      "target": "img1",
+      "from": { "x": 0, "y": 0 },
+      "to": { "x": 200, "y": 50 },
+      "start": 1,
+      "duration": 3,
+      "easing": "easeInOut"
+    },
+    {
+      "id": "img1-scale",
+      "type": "scale",
+      "target": "img1",
+      "from": 1,
+      "to": 1.4,
+      "start": 1,
+      "duration": 3,
+      "easing": "easeOut"
+    },
+    {
+      "id": "img1-rotate",
+      "type": "rotate",
+      "target": "img1",
+      "from": 0,
+      "to": 15,
+      "start": 2,
+      "duration": 4,
+      "easing": "easeInOut"
+    },
+    {
+      "id": "img1-fadeout",
+      "type": "fadeOut",
+      "target": "img1",
+      "start": 5,
+      "duration": 1
+    },
+    {
+      "id": "img2",
+      "type": "show",
+      "asset": "image2",
+      "start": 5,
+      "duration": 6
+    },
+    {
+      "id": "img2-fadein",
+      "type": "fadeIn",
+      "target": "img2",
+      "start": 5,
+      "duration": 1
+    },
+    {
+      "id": "img2-move",
+      "type": "move",
+      "target": "img2",
+      "from": { "x": -300, "y": 0 },
+      "to": { "x": 0, "y": 0 },
+      "start": 5,
+      "duration": 2,
+      "easing": "easeOut"
+    },
+    {
+      "id": "img2-scale",
+      "type": "scale",
+      "target": "img2",
+      "from": 0.6,
+      "to": 1.2,
+      "start": 6,
+      "duration": 3,
+      "easing": "easeInOut"
+    },
+    {
+      "id": "img2-rotate",
+      "type": "rotate",
+      "target": "img2",
+      "from": -10,
+      "to": 5,
+      "start": 7,
+      "duration": 2,
+      "easing": "linear"
+    },
+    {
+      "id": "img2-fadeout",
+      "type": "fadeOut",
+      "target": "img2",
+      "start": 10,
+      "duration": 1
+    },
+    {
+      "id": "img3",
+      "type": "show",
+      "asset": "image3",
+      "start": 10,
+      "duration": 5
+    },
+    {
+      "id": "img3-fadein",
+      "type": "fadeIn",
+      "target": "img3",
+      "start": 10,
+      "duration": 1
+    },
+    {
+      "id": "img3-move",
+      "type": "move",
+      "target": "img3",
+      "from": { "x": 0, "y": 200 },
+      "to": { "x": 0, "y": -50 },
+      "start": 10,
+      "duration": 4,
+      "easing": "easeInOut"
+    },
+    {
+      "id": "img3-scale",
+      "type": "scale",
+      "target": "img3",
+      "from": 1.5,
+      "to": 1,
+      "start": 11,
+      "duration": 3,
+      "easing": "easeOut"
+    },
+    {
+      "id": "img3-rotate",
+      "type": "rotate",
+      "target": "img3",
+      "from": 20,
+      "to": 0,
+      "start": 10,
+      "duration": 4,
+      "easing": "easeInOut"
+    },
+    {
+      "id": "img3-blur",
+      "type": "blur",
+      "target": "img3",
+      "from": 8,
+      "to": 0,
+      "start": 10,
+      "duration": 2,
+      "easing": "easeOut"
+    },
+    {
+      "id": "img3-fadeout",
+      "type": "fadeOut",
+      "target": "img3",
+      "start": 14,
+      "duration": 1
+    },
+    {
+      "id": "title-text",
+      "type": "text",
+      "content": "Stress Test\nMulti-Image Overlap",
+      "x": 100,
+      "y": 80,
+      "fontSize": 72,
+      "color": "#FFD700",
+      "start": 0,
+      "duration": 5
+    },
+    {
+      "id": "caption-text",
+      "type": "subtitle",
+      "content": "Three images overlapping with animations, crossfades, and audio",
+      "start": 5,
+      "duration": 10
+    },
+    {
+      "id": "bgm",
+      "type": "music",
+      "asset": "whoosh",
+      "volume": 0.3,
+      "fadeIn": 2,
+      "fadeOut": 2,
+      "start": 0,
+      "duration": 15
+    },
+    {
+      "id": "sfx1",
+      "type": "sfx",
+      "asset": "whoosh",
+      "volume": 0.8,
+      "start": 5
+    },
+    {
+      "id": "sfx2",
+      "type": "sfx",
+      "asset": "whoosh",
+      "volume": 0.6,
+      "start": 10
+    }
+  ]
+}

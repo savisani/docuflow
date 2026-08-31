@@ -1,0 +1,24 @@
+node_modules/
+out/
+dist/
+.env
+.env.local
+*.log
+.DS_Store
+Thumbs.db
+
+# Python virtual env
+scripts/.venv/
+
+# Test results
+test-results/
+
+# Build artifacts
+*.tsbuildinfo
+
+# Cloudflare Worker
+image-generator/node_modules/
+image-generator/dist/
+
+# Electron builder output
+dist_electron/

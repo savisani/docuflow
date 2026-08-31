@@ -1,0 +1,178 @@
+# DocuFlow Desktop
+
+**Browser-based video editor as Electron desktop app** — powered by local AI models, Cloudflare Workers, and Remotion.
+
+## Executive Summary
+
+DocuFlow is an Electron desktop application that lets users build documentary-style videos by combining:
+- **Local GPU-accelerated Whisper** for audio transcription
+- **Ollama (local LLM)** for AI scene breakdown and storyboard generation
+- **Cloudflare Workers (FLUX/SD)** for image generation
+- **Remotion** for real-time video preview and rendering
+
+### Target Hardware Constraints
+
+| Resource | Constraint |
+|----------|-----------|
+| VRAM     | 4 GB (target: entry-level dGPU / iGPU) |
+| Context Window | `num_ctx: 2048` to stay within VRAM budget |
+| Model Keep-Alive | 15 minutes (`keep_alive: "15m"`) |
+| Network Timeout | 5 minutes per AI request (300,000 ms) |
+| Ollama Server | Localhost:11434, auto-started if offline |
+
+---
+
+## Directory Map
+
+```
+docuflow-desktop/
+├── electron.vite.config.ts          # Electron-Vite build config (main/preload/renderer)
+├── package.json                     # Dependencies & scripts
+├── tsconfig.json                    # Root TypeScript config
+│
+├── src/
+│   ├── main/                        # Electron main process
+│   │   ├── index.ts                 # Window creation, IPC handlers, asset protocol
+│   │   ├── ipc/
+│   │   │   └── assets.ts            # Asset copy/resolve IPC
+│   │   └── services/
+│   │       └── projectFolder.ts     # Project directory management
+│   │
+│   ├── preload/                     # Electron preload (context bridge)
+│   │   ├── index.ts                 # window.docuflow API bridge
+│   │   └── index.d.ts              # TypeScript declarations for preload
+│   │
+│   └── renderer/                    # React frontend (Vite)
+│       ├── index.html               # Entry HTML
+│       ├── tailwind.config.js       # Tailwind CSS config
+│       ├── postcss.config.js        # PostCSS config
+│       ├── tsconfig.json            # Renderer TS config
+│       └── src/
+│           ├── App.tsx              # Root component, tab routing
+│           ├── main.tsx             # ReactDOM entry
+│           ├── app/
+│           │   ├── store.ts         # Zustand global state (undo/redo, assets, commands)
+│           │   └── demo.ts          # Demo data
+│           ├── components/
+│           │   ├── titlebar/        # Custom window title bar
+│           │   ├── editor/          # Studio layout (EditorLayout, CommandEditor)
+│           │   ├── timeline/        # Timeline track rendering
+│           │   ├── preview/         # Asset & video preview panels
+│           │   ├── inspector/       # Right-side property inspector
+│           │   ├── assets/          # Asset library panel
+│           │   ├── commands/        # Command console & results
+│           │   ├── voiceover/       # Voiceover panel
+│           │   ├── generator/       # AI Scene Generator & Image Generator
+│           │   │   ├── SceneGenerator.tsx
+│           │   │   ├── ImageGenerator.tsx
+│           │   │   └── ThinkingInspector.tsx  # VRAM telemetry + AI reasoning console
+│           │   └── ui/              # Reusable primitives (Button, Dialog, Slider, etc.)
+│           ├── engine/              # Core logic
+│           │   ├── commands/        # DSL parser, validator, NLU parser
+│           │   ├── timeline/        # Timeline builder & resolver
+│           │   ├── media/           # Asset loader, findAsset
+│           │   ├── animation/       # Interpolation, easing
+│           │   └── transcription/   # Whisper local provider, auto-register
+│           ├── services/
+│           │   └── aiService.ts     # Ollama / OpenRouter / Gemini AI providers
+│           ├── utils/               # cloudflareApi, geminiApi, format, configStorage
+│           ├── types/               # TypeScript types (assets, project, timeline)
+│           ├── design/              # Design tokens, global CSS
+│           ├── remotion/            # Remotion composition & layers
+│           └── hooks/               # Custom React hooks
+│
+├── scripts/                         # Python scripts (Whisper transcription, SD generation)
+│   ├── generate_local.py            # Stable Diffusion local generation
+│   ├── transcribe.py                # Whisper transcription
+│   └── .venv/                       # Python virtual environment
+│
+├── image-generator/                 # Cloudflare Worker for FLUX/SD image generation
+│   ├── src/index.ts                 # Worker entry point
+│   ├── wrangler.jsonc               # Cloudflare Wrangler config
+│   └── test/                        # Worker tests
+│
+├── patches/                         # Patch files for dependencies
+│   └── electron-vite+3.1.0.patch
+│
+├── out/                             # Built output (main, preload, renderer)
+└── resources/                       # App icons, resources for packaging
+```
+
+---
+
+## Subsystem Status
+
+| Subsystem | Status | Description |
+|-----------|--------|-------------|
+| **Timeline Studio** | ✅ Active | Multi-track editor with drag-and-drop, undo/redo, command DSL |
+| **AI Image Generator** | ✅ Active | Cloudflare Workers (FLUX/SD Schnell) with batch generation |
+| **Local GPU Whisper Transcriber** | ✅ Active | Python-based, supports tiny/base/small/medium/large-v3 |
+| **AI Scene Breakdown Engine** | ✅ Active | Ollama (local) + OpenRouter + Gemini providers, streaming with `<think>` tag extraction |
+| **Thinking Inspector / VRAM Telemetry** | ✅ Active | Real-time Ollama `/api/ps` VRAM monitor, progress bar, live reasoning console |
+| **Asset Management** | ✅ Active | Drag-drop import, asset library, protocol-based local file serving |
+| **Video Preview (Remotion)** | ✅ Active | Real-time preview with playhead, track visibility toggles |
+| **Voiceover Panel** | ✅ Active | Audio role assignment (voiceover, music, SFX, ambient) |
+| **Custom Title Bar** | ✅ Active | Frameless window with minimize/maximize/close IPC |
+| **Voiceover Transcription** | ✅ Active | Audio-to-text via local Whisper, segment-level timestamps |
+
+---
+
+## Quick Start
+
+```bash
+# Install dependencies
+npm install
+
+# Run in development mode (starts Vite dev server + Electron)
+npm run dev
+
+# Build for production
+npm run build
+
+# Package for distribution
+npm run build:win    # Windows
+npm run build:mac    # macOS
+npm run build:linux  # Linux
+```
+
+---
+
+## AI Provider Configuration
+
+### Ollama (Local, Free)
+- Endpoint: `http://localhost:11434`
+- Auto-starts Ollama if not running
+- Streaming with `stream: true`, `keep_alive: "15m"`, `num_ctx: 2048`
+- 5-minute timeout per request
+- VRAM monitor polls `/api/ps` every 3s during generation
+
+### OpenRouter (Cloud, Free tier)
+- Endpoint: `https://openrouter.ai/api/v1/chat/completions`
+- Supports free models: Llama 3.2, Gemma 2, Mistral 7B
+
+### Gemini (Cloud)
+- Endpoint: `https://generativelanguage.googleapis.com/v1beta`
+- Structured JSON output via `responseMimeType`
+
+---
+
+## Change Ledger
+
+| Date | Change | Files |
+|------|--------|-------|
+| 2026-09-01 | Added streaming Ollama support with `keep_alive`, `num_ctx: 2048`, 5min timeout, `<think>` tag extraction, and `/api/ps` VRAM telemetry | `src/renderer/src/services/aiService.ts` |
+| 2026-09-01 | Created ThinkingInspector panel with VRAM monitor, progress indicator, and live AI reasoning console | `src/renderer/src/components/generator/ThinkingInspector.tsx` |
+| 2026-09-01 | Fixed Electron window not showing on startup (added `did-finish-load` fallback) | `src/main/index.ts` |
+| 2026-09-01 | Initial README.md with full directory map, subsystem status, and change ledger | `README.md` |
+
+---
+
+## Tech Stack
+
+- **Electron** 36.x + **electron-vite** 3.x
+- **React** 19.x + **TypeScript** 5.8
+- **Tailwind CSS** 3.x
+- **Zustand** 5.x (state management with undo/redo)
+- **Remotion** 4.x (video rendering)
+- **Lucide React** (icons)
+- **Playwright** (E2E testing)

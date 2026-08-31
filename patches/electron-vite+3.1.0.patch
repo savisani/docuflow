@@ -1,0 +1,13 @@
+diff --git a/node_modules/electron-vite/dist/chunks/lib-DyJQBCfr.mjs b/node_modules/electron-vite/dist/chunks/lib-DyJQBCfr.mjs
+index 0da83c7..74a4909 100644
+--- a/node_modules/electron-vite/dist/chunks/lib-DyJQBCfr.mjs
++++ b/node_modules/electron-vite/dist/chunks/lib-DyJQBCfr.mjs
+@@ -218,7 +218,7 @@ function startElectron(root) {
+         args.push('--no-sandbox');
+     }
+     const entry = process.env.ELECTRON_ENTRY || '.';
+-    const ps = spawn(electronPath, [entry].concat(args), { stdio: 'inherit' });
++      const ps = spawn(electronPath, [entry].concat(args), { stdio: 'inherit', windowsHide: true });
+     ps.on('close', process.exit);
+     return ps;
+ }
