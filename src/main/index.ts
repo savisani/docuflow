@@ -1,6 +1,7 @@
 import { app, BrowserWindow, shell, ipcMain, protocol, dialog } from 'electron'
 import { join, extname } from 'path'
-import { readFile, writeFile, existsSync, mkdirSync, readdirSync, statSync } from 'fs/promises'
+import { readFile, writeFile } from 'fs/promises'
+import { existsSync, mkdirSync, readdirSync, statSync } from 'fs'
 import { spawn } from 'child_process'
 import { is } from '@electron-toolkit/utils'
 import { tmpdir } from 'os'
@@ -201,10 +202,9 @@ function getPythonPath(): string {
 }
 
 function getLocalModelPath(): string | null {
-  const fs = require('fs')
   // Check for locally downloaded model in scripts/models/
   const localModel = join(__dirname, '../../scripts/models/stable-diffusion-v1-5')
-  if (fs.existsSync(localModel) && fs.existsSync(join(localModel, 'model_index.json'))) {
+  if (existsSync(localModel) && existsSync(join(localModel, 'model_index.json'))) {
     return localModel
   }
   return null
