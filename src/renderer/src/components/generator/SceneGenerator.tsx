@@ -11,7 +11,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { Asset } from '../../types/assets';
 import { Command } from '../../engine/commands/types';
 import { compileSceneDSL, type SceneDSL, type CompileContext } from '../../engine/sceneDSL';
-import { generateWithCloudflare, CLOUDFLARE_MODELS, CloudflareConfig } from '../../utils/cloudflareApi';
+import { CLOUDFLARE_MODELS, CloudflareConfig } from '../../utils/cloudflareApi';
+import { generateImage, type ImageProvider } from '../../services/imageGenerationService';
+import { listLocalModels, detectHardware, type LocalModel, type LocalHardware } from '../../services/localImageProvider';
 import {
   generateScenesStream, fetchOllamaModels, offloadModel, chatWithModel, chatWithProvider,
   clearGpuCache,
@@ -161,6 +163,20 @@ export const SceneGenerator: React.FC = () => {
   // -- Cloudflare config (for image generation) --
   const [cloudflareConfig] = useState<CloudflareConfig>(loadCloudflareConfig);
   const [advancedSettings] = useState(loadAdvancedSettings);
+
+  // -- Image provider selection --
+  const [imageProvider, setImageProvider] = useState<ImageProvider>(() => {
+    return (localStorage.getItem('docuflow-scene-image-provider') as ImageProvider) || 'cloudflare';
+  });
+
+  // -- Local model state --
+  const [localModels, setLocalModels] = useState<LocalModel[]>([]);
+  const [selectedLocalModel, setSelectedLocalModel] = useState<string>(() => {
+    return localStorage.getItem('docuflow-scene-local-model') || '';
+  });
+  const [localHardware, setLocalHardware] = useState<LocalHardware | null>(null);
+  const [localDevice, setLocalDevice] = useState<'auto' | 'gpu' | 'cpu' | 'directml'>('auto');
+  const [showLocalSettings, setShowLocalSettings] = useState(false);
 
   // -- UI state --
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -321,15 +337,20 @@ export const SceneGenerator: React.FC = () => {
     setScenes(updated);
 
     try {
-      if (!cloudflareConfig.workerUrl) throw new Error('Cloudflare Worker URL not configured');
-      const result = await generateWithCloudflare(cloudflareConfig, {
+      const result = await generateImage({
         prompt: scene.imagePrompt,
+        source: 'scene-generator',
+        sceneId: String(sceneId),
+        provider: imageProvider,
+        cloudflareConfig: imageProvider === 'cloudflare' ? cloudflareConfig : undefined,
         model: advancedSettings.model,
         steps: advancedSettings.steps,
+        localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
+        device: imageProvider === 'local' ? localDevice : undefined,
       });
 
-      if (result.success && result.imageUrls && result.imageUrls.length > 0) {
-        updated[idx] = { ...scene, status: 'done', imageUrl: result.imageUrls[0] };
+      if (result.success && result.images.length > 0) {
+        updated[idx] = { ...scene, status: 'done', imageUrl: result.images[0].url };
       } else {
         updated[idx] = { ...scene, status: 'error', error: result.error || 'Failed' };
       }
@@ -338,7 +359,7 @@ export const SceneGenerator: React.FC = () => {
     }
 
     setScenes([...updated]);
-  }, [scenes, cloudflareConfig, advancedSettings]);
+  }, [scenes, imageProvider, cloudflareConfig, advancedSettings, selectedLocalModel, localDevice]);
 
   // -----------------------------------------------------------------------
   // Step 3: Batch generate all
@@ -359,15 +380,20 @@ export const SceneGenerator: React.FC = () => {
       setScenes([...updated]);
 
       try {
-        if (!cloudflareConfig.workerUrl) throw new Error('Cloudflare Worker URL not configured');
-        const result = await generateWithCloudflare(cloudflareConfig, {
+        const result = await generateImage({
           prompt: updated[i].imagePrompt,
+          source: 'scene-generator',
+          sceneId: String(updated[i].sceneId),
+          provider: imageProvider,
+          cloudflareConfig: imageProvider === 'cloudflare' ? cloudflareConfig : undefined,
           model: advancedSettings.model,
           steps: advancedSettings.steps,
+          localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
+          device: imageProvider === 'local' ? localDevice : undefined,
         });
 
-        if (result.success && result.imageUrls && result.imageUrls.length > 0) {
-          updated[i] = { ...updated[i], status: 'done', imageUrl: result.imageUrls[0] };
+        if (result.success && result.images.length > 0) {
+          updated[i] = { ...updated[i], status: 'done', imageUrl: result.images[0].url };
         } else {
           updated[i] = { ...updated[i], status: 'error', error: result.error || 'Failed' };
         }
@@ -472,7 +498,7 @@ export const SceneGenerator: React.FC = () => {
     } finally {
       setGeneratingAll(false);
     }
-  }, [scenes, cloudflareConfig, advancedSettings, setActiveTab]);
+  }, [scenes, imageProvider, cloudflareConfig, advancedSettings, selectedLocalModel, localDevice, setActiveTab]);
 
   // -----------------------------------------------------------------------
   // Edit helpers
@@ -1256,6 +1282,76 @@ export const SceneGenerator: React.FC = () => {
               </div>
             )}
 
+            {/* Image Provider Selection */}
+            {step2Done && (
+              <div className="mb-3 p-2.5 rounded-lg bg-slate-800/40 border border-white/5">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-medium text-slate-300">Image Provider</span>
+                  <div className="flex items-center bg-slate-800/60 rounded-md border border-white/5 p-0.5">
+                    <button
+                      onClick={() => { setImageProvider('cloudflare'); localStorage.setItem('docuflow-scene-image-provider', 'cloudflare'); }}
+                      className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-medium transition-all ${
+                        imageProvider === 'cloudflare'
+                          ? 'bg-purple-500/20 text-purple-300'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Globe size={10} />
+                      <span>Cloud</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setImageProvider('local');
+                        localStorage.setItem('docuflow-scene-image-provider', 'local');
+                        // Load models if not loaded
+                        if (localModels.length === 0) {
+                          listLocalModels().then(setLocalModels);
+                          detectHardware().then(setLocalHardware);
+                        }
+                      }}
+                      className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-medium transition-all ${
+                        imageProvider === 'local'
+                          ? 'bg-emerald-500/20 text-emerald-300'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Cpu size={10} />
+                      <span>Local</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Local model settings */}
+                {imageProvider === 'local' && (
+                  <div className="mt-2 space-y-2">
+                    {localHardware && (
+                      <div className="text-[8px] text-slate-500">
+                        {localHardware.device_name} {localHardware.vram_mb > 0 ? `(${Math.round(localHardware.vram_mb / 1024)} GB)` : ''}
+                      </div>
+                    )}
+                    <select
+                      value={selectedLocalModel}
+                      onChange={(e) => {
+                        setSelectedLocalModel(e.target.value);
+                        localStorage.setItem('docuflow-scene-local-model', e.target.value);
+                      }}
+                      className="w-full bg-slate-700/50 border border-white/10 rounded-md px-2 py-1.5 text-[10px] text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    >
+                      <option value="">Select a local model...</option>
+                      {localModels.map((model) => (
+                        <option key={model.path} value={model.path}>
+                          {model.name} ({model.size_label})
+                        </option>
+                      ))}
+                    </select>
+                    {localModels.length === 0 && (
+                      <p className="text-[9px] text-slate-600">No local models found. Import models in Settings.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Batch generate */}
             {step2Done && (
               <div>
@@ -1401,7 +1497,7 @@ export const SceneGenerator: React.FC = () => {
                           variant="secondary"
                           size="sm"
                           onClick={() => handleGenerateSingle(scene.sceneId)}
-                          disabled={scene.status === 'generating' || !cloudflareConfig.workerUrl}
+                          disabled={scene.status === 'generating' || (imageProvider === 'cloudflare' && !cloudflareConfig.workerUrl) || (imageProvider === 'local' && !selectedLocalModel)}
                           loading={scene.status === 'generating'}
                           icon={<ImageIcon size={10} />}
                           className="px-2.5 py-1 text-[9px] border border-white/10 hover:border-amber-500/30 hover:text-amber-300"

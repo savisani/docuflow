@@ -1,6 +1,6 @@
 import { app, BrowserWindow, shell, ipcMain, protocol, dialog } from 'electron'
 import { join, extname } from 'path'
-import { readFile, writeFile } from 'fs/promises'
+import { readFile, writeFile, existsSync, mkdirSync, readdirSync, statSync } from 'fs/promises'
 import { spawn } from 'child_process'
 import { is } from '@electron-toolkit/utils'
 import { tmpdir } from 'os'
@@ -208,6 +208,209 @@ function getLocalModelPath(): string | null {
     return localModel
   }
   return null
+}
+
+function getModelsDir(): string {
+  if (is.dev) {
+    return join(__dirname, '../../scripts/models')
+  }
+  return join(process.resourcesPath, 'scripts/models')
+}
+
+function registerLocalModelManagerIpc(): void {
+  // List installed local models
+  ipcMain.handle('local-models:list', async () => {
+    try {
+      const pythonPath = getPythonPath()
+      const scriptPath = getScriptPath()
+      const modelsDir = getModelsDir()
+
+      return new Promise((resolve) => {
+        const proc = spawn(pythonPath, [
+          scriptPath, 'list-models', '--models_dir', modelsDir
+        ], { stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000 })
+
+        let stdout = ''
+        proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
+        proc.on('close', (code) => {
+          if (code === 0) {
+            try {
+              resolve(JSON.parse(stdout.trim()))
+            } catch {
+              resolve({ models: [] })
+            }
+          } else {
+            resolve({ models: [] })
+          }
+        })
+        proc.on('error', () => resolve({ models: [] }))
+      })
+    } catch {
+      return { models: [] }
+    }
+  })
+
+  // Detect hardware capabilities
+  ipcMain.handle('local-models:detect-hardware', async () => {
+    try {
+      const pythonPath = getPythonPath()
+      const scriptPath = getScriptPath()
+
+      return new Promise((resolve) => {
+        const proc = spawn(pythonPath, [
+          scriptPath, 'detect-hardware'
+        ], { stdio: ['pipe', 'pipe', 'pipe'], timeout: 15000 })
+
+        let stdout = ''
+        proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
+        proc.on('close', (code) => {
+          if (code === 0) {
+            try {
+              resolve(JSON.parse(stdout.trim()))
+            } catch {
+              resolve({ cuda: false, directml: false, cpu: true, vram_mb: 0, device_name: 'CPU' })
+            }
+          } else {
+            resolve({ cuda: false, directml: false, cpu: true, vram_mb: 0, device_name: 'CPU' })
+          }
+        })
+        proc.on('error', () => resolve({ cuda: false, directml: false, cpu: true, vram_mb: 0, device_name: 'CPU' }))
+      })
+    } catch {
+      return { cuda: false, directml: false, cpu: true, vram_mb: 0, device_name: 'CPU' }
+    }
+  })
+
+  // Select a model directory (import)
+  ipcMain.handle('local-models:import', async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Select Model Directory',
+      properties: ['openDirectory'],
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, error: 'Cancelled' }
+    }
+    const selectedPath = result.filePaths[0]
+    // Validate it looks like a model directory
+    const modelIndex = join(selectedPath, 'model_index.json')
+    if (!existsSync(modelIndex)) {
+      return { success: false, error: 'Invalid model: model_index.json not found' }
+    }
+    return { success: true, path: selectedPath }
+  })
+
+  // Generate image with progress (enhanced version)
+  ipcMain.handle('image:generate-local-enhanced', async (event, params: {
+    prompt: string
+    width: number
+    height: number
+    outputPath: string
+    modelPath: string
+    steps?: number
+    seed?: number
+    device?: string
+  }): Promise<{ success: boolean; path?: string; error?: string }> => {
+    return new Promise((resolve) => {
+      const scriptPath = getScriptPath()
+      const pythonPath = getPythonPath()
+
+      let resolvedOutputPath = params.outputPath
+      if (resolvedOutputPath.includes('%TEMP%')) {
+        resolvedOutputPath = resolvedOutputPath.replace(/%TEMP%/g, tmpdir())
+      }
+
+      const args = [
+        scriptPath, 'generate',
+        '--prompt', params.prompt,
+        '--output_path', resolvedOutputPath,
+        '--width', String(params.width),
+        '--height', String(params.height),
+        '--steps', String(params.steps || 20),
+        '--model_path', params.modelPath,
+        '--device', params.device || 'auto',
+      ]
+
+      if (params.seed !== undefined && params.seed >= 0) {
+        args.push('--seed', String(params.seed))
+      }
+
+      const proc = spawn(pythonPath, args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 600000, // 10 minutes for slow generation
+      })
+
+      let stdout = ''
+      let stderr = ''
+
+      proc.stdout.on('data', (data: Buffer) => {
+        const msg = data.toString()
+        stdout += msg
+        // Forward progress/status lines to renderer
+        const lines = msg.trim().split('\n')
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line)
+            if (parsed.type === 'progress' || parsed.type === 'status') {
+              event.sender.send('local-generation:progress', parsed)
+            }
+          } catch {}
+        }
+      })
+
+      proc.stderr.on('data', (data: Buffer) => {
+        stderr += data.toString()
+      })
+
+      proc.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const lastLine = stdout.trim().split('\n').pop() || '{}'
+            resolve(JSON.parse(lastLine))
+          } catch {
+            resolve({ success: false, error: 'Failed to parse output' })
+          }
+        } else {
+          let errorMsg = `Process exited with code ${code}`
+          try {
+            const errResult = JSON.parse(stderr.trim())
+            errorMsg = errResult.error || errorMsg
+          } catch {
+            if (stderr.trim()) errorMsg = stderr.trim().slice(0, 500)
+          }
+          resolve({ success: false, error: errorMsg })
+        }
+      })
+
+      proc.on('error', (err) => {
+        resolve({ success: false, error: `Failed to start Python: ${err.message}` })
+      })
+
+      // Store process reference for cancellation
+      const genId = `gen-${Date.now()}`
+      ;(global as any).__localGenProcesses = (global as any).__localGenProcesses || {}
+      ;(global as any).__localGenProcesses[genId] = proc
+
+      proc.on('close', () => {
+        delete (global as any).__localGenProcesses?.[genId]
+      })
+    })
+  })
+
+  // Cancel ongoing generation
+  ipcMain.handle('local-models:cancel-generation', async () => {
+    const processes = (global as any).__localGenProcesses || {}
+    for (const id of Object.keys(processes)) {
+      try {
+        processes[id].kill('SIGTERM')
+      } catch {}
+    }
+    return { success: true }
+  })
+
+  // Get default models directory
+  ipcMain.handle('local-models:get-dir', async () => {
+    return getModelsDir()
+  })
 }
 
 function registerLocalGenerationIpc(): void {
@@ -446,6 +649,7 @@ app.whenReady().then(() => {
   registerWindowControls()
   registerProjectIpc()
   registerLocalGenerationIpc()
+  registerLocalModelManagerIpc()
   registerTranscriptionIpc()
   registerSaveImageIpc()
   registerAssetIpc()

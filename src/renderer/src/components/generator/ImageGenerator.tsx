@@ -1,11 +1,10 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Settings, Wand2, Image as ImageIcon, Download, Film, Plus, Cloud, X, Sliders, Sparkles, ZoomIn, Save, CheckCircle, FolderOpen, RefreshCw } from 'lucide-react';
+import { Settings, Wand2, Image as ImageIcon, Download, Film, Plus, Cloud, X, Sliders, Sparkles, ZoomIn, Save, CheckCircle, FolderOpen, RefreshCw, Cpu, Monitor } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { Button } from '../ui';
-import { v4 as uuidv4 } from 'uuid';
-import { Asset } from '../../types/assets';
-import { generateLogicalId } from '../../engine/media/findAsset';
-import { generateWithCloudflare, CLOUDFLARE_MODELS, CloudflareConfig } from '../../utils/cloudflareApi';
+import { CLOUDFLARE_MODELS, CloudflareConfig } from '../../utils/cloudflareApi';
+import { generateImage, regenerateImage, ImageProvider } from '../../services/imageGenerationService';
+import { listLocalModels, detectHardware, importModel, LocalModel, LocalHardware, getRecommendedSettings, QUALITY_PRESETS, QualityPreset } from '../../services/localImageProvider';
 
 const ASPECT_RATIOS = [
   { id: '16:9', label: '16:9', width: 16, height: 9 },
@@ -53,49 +52,6 @@ function setSaveLocation(path: string) {
   localStorage.setItem('docuflow-save-location', path);
 }
 
-function cropImageToAspectRatio(imageUrl: string, ratioW: number, ratioH: number): Promise<string> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const srcW = img.naturalWidth;
-      const srcH = img.naturalHeight;
-      const targetRatio = ratioW / ratioH;
-      const srcRatio = srcW / srcH;
-
-      let sx: number, sy: number, sw: number, sh: number;
-      if (srcRatio > targetRatio) {
-        sh = srcH;
-        sw = srcH * targetRatio;
-        sy = 0;
-        sx = (srcW - sw) / 2;
-      } else {
-        sw = srcW;
-        sh = srcW / targetRatio;
-        sx = 0;
-        sy = (srcH - sh) / 2;
-      }
-
-      const canvas = document.createElement('canvas');
-      canvas.width = 1024;
-      canvas.height = Math.round(1024 * ratioH / ratioW);
-      const ctx = canvas.getContext('2d');
-      if (!ctx) { resolve(imageUrl); return; }
-
-      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob((blob) => {
-        if (blob) {
-          resolve(URL.createObjectURL(blob));
-        } else {
-          resolve(imageUrl);
-        }
-      }, 'image/png', 1.0);
-    };
-    img.onerror = () => resolve(imageUrl);
-    img.src = imageUrl;
-  });
-}
-
 async function blobUrlToBase64(url: string): Promise<string> {
   const resp = await fetch(url);
   const blob = await resp.blob();
@@ -111,7 +67,7 @@ async function blobUrlToBase64(url: string): Promise<string> {
 }
 
 export const ImageGenerator: React.FC = () => {
-  const { generatedImages, addGeneratedImage, addToTimeline, addAsset } = useDocuFlowStore();
+  const { generatedImages, addToTimeline } = useDocuFlowStore();
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -133,6 +89,22 @@ export const ImageGenerator: React.FC = () => {
   const [prePolishPrompt, setPrePolishPrompt] = useState('');
   const [isPolished, setIsPolished] = useState(false);
 
+  // Provider selection
+  const [imageProvider, setImageProvider] = useState<ImageProvider>(() => {
+    return (localStorage.getItem('docuflow-image-provider') as ImageProvider) || 'cloudflare';
+  });
+
+  // Local model state
+  const [localModels, setLocalModels] = useState<LocalModel[]>([]);
+  const [selectedLocalModel, setSelectedLocalModel] = useState<string>(() => {
+    return localStorage.getItem('docuflow-local-model-path') || '';
+  });
+  const [localHardware, setLocalHardware] = useState<LocalHardware | null>(null);
+  const [localQualityPreset, setLocalQualityPreset] = useState<QualityPreset>('balanced');
+  const [localDevice, setLocalDevice] = useState<'auto' | 'gpu' | 'cpu' | 'directml'>('auto');
+  const [localProgress, setLocalProgress] = useState<{ percent: number; message: string } | null>(null);
+  const [showLocalModelManager, setShowLocalModelManager] = useState(false);
+
   const [lightboxImage, setLightboxImage] = useState<{ url: string; prompt: string; aspectRatio: string } | null>(null);
 
   // Regeneration state
@@ -142,8 +114,26 @@ export const ImageGenerator: React.FC = () => {
 
   const [saveLocation, setSaveLocationState] = useState(loadSaveLocation);
 
+  // Derived values — must be before any useCallback that references them
+  const currentModel = CLOUDFLARE_MODELS.find(m => m.id === advancedSettings.model);
+  const selectedRatio = ASPECT_RATIOS.find(r => r.id === selectedAspectRatio) ?? ASPECT_RATIOS[2];
+
   useEffect(() => { saveCloudflareConfig(cloudflareConfig); }, [cloudflareConfig]);
   useEffect(() => { saveAdvancedSettings(advancedSettings); }, [advancedSettings]);
+  useEffect(() => { localStorage.setItem('docuflow-image-provider', imageProvider); }, [imageProvider]);
+  useEffect(() => { localStorage.setItem('docuflow-local-model-path', selectedLocalModel); }, [selectedLocalModel]);
+
+  // Load local models and hardware when switching to local provider
+  useEffect(() => {
+    if (imageProvider === 'local') {
+      listLocalModels().then(setLocalModels);
+      detectHardware().then((hw) => {
+        setLocalHardware(hw);
+        const rec = getRecommendedSettings(hw);
+        setLocalDevice(rec.device);
+      });
+    }
+  }, [imageProvider]);
 
   useEffect(() => {
     if (toast) {
@@ -161,36 +151,44 @@ export const ImageGenerator: React.FC = () => {
   // Regeneration handler
   const handleRegenerate = useCallback(async (imageId: string) => {
     const image = generatedImages.find(img => img.id === imageId);
-    if (!image || !cloudflareConfig.workerUrl) return;
+    if (!image) return;
+
+    if (imageProvider === 'cloudflare' && !cloudflareConfig.workerUrl) return;
+    if (imageProvider === 'local' && !selectedLocalModel) return;
 
     // Start regeneration - preserve original
     setRegeneratingId(imageId);
     setRegeneratePrompt(image.prompt);
     setRegenerateOriginalUrl(image.url);
     setError(null);
+    setLocalProgress(null);
 
     try {
-      const result = await generateWithCloudflare(cloudflareConfig, {
-        prompt: image.prompt.trim(),
-        model: advancedSettings.model,
-        steps: advancedSettings.steps,
-        aspectRatio: image.aspectRatio,
-        negativePrompt: negativePrompt || undefined,
-      });
-
-      const croppedUrl = await cropImageToAspectRatio(
-        result.url,
-        selectedRatio.width,
-        selectedRatio.height,
+      const preset = QUALITY_PRESETS[localQualityPreset];
+      const result = await regenerateImage(
+        imageId,
+        image.prompt,
+        {
+          provider: imageProvider,
+          cloudflareConfig,
+          model: advancedSettings.model,
+          steps: imageProvider === 'local' ? preset.steps : advancedSettings.steps,
+          negativePrompt: negativePrompt || undefined,
+          localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
+          device: imageProvider === 'local' ? localDevice : undefined,
+          onProgress: imageProvider === 'local' ? (p) => {
+            if (p.type === 'progress' && p.percent !== undefined) {
+              setLocalProgress({ percent: p.percent, message: `Regenerating... ${p.percent}%` });
+            } else if (p.type === 'status' && p.message) {
+              setLocalProgress({ percent: 0, message: p.message });
+            }
+          } : undefined,
+        }
       );
 
-      // Replace the original with the new image
-      const updatedImages = generatedImages.map(img =>
-        img.id === imageId
-          ? { ...img, url: croppedUrl, prompt: image.prompt }
-          : img
-      );
-      useDocuFlowStore.setState({ generatedImages: updatedImages });
+      if (!result.success) {
+        throw new Error(result.error || 'Regeneration failed');
+      }
 
       setToast({ message: 'Image regenerated successfully', type: 'success' });
     } catch (err) {
@@ -201,8 +199,9 @@ export const ImageGenerator: React.FC = () => {
       setRegeneratingId(null);
       setRegeneratePrompt('');
       setRegenerateOriginalUrl(null);
+      setLocalProgress(null);
     }
-  }, [generatedImages, cloudflareConfig, advancedSettings, negativePrompt, selectedRatio]);
+  }, [generatedImages, imageProvider, cloudflareConfig, selectedLocalModel, advancedSettings, negativePrompt, localQualityPreset, localDevice]);
 
   const handleSelectFolder = useCallback(async () => {
     const result = await window.docuflow.selectFolder();
@@ -212,9 +211,6 @@ export const ImageGenerator: React.FC = () => {
       setToast({ message: `Save location set to ${result.filePath}`, type: 'success' });
     }
   }, []);
-
-  const currentModel = CLOUDFLARE_MODELS.find(m => m.id === advancedSettings.model);
-  const selectedRatio = ASPECT_RATIOS.find(r => r.id === selectedAspectRatio) ?? ASPECT_RATIOS[2];
 
   const handleMagicPolish = useCallback(() => {
     const trimmed = prompt.trim();
@@ -235,51 +231,48 @@ export const ImageGenerator: React.FC = () => {
 
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim() || isGenerating) return;
-    if (!cloudflareConfig.workerUrl) {
+
+    if (imageProvider === 'cloudflare' && !cloudflareConfig.workerUrl) {
       setError('Please configure your Cloudflare Worker URL in Settings first.');
+      return;
+    }
+
+    if (imageProvider === 'local' && !selectedLocalModel) {
+      setError('Please select a local model first.');
       return;
     }
 
     setIsGenerating(true);
     setError(null);
+    setLocalProgress(null);
 
     try {
-      const result = await generateWithCloudflare(cloudflareConfig, {
+      const preset = QUALITY_PRESETS[localQualityPreset];
+      const result = await generateImage({
         prompt: prompt.trim(),
+        aspectRatio: selectedAspectRatio,
+        negativePrompt,
+        source: 'image-generator',
+        provider: imageProvider,
+        cloudflareConfig,
         model: advancedSettings.model,
-        steps: advancedSettings.steps,
-        negative_prompt: negativePrompt,
-        count: batchSize,
+        steps: imageProvider === 'local' ? preset.steps : advancedSettings.steps,
+        count: imageProvider === 'local' ? 1 : batchSize,
+        localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
+        device: imageProvider === 'local' ? localDevice : undefined,
+        width: imageProvider === 'local' ? preset.width : undefined,
+        height: imageProvider === 'local' ? preset.height : undefined,
+        onProgress: imageProvider === 'local' ? (p) => {
+          if (p.type === 'progress' && p.percent !== undefined) {
+            setLocalProgress({ percent: p.percent, message: `Generating... ${p.percent}%` });
+          } else if (p.type === 'status' && p.message) {
+            setLocalProgress({ percent: 0, message: p.message });
+          }
+        } : undefined,
       });
 
-      if (!result.success || !result.imageUrls || result.imageUrls.length === 0) {
+      if (!result.success) {
         throw new Error(result.error || 'Image generation failed');
-      }
-
-      const basePrompt = prompt.trim();
-      for (const imageUrl of result.imageUrls) {
-        const croppedUrl = await cropImageToAspectRatio(imageUrl, selectedRatio.width, selectedRatio.height);
-        const imageId = uuidv4();
-        const image = {
-          id: imageId,
-          prompt: basePrompt,
-          style: 'default',
-          aspectRatio: selectedAspectRatio,
-          url: croppedUrl,
-          timestamp: Date.now(),
-        };
-        addGeneratedImage(image);
-
-        const currentAssets = useDocuFlowStore.getState().assets;
-        const asset: Asset = {
-          id: imageId,
-          logicalId: generateLogicalId('image', currentAssets),
-          filename: `generated-${Date.now()}-${imageId.slice(0, 8)}.png`,
-          type: 'image',
-          mimeType: 'image/png',
-          url: croppedUrl,
-        };
-        addAsset(asset);
       }
 
       setPrompt('');
@@ -291,8 +284,9 @@ export const ImageGenerator: React.FC = () => {
       console.error('Image generation failed:', err);
     } finally {
       setIsGenerating(false);
+      setLocalProgress(null);
     }
-  }, [prompt, isGenerating, addGeneratedImage, addAsset, cloudflareConfig, advancedSettings, selectedAspectRatio, selectedRatio, batchSize, negativePrompt]);
+  }, [prompt, isGenerating, imageProvider, cloudflareConfig, selectedLocalModel, advancedSettings, selectedAspectRatio, batchSize, negativePrompt, localQualityPreset, localDevice]);
 
   const handleDownload = useCallback(async (url: string, filename: string) => {
     try {
@@ -382,15 +376,48 @@ export const ImageGenerator: React.FC = () => {
           {/* Header row */}
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center">
-                <Cloud size={14} className="text-white" />
+              <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                imageProvider === 'local'
+                  ? 'bg-gradient-to-br from-emerald-500 to-teal-600'
+                  : 'bg-gradient-to-br from-purple-500 to-pink-600'
+              }`}>
+                {imageProvider === 'local' ? <Cpu size={14} className="text-white" /> : <Cloud size={14} className="text-white" />}
               </div>
               <div>
-                <h1 className="text-[13px] font-bold text-white">AI Image Generator</h1>
-                <p className="text-[10px] text-slate-400">Powered by Cloudflare Workers AI</p>
+                <h1 className="text-[13px] font-bold text-white">
+                  {imageProvider === 'local' ? 'Local Image Generator' : 'AI Image Generator'}
+                </h1>
+                <p className="text-[10px] text-slate-400">
+                  {imageProvider === 'local' ? 'Offline Stable Diffusion' : 'Powered by Cloudflare Workers AI'}
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-1.5">
+              {/* Provider Toggle */}
+              <div className="flex items-center bg-slate-800/60 rounded-md border border-white/5 p-0.5">
+                <button
+                  onClick={() => setImageProvider('cloudflare')}
+                  className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-medium transition-all ${
+                    imageProvider === 'cloudflare'
+                      ? 'bg-purple-500/20 text-purple-300'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Cloud size={10} />
+                  <span>Cloud</span>
+                </button>
+                <button
+                  onClick={() => setImageProvider('local')}
+                  className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-medium transition-all ${
+                    imageProvider === 'local'
+                      ? 'bg-emerald-500/20 text-emerald-300'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Cpu size={10} />
+                  <span>Local</span>
+                </button>
+              </div>
               <button
                 onClick={() => setShowAdvanced(!showAdvanced)}
                 className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all ${
@@ -422,27 +449,138 @@ export const ImageGenerator: React.FC = () => {
                 </button>
               </div>
 
-              {/* Worker URL */}
-              <div className="mb-3">
-                <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1 block">
-                  Cloudflare Worker URL
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    value={tempWorkerUrl}
-                    onChange={(e) => setTempWorkerUrl(e.target.value)}
-                    placeholder="https://your-worker.workers.dev"
-                    className="flex-1 bg-slate-700/50 border border-white/10 rounded-md px-2 py-1.5 text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
-                  />
-                  <Button variant="primary" onClick={handleSaveSettings} className="px-3 py-1.5 text-[10px]">
-                    Save
-                  </Button>
-                </div>
-                <p className="mt-1 text-[9px] text-slate-500">Worker: https://image-generator.docuflowyt.workers.dev</p>
-              </div>
+              {/* Cloudflare Settings */}
+              {imageProvider === 'cloudflare' && (
+                <>
+                  {/* Worker URL */}
+                  <div className="mb-3">
+                    <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1 block">
+                      Cloudflare Worker URL
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="url"
+                        value={tempWorkerUrl}
+                        onChange={(e) => setTempWorkerUrl(e.target.value)}
+                        placeholder="https://your-worker.workers.dev"
+                        className="flex-1 bg-slate-700/50 border border-white/10 rounded-md px-2 py-1.5 text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      />
+                      <Button variant="primary" onClick={handleSaveSettings} className="px-3 py-1.5 text-[10px]">
+                        Save
+                      </Button>
+                    </div>
+                    <p className="mt-1 text-[9px] text-slate-500">Worker: https://image-generator.docuflowyt.workers.dev</p>
+                  </div>
+                </>
+              )}
 
-              {/* Save Location */}
+              {/* Local Model Settings */}
+              {imageProvider === 'local' && (
+                <>
+                  {/* Hardware Info */}
+                  {localHardware && (
+                    <div className="mb-3 p-2 rounded-md bg-slate-700/30 border border-white/5">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Monitor size={12} className="text-slate-400" />
+                        <span className="text-[10px] font-medium text-slate-300">Hardware</span>
+                      </div>
+                      <p className="text-[9px] text-slate-400">
+                        {localHardware.device_name} {localHardware.vram_mb > 0 ? `(${Math.round(localHardware.vram_mb / 1024)} GB VRAM)` : ''}
+                      </p>
+                      <div className="flex gap-1.5 mt-1.5">
+                        {localHardware.cuda && <span className="text-[8px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-300">CUDA</span>}
+                        {localHardware.directml && <span className="text-[8px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300">DirectML</span>}
+                        <span className="text-[8px] px-1.5 py-0.5 rounded bg-slate-600/50 text-slate-300">CPU</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Model Selection */}
+                  <div className="mb-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider">
+                        Local Model
+                      </label>
+                      <button
+                        onClick={async () => {
+                          const result = await importModel();
+                          if (result.success && result.path) {
+                            setSelectedLocalModel(result.path);
+                            const models = await listLocalModels();
+                            setLocalModels(models);
+                            setToast({ message: 'Model imported', type: 'success' });
+                          }
+                        }}
+                        className="text-[9px] text-purple-400 hover:text-purple-300"
+                      >
+                        + Import Model
+                      </button>
+                    </div>
+                    {localModels.length > 0 ? (
+                      <select
+                        value={selectedLocalModel}
+                        onChange={(e) => setSelectedLocalModel(e.target.value)}
+                        className="w-full bg-slate-700/50 border border-white/10 rounded-md px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      >
+                        <option value="">Select a model...</option>
+                        {localModels.map((model) => (
+                          <option key={model.path} value={model.path}>
+                            {model.name} ({model.size_label})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="text-[10px] text-slate-500 py-2 text-center border border-dashed border-white/10 rounded-md">
+                        No models found. Click "Import Model" to add one.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Quality Preset */}
+                  <div className="mb-3">
+                    <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1 block">
+                      Quality Preset
+                    </label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {(Object.entries(QUALITY_PRESETS) as [QualityPreset, typeof QUALITY_PRESETS[QualityPreset]][]).map(([key, preset]) => (
+                        <button
+                          key={key}
+                          onClick={() => setLocalQualityPreset(key)}
+                          className={`px-2 py-1.5 rounded-md text-[10px] font-medium transition-all ${
+                            localQualityPreset === key
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                              : 'bg-slate-700/50 text-slate-400 border border-white/5 hover:text-white hover:border-white/10'
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-[8px] text-slate-500">
+                      {QUALITY_PRESETS[localQualityPreset].width}x{QUALITY_PRESETS[localQualityPreset].height} | {QUALITY_PRESETS[localQualityPreset].steps} steps
+                    </p>
+                  </div>
+
+                  {/* Device Selection */}
+                  <div className="mb-3">
+                    <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1 block">
+                      Device
+                    </label>
+                    <select
+                      value={localDevice}
+                      onChange={(e) => setLocalDevice(e.target.value as 'auto' | 'gpu' | 'cpu' | 'directml')}
+                      className="w-full bg-slate-700/50 border border-white/10 rounded-md px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    >
+                      <option value="auto">Auto (Best Available)</option>
+                      <option value="gpu">GPU (CUDA)</option>
+                      <option value="directml">DirectML</option>
+                      <option value="cpu">CPU Only</option>
+                    </select>
+                  </div>
+                </>
+              )}
+
+              {/* Save Location (shared) */}
               <div>
                 <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1 block">
                   Save Location
@@ -474,44 +612,61 @@ export const ImageGenerator: React.FC = () => {
                   <X size={12} />
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                {CLOUDFLARE_MODELS.map((model) => (
-                  <button
-                    key={model.id}
-                    onClick={() => setTempAdvanced({ ...tempAdvanced, model: model.id, steps: 4 })}
-                    className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-md text-[10px] font-medium transition-all ${
-                      tempAdvanced.model === model.id
-                        ? 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 text-white border border-purple-500/30'
-                        : 'bg-slate-700/50 text-slate-400 border border-white/5 hover:text-white hover:border-white/10'
-                    }`}
-                  >
-                    <span>{model.label}</span>
-                    <span className="text-[8px] text-slate-500">{model.description}</span>
-                  </button>
-                ))}
-              </div>
-              <div className="mb-2">
-                <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1 block">
-                  Inference Steps: {tempAdvanced.steps}
-                </label>
-                <input
-                  type="range"
-                  min="1"
-                  max={currentModel?.maxSteps || 8}
-                  value={tempAdvanced.steps}
-                  onChange={(e) => setTempAdvanced({ ...tempAdvanced, steps: parseInt(e.target.value) })}
-                  className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                />
-                <div className="flex justify-between text-[8px] text-slate-500 mt-0.5">
-                  <span>Fast</span>
-                  <span>Quality</span>
-                </div>
-              </div>
-              <div className="flex justify-end">
-                <Button variant="primary" onClick={handleSaveSettings} className="px-3 py-1 text-[10px]">
-                  Save
-                </Button>
-              </div>
+
+              {imageProvider === 'cloudflare' ? (
+                <>
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    {CLOUDFLARE_MODELS.map((model) => (
+                      <button
+                        key={model.id}
+                        onClick={() => setTempAdvanced({ ...tempAdvanced, model: model.id, steps: 4 })}
+                        className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-md text-[10px] font-medium transition-all ${
+                          tempAdvanced.model === model.id
+                            ? 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 text-white border border-purple-500/30'
+                            : 'bg-slate-700/50 text-slate-400 border border-white/5 hover:text-white hover:border-white/10'
+                        }`}
+                      >
+                        <span>{model.label}</span>
+                        <span className="text-[8px] text-slate-500">{model.description}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mb-2">
+                    <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1 block">
+                      Inference Steps: {tempAdvanced.steps}
+                    </label>
+                    <input
+                      type="range"
+                      min="1"
+                      max={currentModel?.maxSteps || 8}
+                      value={tempAdvanced.steps}
+                      onChange={(e) => setTempAdvanced({ ...tempAdvanced, steps: parseInt(e.target.value) })}
+                      className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                    />
+                    <div className="flex justify-between text-[8px] text-slate-500 mt-0.5">
+                      <span>Fast</span>
+                      <span>Quality</span>
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button variant="primary" onClick={handleSaveSettings} className="px-3 py-1 text-[10px]">
+                      Save
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-[10px] text-slate-400 mb-2">
+                    Local generation settings are in the Settings panel above.
+                  </div>
+                  {localHardware && (
+                    <div className="p-2 rounded-md bg-slate-700/30 border border-white/5 text-[9px] text-slate-400">
+                      <p>Recommended: {localHardware.cuda ? 'GPU (CUDA)' : localHardware.directml ? 'DirectML' : 'CPU'}</p>
+                      <p>VRAM: {localHardware.vram_mb > 0 ? `${Math.round(localHardware.vram_mb / 1024)} GB` : 'N/A'}</p>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
 
@@ -561,6 +716,22 @@ export const ImageGenerator: React.FC = () => {
               <span className="inline-block w-1 h-1 rounded-full bg-red-400 shrink-0" />
               {error}
             </p>
+          )}
+
+          {/* Local Generation Progress */}
+          {localProgress && imageProvider === 'local' && (
+            <div className="mt-2 p-2 rounded-md bg-emerald-500/10 border border-emerald-500/20">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] text-emerald-300">{localProgress.message}</span>
+                <span className="text-[9px] text-emerald-400">{localProgress.percent}%</span>
+              </div>
+              <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-300"
+                  style={{ width: `${localProgress.percent}%` }}
+                />
+              </div>
+            </div>
           )}
 
           {/* Controls row */}

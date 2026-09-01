@@ -7,7 +7,8 @@
 DocuFlow is an Electron desktop application that lets users build documentary-style videos by combining:
 - **Local GPU-accelerated Whisper** for audio transcription
 - **Ollama (local LLM)** for AI scene breakdown and storyboard generation
-- **Cloudflare Workers (FLUX/SD)** for image generation
+- **Cloudflare Workers (FLUX/SD)** for cloud image generation
+- **Local Stable Diffusion** for offline image generation (CUDA/DirectML/CPU)
 - **Remotion** for real-time video preview and rendering
 
 ### Target Hardware Constraints
@@ -79,7 +80,10 @@ docuflow-desktop/
 │           │   ├── animation/       # Interpolation, easing
 │           │   └── transcription/   # Whisper local provider, auto-register
 │           ├── services/
-│           │   └── aiService.ts     # Ollama / OpenRouter / Gemini, Scene DSL prompt, translation
+│           │   ├── aiService.ts           # Ollama / OpenRouter / Gemini, Scene DSL prompt, translation
+│           │   ├── imageGenerationService.ts  # Shared image gen pipeline (Cloudflare + Local)
+│           │   ├── localImageProvider.ts   # Local SD provider (hardware detect, model management)
+│           │   └── modelRegistry.ts       # Dynamic model discovery for all providers
 │           ├── utils/               # cloudflareApi, geminiApi, format, configStorage
 │           ├── types/               # TypeScript types (assets, project, timeline)
 │           ├── design/              # Design tokens, global CSS
@@ -116,7 +120,7 @@ docuflow-desktop/
 | **Thinking Inspector / VRAM Telemetry** | ✅ Active | 350px collapsible sidebar with real-time VRAM monitor, live reasoning console, GPU auto-detect, live token streaming, interactive AI chat input |
 | **Top VRAM Status Bar** | ✅ Active | Persistent compact bar: active model badge, real-time VRAM usage pill |
 | **Interactive AI Chat** | ✅ Active | In-inspector chat input for direct Ollama model interaction, streaming responses, prompt tweaking |
-| **AI Image Generator** | ✅ Active | Cloudflare Workers (FLUX/SD Schnell) with batch generation, regeneration workflow |
+| **AI Image Generator** | ✅ Active | Cloudflare Workers + Local Stable Diffusion, provider selector, batch generation, regeneration workflow |
 | **Local GPU Whisper Transcriber** | ✅ Active | Python-based, supports tiny/base/small/medium/large-v3 |
 | **Asset Management** | ✅ Active | Drag-drop import, asset library, protocol-based local file serving |
 | **Video Preview (Remotion)** | ✅ Active | Real-time preview with playhead, track visibility toggles |
@@ -191,6 +195,9 @@ npm run build:linux  # Linux
 | 2026-09-01 | Added 350px collapsible inspector sidebar, top VRAM status bar (model badge + VRAM pill + unload button), interactive AI chat panel, collapsible reasoning box, `chatWithModel` streaming function | `SceneGenerator.tsx`, `ThinkingInspector.tsx`, `aiService.ts` |
 | 2026-09-01 | Fixed flex layout across all tabs: `w-full h-full` on App root, `flex-col` → `flex-row` split on EditorLayout/ImageGenerator, left/right panel sizing on SceneGenerator, fixed right panel resize handle positioning | `App.tsx`, `EditorLayout.tsx`, `ImageGenerator.tsx`, `SceneGenerator.tsx` |
 | 2026-09-01 | Added GPU auto-detection, model offload button, live token streaming (`onToken` callback), model loading state callbacks | `src/renderer/src/services/aiService.ts` |
+| 2026-09-01 | **Local/Offline Image Generation** — Enhanced `generate_local.py` with progress reporting, model management, hardware detection. Added `imageGenerationService.ts` shared pipeline, `localImageProvider.ts` provider, `modelRegistry.ts` dynamic discovery. Provider selector (Cloud/Local) in ImageGenerator and SceneGenerator. IPC handlers for model list/import/hardware/cancel. | Multiple files |
+| 2026-09-01 | **Dynamic Model Discovery** — `modelRegistry.ts` fetches models from Ollama `/api/tags`+`/api/ps`, Gemini known models, OpenRouter API. Inspector ChatTab uses dynamic model list with refresh button. | `services/modelRegistry.ts`, `ThinkingInspector.tsx` |
+| 2026-09-01 | **Unified Image Generation Pipeline** — `imageGenerationService.ts` centralizes all image generation for both ImageGenerator and SceneGenerator. Supports Cloudflare and Local providers with progress callbacks. | `services/imageGenerationService.ts`, `ImageGenerator.tsx`, `SceneGenerator.tsx` |
 | 2026-09-01 | Rewrote ThinkingInspector: GPU/VRAM monitor with live polling, model offload button, model loading progress bar, live output stream console, thinking console | `src/renderer/src/components/generator/ThinkingInspector.tsx` |
 | 2026-09-01 | Wired up `generateScenesStream` with streaming callbacks, added model loading progress bar in header, inspector toggle button, live output state | `src/renderer/src/components/generator/SceneGenerator.tsx` |
 | 2026-09-01 | Added streaming Ollama support with `keep_alive`, `num_ctx: 2048`, 5min timeout, `<think>` tag extraction, and `/api/ps` VRAM telemetry | `src/renderer/src/services/aiService.ts` |

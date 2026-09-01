@@ -111,6 +111,46 @@ const docuflowAPI = {
   startOllama: (): Promise<{ success: boolean; error?: string }> => {
     return ipcRenderer.invoke('ollama:start')
   },
+
+  // Local model management
+  listLocalModels: (): Promise<{ models: Array<{ name: string; path: string; size_bytes: number; size_label: string; type: string; has_required_files: boolean }> }> => {
+    return ipcRenderer.invoke('local-models:list')
+  },
+
+  detectLocalHardware: (): Promise<{ cuda: boolean; directml: boolean; cpu: boolean; vram_mb: number; device_name: string }> => {
+    return ipcRenderer.invoke('local-models:detect-hardware')
+  },
+
+  importLocalModel: (): Promise<{ success: boolean; path?: string; error?: string }> => {
+    return ipcRenderer.invoke('local-models:import')
+  },
+
+  getLocalModelsDir: (): Promise<string> => {
+    return ipcRenderer.invoke('local-models:get-dir')
+  },
+
+  generateLocalImageEnhanced: (params: {
+    prompt: string
+    width: number
+    height: number
+    outputPath: string
+    modelPath: string
+    steps?: number
+    seed?: number
+    device?: string
+  }): Promise<{ success: boolean; path?: string; error?: string }> => {
+    return ipcRenderer.invoke('image:generate-local-enhanced', params)
+  },
+
+  cancelLocalGeneration: (): Promise<{ success: boolean }> => {
+    return ipcRenderer.invoke('local-models:cancel-generation')
+  },
+
+  onLocalGenerationProgress: (callback: (data: { type: string; step?: number; total?: number; percent?: number; message?: string }) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('local-generation:progress', handler)
+    return () => ipcRenderer.removeListener('local-generation:progress', handler)
+  },
 }
 
 // Always use contextBridge when contextIsolation is on

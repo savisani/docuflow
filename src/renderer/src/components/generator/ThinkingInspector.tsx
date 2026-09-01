@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Activity, ChevronRight, Loader2, Zap, Send, Settings, FileText,
+  Activity, ChevronRight, Loader2, Zap, Send, Settings, FileText, RefreshCw,
 } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { buildProjectContext, ProjectContext } from '../../services/aiService';
+import { refreshModels, ModelInfo, AIProvider } from '../../services/modelRegistry';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -138,10 +139,36 @@ const ChatTab: React.FC<{
 }> = ({ messages, input, loading, modelName, onInputChange, onSend, onClear }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [includeContext, setIncludeContext] = useState(true);
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
   const {
     chatProvider, setChatProvider, chatModel, setChatModel,
     scenes, assets, commands, settings, transcript, voiceover,
   } = useDocuFlowStore();
+
+  // Load models when provider changes
+  useEffect(() => {
+    let cancelled = false;
+    const loadModels = async () => {
+      setLoadingModels(true);
+      try {
+        const models = await refreshModels(chatProvider as AIProvider);
+        if (!cancelled) {
+          setAvailableModels(models);
+          // Auto-select first model if current one isn't in the list
+          if (models.length > 0 && !models.some(m => m.id === chatModel)) {
+            setChatModel(models[0].id);
+          }
+        }
+      } catch {
+        if (!cancelled) setAvailableModels([]);
+      } finally {
+        if (!cancelled) setLoadingModels(false);
+      }
+    };
+    loadModels();
+    return () => { cancelled = true; };
+  }, [chatProvider]);
 
   const buildContext = useCallback((): string => {
     if (!includeContext) return '';
@@ -193,22 +220,50 @@ const ChatTab: React.FC<{
   return (
     <div className="flex-1 flex flex-col overflow-hidden min-h-0">
       {/* Provider/Model selector */}
-      <div className="shrink-0 flex items-center gap-1 pb-2">
+      <div className="shrink-0 space-y-1.5 pb-2">
+        <div className="flex items-center gap-1">
+          <select
+            value={chatProvider}
+            onChange={(e) => setChatProvider(e.target.value as any)}
+            className="flex-1 bg-slate-800/60 border border-white/10 rounded px-1.5 py-1 text-[9px] text-slate-300 outline-none"
+          >
+            <option value="ollama">Local (Ollama)</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="gemini">Gemini</option>
+          </select>
+          <button
+            onClick={async () => {
+              setLoadingModels(true);
+              try {
+                const models = await refreshModels(chatProvider as AIProvider, true);
+                setAvailableModels(models);
+              } catch {}
+              setLoadingModels(false);
+            }}
+            disabled={loadingModels}
+            className="px-1.5 py-1 rounded bg-slate-800/60 border border-white/10 text-slate-400 hover:text-white transition-colors disabled:opacity-50"
+            title="Refresh models"
+          >
+            <RefreshCw size={9} className={loadingModels ? 'animate-spin' : ''} />
+          </button>
+        </div>
         <select
-          value={chatProvider}
-          onChange={(e) => setChatProvider(e.target.value as any)}
-          className="flex-1 bg-slate-800/60 border border-white/10 rounded px-1.5 py-1 text-[9px] text-slate-300 outline-none"
-        >
-          <option value="ollama">Local (Ollama)</option>
-          <option value="openrouter">OpenRouter</option>
-          <option value="gemini">Gemini</option>
-        </select>
-        <input
           value={chatModel}
           onChange={(e) => setChatModel(e.target.value)}
-          placeholder="model name"
-          className="flex-1 bg-slate-800/60 border border-white/10 rounded px-1.5 py-1 text-[9px] text-slate-300 font-mono outline-none"
-        />
+          className="w-full bg-slate-800/60 border border-white/10 rounded px-1.5 py-1 text-[9px] text-slate-300 font-mono outline-none"
+        >
+          {loadingModels ? (
+            <option value="">Loading models...</option>
+          ) : availableModels.length === 0 ? (
+            <option value="">No models available</option>
+          ) : (
+            availableModels.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name} {m.isLoaded ? '(loaded)' : ''} {m.sizeLabel ? `- ${m.sizeLabel}` : ''}
+              </option>
+            ))
+          )}
+        </select>
       </div>
 
       {/* Model header */}

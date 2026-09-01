@@ -17,6 +17,14 @@ export interface GeneratedImage {
   aspectRatio: string;
   url: string;
   timestamp: number;
+  /** Where this image was generated from */
+  source: 'image-generator' | 'scene-generator';
+  /** Associated scene ID if source is 'scene-generator' */
+  sceneId?: string;
+  /** Image provider used (cloudflare, etc.) */
+  provider?: string;
+  /** Model used for generation */
+  model?: string;
 }
 
 export interface TrackVisibility {
@@ -137,6 +145,7 @@ interface DocuFlowState {
   setProject: (project: Project) => void;
   setAssets: (assets: Asset[]) => void;
   addAsset: (asset: Asset) => void;
+  updateAsset: (id: string, updates: Partial<Asset>) => void;
   removeAsset: (id: string) => void;
   setCommands: (commands: Command[]) => void;
   addCommand: (command: Command) => void;
@@ -146,6 +155,8 @@ interface DocuFlowState {
   setSettings: (settings: ProjectSettings) => void;
   setActiveTab: (tab: ActiveTab) => void;
   addGeneratedImage: (image: GeneratedImage) => void;
+  updateGeneratedImage: (id: string, updates: Partial<GeneratedImage>) => void;
+  getGeneratedImagesBySceneId: (sceneId: string) => GeneratedImage[];
   addToTimeline: (imageId: string) => void;
   setCurrentTime: (time: number) => void;
   setPlaying: (playing: boolean) => void;
@@ -360,6 +371,12 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       set({ assets: newAssets, timeline: tl });
     }
   },
+  updateAsset: (id, updates) => {
+    const state = get();
+    const newAssets = state.assets.map((a) => (a.id === id ? { ...a, ...updates } : a));
+    const tl = buildTimelineFromState(state.commands, newAssets, state.settings, state.voiceover);
+    set({ assets: newAssets, timeline: tl });
+  },
   setCommands: (commands) => {
     const state = get();
     set({ commands });
@@ -413,6 +430,12 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
   setSettings: (settings) => set({ settings }),
   setActiveTab: (tab) => set({ activeTab: tab }),
   addGeneratedImage: (image) => set((state) => ({ generatedImages: [...state.generatedImages, image] })),
+  updateGeneratedImage: (id, updates) => set((state) => ({
+    generatedImages: state.generatedImages.map((img) =>
+      img.id === id ? { ...img, ...updates } : img
+    ),
+  })),
+  getGeneratedImagesBySceneId: (sceneId) => get().generatedImages.filter((img) => img.sceneId === sceneId),
   addToTimeline: (imageId) => {
     const state = get();
     const image = state.generatedImages.find((img) => img.id === imageId);

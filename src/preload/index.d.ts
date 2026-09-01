@@ -44,6 +44,22 @@ export interface DocuFlowAPI {
   }>
   selectAudioFile(): Promise<{ canceled: boolean; filePath: string }>
   startOllama(): Promise<{ success: boolean; error?: string }>
+  listLocalModels(): Promise<{ models: Array<{ name: string; path: string; size_bytes: number; size_label: string; type: string; has_required_files: boolean }> }>
+  detectLocalHardware(): Promise<{ cuda: boolean; directml: boolean; cpu: boolean; vram_mb: number; device_name: string }>
+  importLocalModel(): Promise<{ success: boolean; path?: string; error?: string }>
+  getLocalModelsDir(): Promise<string>
+  generateLocalImageEnhanced(params: {
+    prompt: string
+    width: number
+    height: number
+    outputPath: string
+    modelPath: string
+    steps?: number
+    seed?: number
+    device?: string
+  }): Promise<{ success: boolean; path?: string; error?: string }>
+  cancelLocalGeneration(): Promise<{ success: boolean }>
+  onLocalGenerationProgress(callback: (data: { type: string; step?: number; total?: number; percent?: number; message?: string }) => void): (() => void)
 }
 
 declare global {
