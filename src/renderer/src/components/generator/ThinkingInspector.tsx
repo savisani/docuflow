@@ -128,7 +128,7 @@ const StreamingSection: React.FC<{
 // ---------------------------------------------------------------------------
 
 const ChatTab: React.FC<{
-  messages: Array<{ role: 'user' | 'assistant'; thinking?: string; text: string }>;
+  messages: Array<{ role: 'user' | 'assistant'; thinking?: string; content: string }>;
   input: string;
   loading: boolean;
   modelName?: string;
@@ -245,7 +245,7 @@ const ChatTab: React.FC<{
               <div className="flex justify-end">
                 <div className="max-w-[85%] rounded-lg px-2.5 py-1.5 text-[10px] bg-amber-500/10 text-amber-200 border border-amber-500/15">
                   <pre className="whitespace-pre-wrap break-words font-mono" style={{ tabSize: 2 }}>
-                    {msg.text}
+                    {msg.content}
                   </pre>
                 </div>
               </div>
@@ -265,7 +265,7 @@ const ChatTab: React.FC<{
                       <span className="text-[8px] text-slate-600 uppercase tracking-wider block mb-0.5">Output</span>
                     )}
                     <pre className="whitespace-pre-wrap break-words font-mono" style={{ tabSize: 2 }}>
-                      {msg.text}
+                      {msg.content}
                     </pre>
                   </div>
                 </div>

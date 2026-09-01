@@ -315,7 +315,7 @@ function normalizeSceneDurations(
   // No durations provided — derive from transcript segments
   if (context.transcriptSegments && context.transcriptSegments.length > 0) {
     // Match scenes to transcript segments by text overlap
-    const durations: number[] = [];
+    let durations: number[] = [];
     const segText = context.transcriptSegments.map(s => s.text.toLowerCase());
 
     for (const scene of scenes) {

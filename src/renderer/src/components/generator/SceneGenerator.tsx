@@ -593,15 +593,15 @@ export const SceneGenerator: React.FC = () => {
   // -----------------------------------------------------------------------
 
   const handleChatSend = useCallback(async () => {
-    const msg = chatInput.trim();
-    if (!msg || chatLoading) return;
-
     const store = useDocuFlowStore.getState();
+    const msg = store.chatInput.trim();
+    if (!msg || store.chatLoading) return;
+
     const provider = store.chatProvider;
     const model = store.chatModel;
     const context = (window as any).__chatContext || '';
 
-    const userMessage = { role: 'user' as const, text: msg };
+    const userMessage = { role: 'user' as const, content: msg };
     store.addChatMessage(userMessage);
     store.setChatInput('');
     store.setChatLoading(true);
@@ -662,7 +662,7 @@ export const SceneGenerator: React.FC = () => {
     } finally {
       store.setChatLoading(false);
     }
-  }, [chatInput, chatLoading, aiSettings, geminiConfig]);
+  }, [aiSettings, geminiConfig]);
 
   // Toast auto-dismiss
   React.useEffect(() => {
