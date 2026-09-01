@@ -33,12 +33,14 @@ export const VideoPreview: React.FC = () => {
       if (hasLayers && assets.length > 0) {
         const firstLayer = Object.values(timeline.layers)[0];
         if (firstLayer && !firstLayer.assetUrl) {
-          base = buildTimeline(commands, assets, settings);
+          const voiceoverAsset = voiceover ? assets.find(a => a.id === voiceover.assetId) : undefined;
+          base = buildTimeline(commands, assets, settings, voiceoverAsset?.duration);
         }
       }
       if (!base) base = timeline;
     } else if (commands.length > 0) {
-      base = buildTimeline(commands, assets, settings);
+      const voiceoverAsset = voiceover ? assets.find(a => a.id === voiceover.assetId) : undefined;
+      base = buildTimeline(commands, assets, settings, voiceoverAsset?.duration);
     }
 
     if (!base) return null;

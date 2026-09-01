@@ -260,6 +260,20 @@ function durationToSeconds(duration?: string): number {
 // Uses transcript segments when available, falls back to even distribution
 // ---------------------------------------------------------------------------
 
+/**
+ * Ensure that the sum of durations exactly equals targetDuration.
+ * Adjusts the last scene to absorb any rounding difference.
+ */
+function ensureExactSum(durations: number[], targetDuration: number): number[] {
+  if (durations.length === 0) return durations;
+  const result = [...durations];
+  const currentSum = result.reduce((a, b) => a + b, 0);
+  const diff = targetDuration - currentSum;
+  // Adjust the last scene by the difference (clamp to minimum 0.1s)
+  result[result.length - 1] = Math.max(0.1, result[result.length - 1] + diff);
+  return result;
+}
+
 function normalizeSceneDurations(
   scenes: SceneDSL[],
   context: CompileContext,
@@ -283,10 +297,15 @@ function normalizeSceneDurations(
 
     if (totalAudioDuration > 0) {
       const totalSceneDuration = durations.reduce((a, b) => a + b, 0);
-      if (totalSceneDuration > 0 && Math.abs(totalSceneDuration - totalAudioDuration) > 0.5) {
+      if (totalSceneDuration > 0 && Math.abs(totalSceneDuration - totalAudioDuration) > 0.1) {
         // Scale durations to match audio
         const scale = totalAudioDuration / totalSceneDuration;
         durations = durations.map(d => Math.max(0.5, d * scale));
+        // Ensure exact sum (absorb rounding error in last scene)
+        durations = ensureExactSum(durations, totalAudioDuration);
+      } else {
+        // Total is already close — clamp last scene to hit exact audio end
+        durations = ensureExactSum(durations, totalAudioDuration);
       }
     }
 
@@ -334,20 +353,25 @@ function normalizeSceneDurations(
     // Normalize to fit total audio duration
     if (totalAudioDuration > 0) {
       const total = durations.reduce((a, b) => a + b, 0);
-      if (total > 0 && Math.abs(total - totalAudioDuration) > 0.5) {
+      if (total > 0 && Math.abs(total - totalAudioDuration) > 0.1) {
         const scale = totalAudioDuration / total;
-        return durations.map(d => Math.max(0.5, d * scale));
+        durations = durations.map(d => Math.max(0.5, d * scale));
       }
+      // Ensure exact sum regardless of whether we scaled
+      durations = ensureExactSum(durations, totalAudioDuration);
     }
 
     return durations;
   }
 
   // No transcript — even distribution across audio duration or 3s per scene
-  const fallbackDuration = totalAudioDuration > 0
-    ? totalAudioDuration / scenes.length
-    : 3;
-  return scenes.map(() => Math.max(0.5, fallbackDuration));
+  if (totalAudioDuration > 0) {
+    // Even distribution with exact sum
+    const perScene = totalAudioDuration / scenes.length;
+    const durations = scenes.map(() => Math.max(0.5, perScene));
+    return ensureExactSum(durations, totalAudioDuration);
+  }
+  return scenes.map(() => 3);
 }
 
 export interface CompileContext {
@@ -488,4 +512,78 @@ export function compileSceneDSL(
 
 export function getDurationSeconds(scene: SceneDSL): number {
   return durationToSeconds(scene.duration);
+}
+
+// ---------------------------------------------------------------------------
+// Timeline Validator — validates and fixes issues in compiled output
+// ---------------------------------------------------------------------------
+
+export interface ValidationIssue {
+  severity: 'error' | 'warning';
+  message: string;
+  fix?: string;
+}
+
+export function validateTimeline(output: CompileOutput): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  // Check for overlapping frames
+  for (let i = 0; i < output.scenes.length - 1; i++) {
+    const curr = output.scenes[i];
+    const next = output.scenes[i + 1];
+    if (curr.endFrame > next.startFrame) {
+      issues.push({
+        severity: 'warning',
+        message: `Scene ${i + 1} overlaps with scene ${i + 2} at frames ${curr.endFrame} vs ${next.startFrame}`,
+        fix: 'Adjusted start frame',
+      });
+    }
+  }
+
+  // Check for negative or zero durations
+  for (const scene of output.scenes) {
+    if (scene.durationFrames <= 0) {
+      issues.push({
+        severity: 'error',
+        message: `Scene ${scene.sceneIndex + 1} has zero or negative duration`,
+        fix: 'Set to minimum 1 frame',
+      });
+    }
+  }
+
+  // Check for missing assets
+  const assetIds = new Set(output.assetMap.values().map(a => a.logicalId));
+  for (const cmd of output.allCommands) {
+    if ('target' in cmd && cmd.target && !assetIds.has(cmd.target)) {
+      issues.push({
+        severity: 'error',
+        message: `Command references missing asset: ${cmd.target}`,
+      });
+    }
+    if ('asset' in cmd && cmd.asset && !assetIds.has(cmd.asset)) {
+      issues.push({
+        severity: 'error',
+        message: `Show command references missing asset: ${cmd.asset}`,
+      });
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * Fix common timeline issues: clamp frame ranges, remove invalid commands
+ */
+export function fixTimeline(output: CompileOutput, fps: number): CompileOutput {
+  const assetIds = new Set(output.assetMap.values().map(a => a.logicalId));
+  const fixedCommands = output.allCommands.filter(cmd => {
+    if ('target' in cmd && cmd.target && !assetIds.has(cmd.target)) return false;
+    if ('asset' in cmd && cmd.asset && !assetIds.has(cmd.asset)) return false;
+    return true;
+  });
+
+  return {
+    ...output,
+    allCommands: fixedCommands,
+  };
 }

@@ -223,4 +223,72 @@ describe('Timeline Builder', () => {
       expect(at2?.y).toBe(40);
     });
   });
+
+  describe('Primary audio duration constraint', () => {
+    test('timeline totalFrames equals primaryAudioDuration when provided', () => {
+      const assets = [makeAsset('img1', 'image1')];
+      // 4 scenes that would normally extend to 20s (5s each)
+      const commands: Command[] = [
+        makeImageCmd('cmd1', 'img1', 0, 5),
+        makeImageCmd('cmd2', 'img1', 5, 5),
+        makeImageCmd('cmd3', 'img1', 10, 5),
+        makeImageCmd('cmd4', 'img1', 15, 5),
+      ];
+
+      // With 14.88s audio, timeline should be exactly 14.88s
+      const primaryAudioDuration = 14.88;
+      const tl = buildTimeline(commands, assets, settings, primaryAudioDuration);
+
+      const expectedFrames = Math.round(primaryAudioDuration * settings.fps);
+      expect(tl.totalFrames).toBe(expectedFrames);
+    });
+
+    test('layer endFrames are clamped to primary audio duration', () => {
+      const assets = [makeAsset('img1', 'image1')];
+      const commands: Command[] = [
+        makeImageCmd('cmd1', 'img1', 0, 20), // 20s scene
+      ];
+
+      const primaryAudioDuration = 14.88;
+      const tl = buildTimeline(commands, assets, settings, primaryAudioDuration);
+
+      const maxAllowedFrames = Math.round(primaryAudioDuration * settings.fps);
+      const layer = tl.layers['cmd1'];
+      expect(layer).toBeDefined();
+      expect(layer!.endFrame).toBeLessThanOrEqual(maxAllowedFrames);
+    });
+
+    test('without primaryAudioDuration, uses padding (fallback behavior)', () => {
+      const assets = [makeAsset('img1', 'image1')];
+      const commands: Command[] = [
+        makeImageCmd('cmd1', 'img1', 0, 10),
+      ];
+
+      const tl = buildTimeline(commands, assets, settings);
+
+      // Should have 2s padding: maxFrame=300 + padding=60 = 360
+      expect(tl.totalFrames).toBe(360);
+    });
+
+    test('multiple scenes sum to exactly primaryAudioDuration', () => {
+      const assets = [makeAsset('img1', 'image1')];
+      const commands: Command[] = [
+        makeImageCmd('cmd1', 'img1', 0, 3.20),
+        makeImageCmd('cmd2', 'img1', 3.20, 3.55),
+        makeImageCmd('cmd3', 'img1', 6.75, 3.65),
+        makeImageCmd('cmd4', 'img1', 10.40, 4.48),
+      ];
+
+      const primaryAudioDuration = 14.88;
+      const tl = buildTimeline(commands, assets, settings, primaryAudioDuration);
+
+      const expectedFrames = Math.round(primaryAudioDuration * settings.fps);
+      expect(tl.totalFrames).toBe(expectedFrames);
+
+      // Verify no layer extends beyond
+      for (const layer of Object.values(tl.layers)) {
+        expect(layer.endFrame).toBeLessThanOrEqual(expectedFrames);
+      }
+    });
+  });
 });

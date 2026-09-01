@@ -66,9 +66,12 @@ function resolveAssetInfo(assets: Asset[], name: string) {
 export function buildTimeline(
   commands: Command[],
   assets: Asset[],
-  settings: ProjectSettings
+  settings: ProjectSettings,
+  primaryAudioDuration?: number
 ): TimelineState {
   const fps = settings.fps;
+  const hasPrimaryAudio = typeof primaryAudioDuration === 'number' && primaryAudioDuration > 0;
+  const maxAllowedFrames = hasPrimaryAudio ? Math.round(primaryAudioDuration * fps) : Infinity;
   const layers: Record<string, LayerState> = {};
   const audioTracks: AudioTrack[] = [];
   const textLayers: TextLayer[] = [];
@@ -706,8 +709,81 @@ export function buildTimeline(
     }
   }
 
-  const paddingFrames = Math.round(2 * fps);
-  const totalFrames = Math.max(Math.round(fps * 0.5), maxFrame + paddingFrames);
+  // ---------------------------------------------------------------------------
+  // Clamp all end frames to primary audio duration when provided
+  // ---------------------------------------------------------------------------
+  if (hasPrimaryAudio) {
+    for (const layer of Object.values(layers)) {
+      if (layer.endFrame > maxAllowedFrames) layer.endFrame = maxAllowedFrames;
+      for (const anim of layer.animations) {
+        if (anim.endFrame > maxAllowedFrames) anim.endFrame = maxAllowedFrames;
+      }
+      for (const seg of layer.assetSegments) {
+        // segments don't have endFrame but ensure startFrame is within bounds
+      }
+    }
+    for (const track of audioTracks) {
+      if (track.endFrame > maxAllowedFrames) track.endFrame = maxAllowedFrames;
+      if (track.fadeIn && track.fadeIn.endFrame > maxAllowedFrames) track.fadeIn.endFrame = maxAllowedFrames;
+      if (track.fadeOut && track.fadeOut.startFrame > maxAllowedFrames) track.fadeOut.startFrame = maxAllowedFrames;
+      if (track.fadeOut && track.fadeOut.endFrame > maxAllowedFrames) track.fadeOut.endFrame = maxAllowedFrames;
+      if (track.volumeAnimations) {
+        for (const va of track.volumeAnimations) {
+          if (va.endFrame > maxAllowedFrames) va.endFrame = maxAllowedFrames;
+        }
+      }
+    }
+    for (const text of textLayers) {
+      if (text.endFrame > maxAllowedFrames) text.endFrame = maxAllowedFrames;
+    }
+    if (camera.animations) {
+      for (const anim of camera.animations) {
+        if (anim.endFrame > maxAllowedFrames) anim.endFrame = maxAllowedFrames;
+      }
+    }
+
+    // Recalculate maxFrame after clamping
+    maxFrame = 0;
+    for (const layer of Object.values(layers)) {
+      if (layer.endFrame > maxFrame) maxFrame = layer.endFrame;
+      for (const anim of layer.animations) {
+        if (anim.endFrame > maxFrame) maxFrame = anim.endFrame;
+      }
+    }
+    for (const track of audioTracks) {
+      if (track.endFrame > maxFrame) maxFrame = track.endFrame;
+    }
+    for (const text of textLayers) {
+      if (text.endFrame > maxFrame) maxFrame = text.endFrame;
+    }
+  }
+
+  let totalFrames: number;
+  if (hasPrimaryAudio) {
+    // Primary audio is the source of truth — no padding
+    totalFrames = maxAllowedFrames;
+  } else {
+    // Fallback: add 2 seconds padding for projects without primary audio
+    const paddingFrames = Math.round(2 * fps);
+    totalFrames = Math.max(Math.round(fps * 0.5), maxFrame + paddingFrames);
+  }
+
+  // Dev-time validation
+  if (hasPrimaryAudio && process.env.NODE_ENV !== 'production') {
+    const tolerance = 1; // 1 frame tolerance for floating-point rounding
+    if (maxFrame > maxAllowedFrames + tolerance) {
+      console.warn(
+        `[buildTimeline] Scene timeline extends beyond primary audio: ` +
+        `maxFrame=${maxFrame} (${(maxFrame / fps).toFixed(3)}s) > ` +
+        `maxAllowedFrames=${maxAllowedFrames} (${primaryAudioDuration}s)`
+      );
+    }
+    if (totalFrames !== maxAllowedFrames) {
+      console.warn(
+        `[buildTimeline] totalFrames (${totalFrames}) !== maxAllowedFrames (${maxAllowedFrames})`
+      );
+    }
+  }
 
   return {
     layers,

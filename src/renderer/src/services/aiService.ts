@@ -2,6 +2,14 @@
 // AI Scene Breakdown Service — Ollama (local) + OpenRouter (cloud) + Gemini (cloud)
 // ---------------------------------------------------------------------------
 
+import {
+  compileSceneIntents,
+  parseSceneIntents,
+  buildFASTPrompt,
+  type SceneIntent,
+  type PromptSegment,
+} from '../engine/sceneDSL/intentCompiler';
+
 export type AIProvider = 'ollama' | 'openrouter' | 'gemini';
 
 export interface AISceneRequest {
@@ -272,6 +280,25 @@ export interface OllamaModel {
   modified_at: string;
 }
 
+// Models that natively support thinking/reasoning via the `thinking` field
+const THINKING_CAPABLE_PATTERNS = [
+  /^qwen3/i,
+  /^deepseek-r1/i,
+  /^deepseek\/deepseek-r1/i,
+  /^qwq/i,
+  /^o1/i,
+  /^o3/i,
+];
+
+/**
+ * Check if an Ollama model supports the `thinking` parameter.
+ * Models like gemma3, llama3, phi3 do NOT support thinking.
+ * Models like qwen3, deepseek-r1 DO support thinking.
+ */
+export function modelSupportsThinking(modelName: string): boolean {
+  return THINKING_CAPABLE_PATTERNS.some(pattern => pattern.test(modelName));
+}
+
 export async function fetchOllamaModels(): Promise<OllamaModel[]> {
   try {
     const resp = await fetch('http://localhost:11434/api/tags', {
@@ -437,6 +464,8 @@ export interface StreamingCallbacks {
   onThinkingComplete?: (fullThinking: string) => void;
   onModelLoading?: (loading: boolean) => void;
   onModelLoaded?: () => void;
+  onTiming?: (label: string, ms: number) => void;
+  onStatus?: (status: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -685,15 +714,18 @@ async function callOllamaStreaming(
   prompt: string,
   model = 'llama3.2',
   callbacks?: StreamingCallbacks,
+  options?: { think?: boolean },
 ): Promise<string> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 300_000);
 
-  const body = {
+  const supportsThinking = modelSupportsThinking(model);
+  const think = options?.think !== undefined ? options.think : supportsThinking;
+
+  const body: Record<string, any> = {
     model,
     prompt,
     stream: true,
-    think: true,
     keep_alive: '15m',
     options: {
       temperature: 0.3,
@@ -701,6 +733,11 @@ async function callOllamaStreaming(
       num_ctx: 2048,
     },
   };
+
+  // Only include `think` if the model supports it
+  if (supportsThinking) {
+    body.think = think;
+  }
 
   try {
     callbacks?.onModelLoading?.(true);
@@ -823,6 +860,51 @@ async function callOllamaStreaming(
   } finally {
     clearTimeout(timeoutId);
     callbacks?.onModelLoading?.(false);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Provider: Ollama — non-streaming FAST mode (think:false, small output)
+// ---------------------------------------------------------------------------
+
+async function callOllamaDirect(
+  prompt: string,
+  model = 'gemma3:4b',
+  options?: { think?: boolean; temperature?: number; numPredict?: number },
+): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120_000);
+
+  const body = {
+    model,
+    prompt,
+    stream: false,
+    think: options?.think ?? false,
+    keep_alive: '15m',
+    options: {
+      temperature: options?.temperature ?? 0.2,
+      num_predict: options?.numPredict ?? 512,
+      num_ctx: 2048,
+    },
+  };
+
+  try {
+    const resp = await fetch('http://localhost:11434/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`Ollama error ${resp.status}: ${text.slice(0, 300)}`);
+    }
+
+    const data = await resp.json();
+    return data.response ?? '';
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -963,15 +1045,18 @@ export async function chatWithModel(
   message: string,
   model = 'llama3.2',
   callbacks?: StreamingCallbacks,
+  options?: { think?: boolean },
 ): Promise<{ thinking: string; response: string }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 300_000);
 
-  const body = {
+  const supportsThinking = modelSupportsThinking(model);
+  const think = options?.think !== undefined ? options.think : supportsThinking;
+
+  const body: Record<string, any> = {
     model,
     prompt: message,
     stream: true,
-    think: true,
     keep_alive: '15m',
     options: {
       temperature: 0.7,
@@ -979,6 +1064,11 @@ export async function chatWithModel(
       num_ctx: 2048,
     },
   };
+
+  // Only include `think` if the model supports it
+  if (supportsThinking) {
+    body.think = think;
+  }
 
   try {
     callbacks?.onModelLoading?.(true);
@@ -1091,6 +1181,56 @@ export async function chatWithModel(
 }
 
 // ---------------------------------------------------------------------------
+// Generic chat — works with any provider (Ollama, OpenRouter, Gemini)
+// ---------------------------------------------------------------------------
+
+export interface ChatRequest {
+  message: string;
+  provider: AIProvider;
+  model?: string;
+  openRouterApiKey?: string;
+  geminiApiKey?: string;
+  geminiModel?: string;
+  systemPrompt?: string;
+}
+
+/**
+ * Chat with any AI provider. The UI doesn't need to know the implementation.
+ */
+export async function chatWithProvider(
+  req: ChatRequest,
+  callbacks?: StreamingCallbacks,
+): Promise<{ thinking: string; response: string }> {
+  const systemContext = req.systemPrompt
+    ? `[System context: ${req.systemPrompt}]\n\nUser message: ${req.message}`
+    : req.message;
+
+  try {
+    if (req.provider === 'ollama') {
+      return await chatWithModel(systemContext, req.model || 'llama3.2', callbacks);
+    }
+
+    if (req.provider === 'gemini') {
+      if (!req.geminiApiKey) throw new Error('Gemini API key is required. Configure it in Settings.');
+      const raw = await callGemini(
+        systemContext, req.geminiApiKey, req.geminiModel || 'gemini-2.5-flash',
+        0.7, 2048,
+      );
+      return { thinking: '', response: raw };
+    }
+
+    // OpenRouter
+    if (!req.openRouterApiKey) throw new Error('OpenRouter API key is required. Configure it in Settings.');
+    const raw = await callOpenRouter(systemContext, req.openRouterApiKey, req.model || 'openrouter/free');
+    return { thinking: '', response: raw };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    // Re-throw with provider context
+    throw new Error(`[${req.provider}] ${message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API — Non-streaming
 // ---------------------------------------------------------------------------
 
@@ -1119,32 +1259,114 @@ export async function generateScenes(req: AISceneRequest): Promise<SceneItem[]> 
 
 // ---------------------------------------------------------------------------
 // Streaming variant — used by the Thinking Inspector
+// Now uses FAST mode: compact JSON output, per-segment batching,
+// think:false, minimal prompt.
 // ---------------------------------------------------------------------------
 
 export async function generateScenesStream(
   req: AISceneRequest,
   callbacks?: StreamingCallbacks,
 ): Promise<SceneItem[]> {
-  const userPrompt = buildUserPrompt(req);
-  const fullPrompt = `${SCENE_DSL_SYSTEM_PROMPT}\n\n---\n\n${userPrompt}`;
+  const segments = req.transcriptionSegments;
+  if (segments.length === 0) return [];
 
-  let raw: string;
+  const model = req.provider === 'ollama' ? (req.model || 'gemma3:4b') : (req.model || 'openrouter/free');
 
-  if (req.provider === 'ollama') {
-    raw = await callOllamaStreaming(fullPrompt, req.model || 'llama3.2', callbacks);
-  } else if (req.provider === 'gemini') {
-    if (!req.geminiApiKey) throw new Error('Gemini API key is required');
-    raw = await callGemini(
-      userPrompt, req.geminiApiKey, req.geminiModel || 'gemini-2.5-flash',
-      req.geminiTemperature ?? 0.3, req.geminiMaxOutputTokens ?? 8192,
-      SCENE_DSL_SYSTEM_PROMPT,
-    );
-  } else {
-    if (!req.openRouterApiKey) throw new Error('OpenRouter API key is required');
-    raw = await callOpenRouter(userPrompt, req.openRouterApiKey, req.model || 'openrouter/free', SCENE_DSL_SYSTEM_PROMPT);
+  // Batch segments into groups of 3 for small models
+  const BATCH_SIZE = 3;
+  const batches: PromptSegment[][] = [];
+  for (let i = 0; i < segments.length; i += BATCH_SIZE) {
+    batches.push(segments.slice(i, i + BATCH_SIZE).map(s => ({
+      start: s.start,
+      end: s.end,
+      text: s.originalText && s.originalLanguage && s.originalLanguage !== 'en'
+        ? `${s.text}`
+        : s.text,
+    })));
   }
 
-  return convertAIResponseToSceneItems(raw, req.transcriptionSegments);
+  const allIntents: SceneIntent[] = [];
+  const allTexts: string[] = [];
+  const totalBatches = batches.length;
+
+  callbacks?.onStatus?.(`Generating ${segments.length} scenes in ${totalBatches} batches...`);
+
+  for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
+    const batch = batches[batchIdx];
+    const prompt = buildFASTPrompt(batch, req.fullScript?.trim());
+
+    callbacks?.onStatus?.(`Batch ${batchIdx + 1}/${totalBatches}...`);
+    callbacks?.onOutputToken?.(`[${batchIdx + 1}/${totalBatches}]`, '');
+
+    let raw: string;
+
+    if (req.provider === 'ollama') {
+      const t0 = performance.now();
+      raw = await callOllamaDirect(prompt, model, {
+        think: false,
+        temperature: 0.2,
+        numPredict: 512,
+      });
+      callbacks?.onTiming?.(`batch_${batchIdx + 1}`, performance.now() - t0);
+    } else if (req.provider === 'gemini') {
+      if (!req.geminiApiKey) throw new Error('Gemini API key is required');
+      raw = await callGemini(
+        prompt, req.geminiApiKey, req.geminiModel || 'gemini-2.5-flash',
+        req.geminiTemperature ?? 0.2, req.geminiMaxOutputTokens ?? 1024,
+        'Return only a JSON array. No explanation.',
+      );
+    } else {
+      if (!req.openRouterApiKey) throw new Error('OpenRouter API key is required');
+      raw = await callOpenRouter(prompt, req.openRouterApiKey, model, 'Return only a JSON array. No explanation.');
+    }
+
+    // Parse JSON response into SceneIntents
+    const intents = parseSceneIntents(raw);
+    if (intents.length > 0) {
+      allIntents.push(...intents);
+      allTexts.push(...batch.map(s => s.text));
+    } else {
+      // Fallback: if JSON parsing failed, create intents from raw text
+      // This handles models that output text instead of JSON
+      for (const seg of batch) {
+        allIntents.push({ v: seg.text, a: 'zoom_in', t: 'cut', s: 'cinematic' });
+        allTexts.push(seg.text);
+      }
+    }
+  }
+
+  if (allIntents.length === 0) {
+    throw new Error('AI returned no valid scene data. Please try again.');
+  }
+
+  // Compile SceneIntent → SceneDSL (deterministic, no AI)
+  const dslScenes = compileSceneIntents(allIntents, allTexts);
+
+  // Convert to SceneItems with timing from transcript segments
+  const motionMap: Record<string, SceneItem['cameraMotion']> = {
+    'none': 'static',
+    'slow_zoom': 'zoom_in', 'medium_zoom': 'zoom_in', 'fast_zoom': 'zoom_in',
+    'slow_zoom_out': 'zoom_out', 'medium_zoom_out': 'zoom_out', 'fast_zoom_out': 'zoom_out',
+    'slow_pan_left': 'pan_left', 'slow_pan_right': 'pan_right',
+    'medium_pan_left': 'pan_left', 'medium_pan_right': 'pan_right',
+    'fast_pan_left': 'pan_left', 'fast_pan_right': 'pan_right',
+    'dolly_in': 'zoom_in', 'dolly_out': 'zoom_out',
+    'orbit_left': 'pan_left', 'orbit_right': 'pan_right',
+    'tilt_up': 'zoom_out', 'tilt_down': 'zoom_in',
+    'crane_up': 'zoom_out', 'crane_down': 'zoom_in',
+    'handheld': 'static', 'parallax': 'pan_right',
+  };
+
+  // Use transcript timestamps directly (1:1 mapping since we batch segments)
+  return dslScenes.map((scene, i) => ({
+    sceneId: i + 1,
+    startTime: segments[i]?.start ?? 0,
+    endTime: segments[i]?.end ?? segments[i]?.start ?? 0,
+    transcriptChunk: scene.text,
+    visualDescription: scene.visual || scene.text,
+    imagePrompt: scene.visual || scene.text,
+    cameraMotion: motionMap[scene.motion || 'none'] || 'static',
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1275,4 +1497,52 @@ function convertAIResponseToSceneItems(
   } catch {
     throw new Error('AI response could not be parsed as Scene DSL or JSON. Please try again.');
   }
+}
+
+// ---------------------------------------------------------------------------
+// Project Context Builder — provides AI chat with current project state
+// ---------------------------------------------------------------------------
+
+export interface ProjectContext {
+  scenes: Array<{ id: string; type: string; duration: number; content: string }>;
+  assets: Array<{ id: string; name: string; type: string; duration?: number }>;
+  timeline: { duration: number; fps: number } | null;
+  transcript: { text: string; duration: number; segments: number } | null;
+  selectedItems: string[];
+}
+
+/**
+ * Build a context string from the current project state for AI chat.
+ * This helps the AI understand what the user is working on.
+ */
+export function buildProjectContext(ctx: ProjectContext): string {
+  const parts: string[] = [];
+
+  if (ctx.scenes.length > 0) {
+    parts.push(`Scenes (${ctx.scenes.length}):\n${
+      ctx.scenes.map(s => `  - ${s.type}: "${s.content.substring(0, 100)}" (${s.duration}s)`).join('\n')
+    }`);
+  }
+
+  if (ctx.assets.length > 0) {
+    parts.push(`Assets (${ctx.assets.length}):\n${
+      ctx.assets.map(a => `  - ${a.name} (${a.type}${a.duration ? `, ${a.duration}s` : ''})`).join('\n')
+    }`);
+  }
+
+  if (ctx.timeline) {
+    parts.push(`Timeline: ${ctx.timeline.duration}s @ ${ctx.timeline.fps}fps`);
+  }
+
+  if (ctx.transcript) {
+    parts.push(`Transcript: ${ctx.transcript.text.substring(0, 200)}... (${ctx.transcript.segments} segments, ${ctx.transcript.duration}s)`);
+  }
+
+  if (ctx.selectedItems.length > 0) {
+    parts.push(`Selected: ${ctx.selectedItems.join(', ')}`);
+  }
+
+  return parts.length > 0
+    ? `\n\n[Project Context]\n${parts.join('\n\n')}`
+    : '';
 }

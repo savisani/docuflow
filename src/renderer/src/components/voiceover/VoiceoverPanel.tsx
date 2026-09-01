@@ -33,6 +33,9 @@ export const VoiceoverPanel: React.FC = () => {
     sceneMarkers,
     transcriptionStatus,
     transcriptionError,
+    transcriptionStep,
+    transcriptionStepLabel,
+    transcriptionStartedAt,
     currentTime,
     setVoiceover,
     setTranscript,
@@ -41,6 +44,8 @@ export const VoiceoverPanel: React.FC = () => {
     removeSceneMarker,
     setTranscriptionStatus,
     setTranscriptionError,
+    setTranscriptionStep,
+    resetTranscriptionProgress,
     setAudioRole,
     addCommand,
     setCurrentTime,
@@ -51,10 +56,8 @@ export const VoiceoverPanel: React.FC = () => {
   const [selectedModel, setSelectedModel] = useState('base');
   const [availableModels, setAvailableModels] = useState<WhisperModelInfo[]>([]);
   const [importing, setImporting] = useState(false);
-  const [transcriptionStep, setTranscriptionStep] = useState(-1);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playingSegment, setPlayingSegment] = useState<string | null>(null);
-  const stepTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const voiceoverAsset = voiceover
     ? assets.find((a) => a.id === voiceover.assetId)
@@ -115,23 +118,14 @@ export const VoiceoverPanel: React.FC = () => {
 
     setTranscriptionStatus('processing');
     setTranscriptionError(null);
-    setTranscriptionStep(0);
-
-    if (stepTimerRef.current) clearInterval(stepTimerRef.current);
-    stepTimerRef.current = setInterval(() => {
-      setTranscriptionStep((prev) => {
-        if (prev >= TRANSCRIPTION_STEPS.length - 2) {
-          if (stepTimerRef.current) clearInterval(stepTimerRef.current);
-          return prev;
-        }
-        return prev + 1;
-      });
-    }, 2000);
+    setTranscriptionStep(0, 'Preparing audio...');
 
     try {
       const response = await fetch(voiceoverAsset.url);
       const blob = await response.blob();
       const file = new File([blob], voiceoverAsset.filename, { type: voiceoverAsset.mimeType });
+
+      setTranscriptionStep(1, 'Sending to transcription server...');
 
       const formData = new FormData();
       formData.append('file', file);
@@ -142,11 +136,15 @@ export const VoiceoverPanel: React.FC = () => {
 
       const baseUrl = (import.meta as any).env?.VITE_TRANSCRIPTION_URL || 'http://127.0.0.1:8765';
 
+      setTranscriptionStep(2, `Transcribing with ${selectedModel} model...`);
+
       const result = await fetch(`${baseUrl}/transcribe`, {
         method: 'POST',
         body: formData,
         signal: AbortSignal.timeout(300000),
       });
+
+      setTranscriptionStep(3, 'Finalizing transcript...');
 
       if (!result.ok) {
         const errData = await result.json().catch(() => null);
@@ -171,7 +169,7 @@ export const VoiceoverPanel: React.FC = () => {
         })),
       });
 
-      setTranscriptionStep(TRANSCRIPTION_STEPS.length - 1);
+      setTranscriptionStep(4, 'Completed');
       setTranscriptionStatus('complete');
     } catch (err) {
       setTranscriptionStatus('error');
@@ -183,19 +181,8 @@ export const VoiceoverPanel: React.FC = () => {
       } else {
         setTranscriptionError(message);
       }
-    } finally {
-      if (stepTimerRef.current) {
-        clearInterval(stepTimerRef.current);
-        stepTimerRef.current = null;
-      }
     }
-  }, [voiceoverAsset, voiceover?.language, selectedModel, serverOnline, setTranscript, setTranscriptionStatus, setTranscriptionError]);
-
-  useEffect(() => {
-    return () => {
-      if (stepTimerRef.current) clearInterval(stepTimerRef.current);
-    };
-  }, []);
+  }, [voiceoverAsset, voiceover?.language, selectedModel, serverOnline, setTranscript, setTranscriptionStatus, setTranscriptionError, setTranscriptionStep]);
 
   const handleRemoveVoiceover = useCallback(() => {
     setVoiceover(null);
@@ -203,7 +190,8 @@ export const VoiceoverPanel: React.FC = () => {
     setSceneMarkers([]);
     setTranscriptionStatus('idle');
     setTranscriptionError(null);
-  }, [setVoiceover, setTranscript, setSceneMarkers, setTranscriptionStatus, setTranscriptionError]);
+    resetTranscriptionProgress();
+  }, [setVoiceover, setTranscript, setSceneMarkers, setTranscriptionStatus, setTranscriptionError, resetTranscriptionProgress]);
 
   const handleSegmentClick = useCallback((start: number) => {
     setCurrentTime(start);
@@ -256,6 +244,19 @@ export const VoiceoverPanel: React.FC = () => {
   const progressPercent = transcriptionStep >= 0
     ? Math.round(((transcriptionStep + 1) / TRANSCRIPTION_STEPS.length) * 100)
     : 0;
+
+  // Elapsed time for transcription
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    if (transcriptionStatus !== 'processing' || !transcriptionStartedAt) {
+      setElapsedSec(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - transcriptionStartedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [transcriptionStatus, transcriptionStartedAt]);
 
   return (
     <Panel title="Voiceover" icon={<Mic size={10} />} className="h-full flex flex-col">
@@ -461,7 +462,7 @@ export const VoiceoverPanel: React.FC = () => {
           {transcriptionStatus === 'processing' && (
             <div className="space-y-1">
               <div className="text-[10px] text-[var(--color-accent-primary)]">
-                {TRANSCRIPTION_STEPS[transcriptionStep] || 'Starting...'}
+                {transcriptionStepLabel || 'Starting...'}
               </div>
               <div className="w-full bg-[var(--color-border)] rounded-full h-1.5 overflow-hidden">
                 <div
@@ -470,7 +471,7 @@ export const VoiceoverPanel: React.FC = () => {
                 />
               </div>
               <div className="text-[10px] text-[var(--color-text-muted)]">
-                GPU processing audio... {progressPercent}%
+                {transcriptionStepLabel || 'Processing...'} {elapsedSec > 0 && `(${elapsedSec}s elapsed)`}
               </div>
             </div>
           )}

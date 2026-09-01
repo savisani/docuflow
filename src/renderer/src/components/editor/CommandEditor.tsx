@@ -126,7 +126,8 @@ export const CommandEditor: React.FC = () => {
       setSettings(parsed.settings);
     }
 
-    const timeline = buildTimeline(normalized, assets, parsed.settings || settings);
+    const voiceoverAsset = useDocuFlowStore.getState().voiceover ? assets.find(a => a.id === useDocuFlowStore.getState().voiceover!.assetId) : undefined;
+    const timeline = buildTimeline(normalized, assets, parsed.settings || settings, voiceoverAsset?.duration);
     setTimeline(timeline);
     setCommands(normalized);
 

@@ -13,7 +13,7 @@ import { Command } from '../../engine/commands/types';
 import { compileSceneDSL, type SceneDSL, type CompileContext } from '../../engine/sceneDSL';
 import { generateWithCloudflare, CLOUDFLARE_MODELS, CloudflareConfig } from '../../utils/cloudflareApi';
 import {
-  generateScenesStream, fetchOllamaModels, offloadModel, chatWithModel,
+  generateScenesStream, fetchOllamaModels, offloadModel, chatWithModel, chatWithProvider,
   clearGpuCache,
   type AIProvider, type SceneItem, type OllamaModel,
 } from '../../services/aiService';
@@ -138,6 +138,8 @@ export const SceneGenerator: React.FC = () => {
   const [thinkingText, setThinkingText] = useState('');
   const [outputText, setOutputText] = useState('');
   const [modelLoading, setModelLoading] = useState(false);
+  const [timingMetrics, setTimingMetrics] = useState<Record<string, number>>({});
+  const [statusMessage, setStatusMessage] = useState('');
 
   // -- AI Provider settings --
   const [aiSettings, setAISettings] = useState(loadAIProviderSettings);
@@ -164,9 +166,7 @@ export const SceneGenerator: React.FC = () => {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // -- Interactive Chat state --
-  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; thinking?: string; text: string }>>([]);
-  const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
+  // Chat state is now in the Zustand store for persistence across tabs
 
   // -- GPU unload --
   const [unloadingGpu, setUnloadingGpu] = useState(false);
@@ -233,6 +233,8 @@ export const SceneGenerator: React.FC = () => {
     setScenes([]);
     setOutputText('');
     setThinkingText('');
+    setTimingMetrics({});
+    setStatusMessage('');
     setInspectorStatus('loading_model');
     setInspectorOpen(true);
 
@@ -243,6 +245,7 @@ export const SceneGenerator: React.FC = () => {
         text: s.text,
       }));
 
+      const t0 = performance.now();
       const sceneItems = await generateScenesStream(
         {
           transcriptionSegments: segments,
@@ -254,6 +257,9 @@ export const SceneGenerator: React.FC = () => {
           geminiModel: aiSettings.geminiModel || geminiConfig.model,
           geminiTemperature: geminiConfig.temperature,
           geminiMaxOutputTokens: geminiConfig.maxOutputTokens,
+          audioDuration: transcription.segments.length > 0
+            ? transcription.segments[transcription.segments.length - 1].end
+            : undefined,
         },
         {
           onThinkingToken: (_token, fullThinking) => {
@@ -273,8 +279,17 @@ export const SceneGenerator: React.FC = () => {
             setModelLoading(false);
             setInspectorStatus('thinking');
           },
+          onTiming: (label, ms) => {
+            setTimingMetrics(prev => ({ ...prev, [label]: ms }));
+          },
+          onStatus: (status) => {
+            setStatusMessage(status);
+          },
         },
       );
+
+      const totalTime = performance.now() - t0;
+      setTimingMetrics(prev => ({ ...prev, total: totalTime }));
 
       const storyboard: StoryboardScene[] = sceneItems.map((s) => ({
         ...s,
@@ -283,7 +298,7 @@ export const SceneGenerator: React.FC = () => {
 
       setScenes(storyboard);
       setInspectorStatus('done');
-      setToast({ message: `AI breakdown complete: ${storyboard.length} scenes`, type: 'success' });
+      setToast({ message: `AI breakdown complete: ${storyboard.length} scenes in ${(totalTime / 1000).toFixed(1)}s`, type: 'success' });
     } catch (err) {
       setSceneError(err instanceof Error ? err.message : String(err));
       setInspectorStatus('error');
@@ -397,9 +412,12 @@ export const SceneGenerator: React.FC = () => {
 
       // Use compiler to generate commands with proper motion animations
       const fps = store.settings.fps || 30;
-      const totalAudioDuration = transcription?.segments && transcription.segments.length > 0
-        ? transcription.segments[transcription.segments.length - 1].end
-        : undefined;
+      // Prefer explicit audio duration from transcription result, then transcript segment end, then undefined
+      const totalAudioDuration = transcription?.duration && transcription.duration > 0
+        ? transcription.duration
+        : transcription?.segments && transcription.segments.length > 0
+          ? transcription.segments[transcription.segments.length - 1].end
+          : undefined;
       const context: CompileContext = {
         fps,
         width: store.settings.width || 1920,
@@ -577,66 +595,74 @@ export const SceneGenerator: React.FC = () => {
   const handleChatSend = useCallback(async () => {
     const msg = chatInput.trim();
     if (!msg || chatLoading) return;
-    if (aiSettings.provider !== 'ollama') {
-      setToast({ message: 'Chat is only available with Ollama provider', type: 'error' });
-      return;
-    }
+
+    const store = useDocuFlowStore.getState();
+    const provider = store.chatProvider;
+    const model = store.chatModel;
+    const context = (window as any).__chatContext || '';
 
     const userMessage = { role: 'user' as const, text: msg };
-    setChatMessages((prev) => [...prev, userMessage]);
-    setChatInput('');
-    setChatLoading(true);
+    store.addChatMessage(userMessage);
+    store.setChatInput('');
+    store.setChatLoading(true);
 
     try {
-      const result = await chatWithModel(msg, aiSettings.ollamaModel, {
+      const result = await chatWithProvider({
+        message: context ? `${context}\n\nUser: ${msg}` : msg,
+        provider,
+        model,
+        openRouterApiKey: (aiSettings as any).openRouterApiKey,
+        geminiApiKey: geminiConfig.apiKey,
+        geminiModel: geminiConfig.model,
+      }, {
         onThinkingToken: (_token, fullThinking) => {
-          setChatMessages((prev) => {
-            const updated = [...prev];
-            const lastIdx = updated.length - 1;
-            if (lastIdx >= 0 && updated[lastIdx].role === 'assistant') {
-              updated[lastIdx] = { ...updated[lastIdx], thinking: fullThinking };
-            } else {
-              updated.push({ role: 'assistant', thinking: fullThinking, text: '' });
-            }
-            return updated;
-          });
+          const s = useDocuFlowStore.getState();
+          const msgs = s.chatMessages;
+          const lastIdx = msgs.length - 1;
+          if (lastIdx >= 0 && msgs[lastIdx].role === 'assistant') {
+            const updated = [...msgs];
+            updated[lastIdx] = { ...updated[lastIdx], thinking: fullThinking };
+            useDocuFlowStore.setState({ chatMessages: updated });
+          } else {
+            store.addChatMessage({ role: 'assistant', thinking: fullThinking, content: '' });
+          }
         },
         onOutputToken: (_token, fullOutput) => {
-          setChatMessages((prev) => {
-            const updated = [...prev];
-            const lastIdx = updated.length - 1;
-            if (lastIdx >= 0 && updated[lastIdx].role === 'assistant') {
-              updated[lastIdx] = { ...updated[lastIdx], text: fullOutput };
-            } else {
-              updated.push({ role: 'assistant', text: fullOutput });
-            }
-            return updated;
-          });
+          const s = useDocuFlowStore.getState();
+          const msgs = s.chatMessages;
+          const lastIdx = msgs.length - 1;
+          if (lastIdx >= 0 && msgs[lastIdx].role === 'assistant') {
+            const updated = [...msgs];
+            updated[lastIdx] = { ...updated[lastIdx], content: fullOutput };
+            useDocuFlowStore.setState({ chatMessages: updated });
+          } else {
+            store.addChatMessage({ role: 'assistant', content: fullOutput });
+          }
         },
       });
 
       // Ensure final message is set with complete data
-      setChatMessages((prev) => {
-        const updated = [...prev];
-        const lastIdx = updated.length - 1;
-        if (lastIdx >= 0 && updated[lastIdx].role === 'assistant') {
-          updated[lastIdx] = {
-            ...updated[lastIdx],
-            thinking: result.thinking || updated[lastIdx].thinking,
-            text: result.response || updated[lastIdx].text,
-          };
-        } else {
-          updated.push({ role: 'assistant', thinking: result.thinking, text: result.response });
-        }
-        return updated;
-      });
+      const s = useDocuFlowStore.getState();
+      const msgs = s.chatMessages;
+      const lastIdx = msgs.length - 1;
+      if (lastIdx >= 0 && msgs[lastIdx].role === 'assistant') {
+        const updated = [...msgs];
+        updated[lastIdx] = {
+          ...updated[lastIdx],
+          thinking: result.thinking || updated[lastIdx].thinking,
+          content: result.response || updated[lastIdx].content,
+        };
+        useDocuFlowStore.setState({ chatMessages: updated });
+      } else {
+        store.addChatMessage({ role: 'assistant', thinking: result.thinking, content: result.response });
+      }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Chat failed';
-      setChatMessages((prev) => [...prev, { role: 'assistant', text: `[Error: ${errorMsg}]` }]);
+      store.addChatMessage({ role: 'assistant', content: `[Error: ${errorMsg}]` });
     } finally {
-      setChatLoading(false);
+      store.setChatLoading(false);
     }
-  }, [chatInput, chatLoading, aiSettings]);
+  }, [chatInput, chatLoading, aiSettings, geminiConfig]);
 
   // Toast auto-dismiss
   React.useEffect(() => {
@@ -1401,12 +1427,9 @@ export const SceneGenerator: React.FC = () => {
         outputText={outputText}
         status={inspectorStatus}
         modelName={aiSettings.provider === 'ollama' ? aiSettings.ollamaModel : aiSettings.provider}
-        chatMessages={chatMessages}
-        chatInput={chatInput}
-        chatLoading={chatLoading}
-        onChatInputChange={setChatInput}
         onChatSend={handleChatSend}
-        onClearChat={() => setChatMessages([])}
+        timingMetrics={timingMetrics}
+        statusMessage={statusMessage}
       />
       </div>
     </div>

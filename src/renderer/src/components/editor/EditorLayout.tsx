@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useCallback, useRef, useEffect } from 'react';
 import { AssetLibrary } from '../assets/AssetLibrary';
 import { AssetPreview } from '../preview/AssetPreview';
 import { VideoPreview } from '../preview/VideoPreview';
@@ -11,15 +11,10 @@ import { useDocuFlowStore } from '../../app/store';
 import { Settings, FileText, ChevronLeft, ChevronRight, Mic, Terminal } from 'lucide-react';
 import { Tooltip } from '../ui';
 
-type RightPanel = 'inspector' | 'commands' | 'console' | 'voiceover';
-
 const RIGHT_PANEL_MIN_WIDTH = 220;
 const RIGHT_PANEL_MAX_WIDTH = 500;
 
 export const EditorLayout: React.FC = () => {
-  const [rightPanel, setRightPanel] = useState<RightPanel>('inspector');
-  const [rightPanelWidth, setRightPanelWidth] = useState(288);
-
   const {
     panelVisibility,
     setPanelVisibility,
@@ -27,6 +22,10 @@ export const EditorLayout: React.FC = () => {
     setAssetsWidth,
     setPreviewTimelineSplit,
     selectedCommandId,
+    rightPanel,
+    setRightPanel,
+    rightPanelWidth,
+    setRightPanelWidth,
   } = useDocuFlowStore();
 
   const rightPanelVisible = panelVisibility.inspector;
@@ -78,7 +77,7 @@ export const EditorLayout: React.FC = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [setAssetsWidth, setPreviewTimelineSplit]);
+  }, [setAssetsWidth, setPreviewTimelineSplit, setRightPanelWidth]);
 
   const handleAssetsMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -230,10 +229,18 @@ export const EditorLayout: React.FC = () => {
                 ))}
               </div>
               <div className="flex-1 overflow-hidden">
-                {rightPanel === 'inspector' && <Inspector />}
-                {rightPanel === 'commands' && <CommandEditor />}
-                {rightPanel === 'voiceover' && <VoiceoverPanel />}
-                {rightPanel === 'console' && <CommandConsole />}
+                <div style={{ display: rightPanel === 'inspector' ? 'contents' : 'none' }} className="w-full h-full">
+                  <Inspector />
+                </div>
+                <div style={{ display: rightPanel === 'commands' ? 'contents' : 'none' }} className="w-full h-full">
+                  <CommandEditor />
+                </div>
+                <div style={{ display: rightPanel === 'voiceover' ? 'contents' : 'none' }} className="w-full h-full">
+                  <VoiceoverPanel />
+                </div>
+                <div style={{ display: rightPanel === 'console' ? 'contents' : 'none' }} className="w-full h-full">
+                  <CommandConsole />
+                </div>
               </div>
             </>
           )}

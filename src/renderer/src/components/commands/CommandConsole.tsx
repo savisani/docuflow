@@ -120,7 +120,8 @@ export const CommandConsole: React.FC = () => {
 
     const existingCommands = getState().commands;
     const merged = [...existingCommands, ...result.commands];
-    const timeline = buildTimeline(merged, assets, settings);
+    const voiceoverAsset = getState().voiceover ? assets.find(a => a.id === getState().voiceover!.assetId) : undefined;
+    const timeline = buildTimeline(merged, assets, settings, voiceoverAsset?.duration);
 
     getState().setCommands(merged);
     setTimeline(timeline);

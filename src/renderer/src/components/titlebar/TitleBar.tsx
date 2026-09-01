@@ -5,16 +5,38 @@ import { buildTimeline } from '../../engine/timeline/builder';
 import { validateCommands } from '../../engine/commands/validator';
 import { loadAssetMetadata } from '../../engine/media/loader';
 import { generateId } from '../../utils/format';
+import { fetchOllamaPs } from '../../services/aiService';
 
 export const TitleBar: React.FC = () => {
   const [isMaximized, setIsMaximized] = useState(false);
-  const { settings, assets, commands, historyIndex, history, panelVisibility, setPanelVisibility, setTimeline, setSettings, setCommands, setAssets, undo, redo, activeTab, setActiveTab } = useDocuFlowStore();
+  const { settings, assets, commands, historyIndex, history, panelVisibility, setPanelVisibility, setTimeline, setSettings, setCommands, setAssets, undo, redo, activeTab, setActiveTab, ollamaModelStatus, ollamaModelName, setOllamaModelStatus } = useDocuFlowStore();
 
   useEffect(() => {
     window.docuflow?.isMaximized()?.then(setIsMaximized);
     const unsubscribe = window.docuflow?.onMaximizedChange(setIsMaximized);
     return () => { unsubscribe?.(); };
   }, []);
+
+  // Poll Ollama model status every 5 seconds
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const ps = await fetchOllamaPs();
+        if (cancelled) return;
+        if (ps.models.length > 0) {
+          setOllamaModelStatus('loaded', ps.models[0].name);
+        } else {
+          setOllamaModelStatus('unknown');
+        }
+      } catch {
+        if (!cancelled) setOllamaModelStatus('error');
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 5000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [setOllamaModelStatus]);
 
   const handleMinimize = useCallback(() => { window.docuflow?.minimize(); }, []);
   const handleMaximize = useCallback(() => { window.docuflow?.maximize(); }, []);
@@ -26,7 +48,8 @@ export const TitleBar: React.FC = () => {
     if (!validation.valid) {
       console.info('Building timeline with warnings:', validation.errors.map((e) => e.message).join('; '));
     }
-    const timeline = buildTimeline(state.commands, state.assets, state.settings);
+    const voiceoverAsset = state.voiceover ? state.assets.find(a => a.id === state.voiceover!.assetId) : undefined;
+    const timeline = buildTimeline(state.commands, state.assets, state.settings, voiceoverAsset?.duration);
     setTimeline(timeline);
   }, [setTimeline]);
 
@@ -65,7 +88,8 @@ export const TitleBar: React.FC = () => {
         setAssets(loadedAssets);
         const currentState = useDocuFlowStore.getState();
         if (currentState.commands.length > 0) {
-          const tl = buildTimeline(currentState.commands, loadedAssets, currentState.settings);
+          const voiceoverAsset = currentState.voiceover ? currentState.assets.find(a => a.id === currentState.voiceover!.assetId) : undefined;
+          const tl = buildTimeline(currentState.commands, loadedAssets, currentState.settings, voiceoverAsset?.duration);
           setTimeline(tl);
         }
       }
@@ -218,7 +242,7 @@ export const TitleBar: React.FC = () => {
       {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Right: Resolution + Window Controls */}
+      {/* Right: Resolution + Model Status + Window Controls */}
       <div className="flex items-center gap-2 shrink-0">
         <div
           className="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono mr-1"
@@ -227,6 +251,42 @@ export const TitleBar: React.FC = () => {
           <span>{settings.width}x{settings.height}</span>
           <span className="text-slate-600">@</span>
           <span>{settings.fps}fps</span>
+        </div>
+
+        {/* Model status indicator */}
+        <div
+          className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[9px] font-mono"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          title={
+            ollamaModelStatus === 'loaded'
+              ? `Model loaded: ${ollamaModelName}`
+              : ollamaModelStatus === 'loading'
+                ? 'Model loading...'
+                : ollamaModelStatus === 'error'
+                  ? 'Ollama connection error'
+                  : 'No model loaded (use Ollama tab to load)'
+          }
+        >
+          <span
+            className={`w-2 h-2 rounded-full ${
+              ollamaModelStatus === 'loaded'
+                ? 'bg-green-500'
+                : ollamaModelStatus === 'loading'
+                  ? 'bg-amber-500 animate-pulse'
+                  : ollamaModelStatus === 'error'
+                    ? 'bg-red-500'
+                    : 'bg-slate-600'
+            }`}
+          />
+          <span className="text-slate-400">
+            {ollamaModelStatus === 'loaded'
+              ? ollamaModelName || 'Loaded'
+              : ollamaModelStatus === 'loading'
+                ? 'Loading'
+                : ollamaModelStatus === 'error'
+                  ? 'Error'
+                  : 'No model'}
+          </span>
         </div>
 
         <div

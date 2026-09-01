@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Activity, ChevronRight, Loader2, Zap, Send,
+  Activity, ChevronRight, Loader2, Zap, Send, Settings, FileText,
 } from 'lucide-react';
+import { useDocuFlowStore } from '../../app/store';
+import { buildProjectContext, ProjectContext } from '../../services/aiService';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -15,12 +17,11 @@ export interface ThinkingInspectorProps {
   thinkingText: string;
   outputText: string;
   modelName?: string;
-  chatMessages: Array<{ role: 'user' | 'assistant'; thinking?: string; text: string }>;
-  chatInput: string;
-  chatLoading: boolean;
-  onChatInputChange: (value: string) => void;
   onChatSend: () => void;
-  onClearChat?: () => void;
+  /** Timing metrics from generation (label → ms) */
+  timingMetrics?: Record<string, number>;
+  /** Status message (batch progress, etc.) */
+  statusMessage?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +137,45 @@ const ChatTab: React.FC<{
   onClear?: () => void;
 }> = ({ messages, input, loading, modelName, onInputChange, onSend, onClear }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [includeContext, setIncludeContext] = useState(true);
+  const {
+    chatProvider, setChatProvider, chatModel, setChatModel,
+    scenes, assets, commands, settings, transcript, voiceover,
+  } = useDocuFlowStore();
+
+  const buildContext = useCallback((): string => {
+    if (!includeContext) return '';
+
+    const ctx: ProjectContext = {
+      scenes: scenes.map(s => ({
+        id: s.id,
+        type: s.type,
+        duration: s.duration,
+        content: s.content || s.imagePrompt || '',
+      })),
+      assets: assets.map(a => ({
+        id: a.id,
+        name: a.filename,
+        type: a.type,
+        duration: a.duration,
+      })),
+      timeline: commands.length > 0 ? {
+        duration: commands.reduce((max, c) => {
+          const end = (c.start ?? 0) + (c.duration ?? 0);
+          return end > max ? end : max;
+        }, 0),
+        fps: settings.fps,
+      } : null,
+      transcript: transcript ? {
+        text: transcript.text,
+        duration: voiceover?.duration || 0,
+        segments: transcript.words?.length || 0,
+      } : null,
+      selectedItems: [],
+    };
+
+    return buildProjectContext(ctx);
+  }, [includeContext, scenes, assets, commands, settings, transcript, voiceover]);
 
   useEffect(() => {
     if (containerRef.current) {
@@ -152,10 +192,29 @@ const ChatTab: React.FC<{
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+      {/* Provider/Model selector */}
+      <div className="shrink-0 flex items-center gap-1 pb-2">
+        <select
+          value={chatProvider}
+          onChange={(e) => setChatProvider(e.target.value as any)}
+          className="flex-1 bg-slate-800/60 border border-white/10 rounded px-1.5 py-1 text-[9px] text-slate-300 outline-none"
+        >
+          <option value="ollama">Local (Ollama)</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="gemini">Gemini</option>
+        </select>
+        <input
+          value={chatModel}
+          onChange={(e) => setChatModel(e.target.value)}
+          placeholder="model name"
+          className="flex-1 bg-slate-800/60 border border-white/10 rounded px-1.5 py-1 text-[9px] text-slate-300 font-mono outline-none"
+        />
+      </div>
+
       {/* Model header */}
       <div className="shrink-0 flex items-center justify-between px-1 pb-2">
         <span className="text-[8px] text-slate-600 font-mono truncate">
-          {modelName || 'No model loaded'}
+          {modelName || chatModel || 'No model loaded'}
         </span>
         {messages.length > 0 && onClear && (
           <button
@@ -227,19 +286,39 @@ const ChatTab: React.FC<{
 
       {/* Input */}
       <div className="shrink-0 flex gap-1.5 pt-2">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => onInputChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Ask the model anything..."
-          disabled={loading}
-          className="flex-1 bg-slate-800/60 border border-white/10 rounded-lg px-2.5 py-1.5 text-[10px] text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-slate-600 transition-all disabled:opacity-50"
-        />
+        <div className="flex-1 flex flex-col gap-1">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setIncludeContext(!includeContext)}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] transition-colors ${
+                includeContext
+                  ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                  : 'bg-slate-800/60 text-slate-500 border border-white/5 hover:text-slate-300'
+              }`}
+              title={includeContext ? 'Include project context' : 'Exclude project context'}
+            >
+              <FileText size={8} />
+              <span>Context</span>
+            </button>
+          </div>
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => onInputChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask the model anything..."
+            disabled={loading}
+            className="flex-1 bg-slate-800/60 border border-white/10 rounded-lg px-2.5 py-1.5 text-[10px] text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-slate-600 transition-all disabled:opacity-50"
+          />
+        </div>
         <button
-          onClick={onSend}
+          onClick={() => {
+            // Store the context for the send handler
+            (window as any).__chatContext = includeContext ? buildContext() : '';
+            onSend();
+          }}
           disabled={loading || !input.trim()}
-          className="px-2 py-1.5 rounded-lg bg-slate-700/50 text-slate-400 border border-white/10 hover:bg-slate-700 hover:text-slate-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="px-2 py-1.5 rounded-lg bg-slate-700/50 text-slate-400 border border-white/10 hover:bg-slate-700 hover:text-slate-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed self-end"
         >
           <Send size={10} />
         </button>
@@ -257,7 +336,9 @@ const LiveAITab: React.FC<{
   thinkingText: string;
   outputText: string;
   modelName?: string;
-}> = ({ status, thinkingText, outputText, modelName }) => {
+  timingMetrics?: Record<string, number>;
+  statusMessage?: string;
+}> = ({ status, thinkingText, outputText, modelName, timingMetrics, statusMessage }) => {
   const statusLabel = {
     idle: '',
     loading_model: 'Loading model...',
@@ -273,17 +354,39 @@ const LiveAITab: React.FC<{
         <span className="text-[9px] text-slate-500 truncate">
           {modelName}
         </span>
-        {statusLabel && (
-          <span className={`text-[8px] font-medium px-1.5 py-0.5 rounded ${
-            status === 'error' ? 'text-red-400 bg-red-500/10' :
-            status === 'done' ? 'text-emerald-400 bg-emerald-500/10' :
-            status === 'loading_model' ? 'text-amber-400 bg-amber-500/10' :
-            'text-slate-400 bg-slate-500/10'
-          }`}>
-            {statusLabel}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {statusLabel && (
+            <span className={`text-[8px] font-medium px-1.5 py-0.5 rounded ${
+              status === 'error' ? 'text-red-400 bg-red-500/10' :
+              status === 'done' ? 'text-emerald-400 bg-emerald-500/10' :
+              status === 'loading_model' ? 'text-amber-400 bg-amber-500/10' :
+              'text-slate-400 bg-slate-500/10'
+            }`}>
+              {statusLabel}
+            </span>
+          )}
+        </div>
       </div>
+
+      {/* Status message (batch progress, etc.) */}
+      {statusMessage && status === 'thinking' && (
+        <div className="shrink-0 flex items-center gap-2 px-2 py-1 bg-slate-800/40 rounded-lg border border-white/5">
+          <Zap size={10} className="text-amber-400" />
+          <span className="text-[9px] text-slate-400">{statusMessage}</span>
+        </div>
+      )}
+
+      {/* Timing metrics — shown when generation completes */}
+      {timingMetrics && Object.keys(timingMetrics).length > 0 && (
+        <div className="shrink-0 grid grid-cols-2 gap-1.5">
+          {Object.entries(timingMetrics).map(([label, ms]) => (
+            <div key={label} className="flex items-center justify-between px-2 py-1 bg-slate-800/40 rounded border border-white/5">
+              <span className="text-[8px] text-slate-500 uppercase">{label}</span>
+              <span className="text-[9px] text-slate-300 font-mono">{(ms / 1000).toFixed(1)}s</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Thinking section — light gray, collapsible, only when present */}
       <StreamingSection
@@ -325,14 +428,15 @@ export const ThinkingInspector: React.FC<ThinkingInspectorProps> = ({
   thinkingText,
   outputText,
   modelName,
-  chatMessages,
-  chatInput,
-  chatLoading,
-  onChatInputChange,
   onChatSend,
-  onClearChat,
+  timingMetrics,
+  statusMessage,
 }) => {
   const [tab, setTab] = useState<InspectorTab>('live');
+  const {
+    chatMessages, chatInput, chatLoading,
+    setChatInput, clearChatMessages,
+  } = useDocuFlowStore();
 
   return (
     <div
@@ -396,6 +500,8 @@ export const ThinkingInspector: React.FC<ThinkingInspectorProps> = ({
                 thinkingText={thinkingText}
                 outputText={outputText}
                 modelName={modelName}
+                timingMetrics={timingMetrics}
+                statusMessage={statusMessage}
               />
             ) : (
               <ChatTab
@@ -403,9 +509,9 @@ export const ThinkingInspector: React.FC<ThinkingInspectorProps> = ({
                 input={chatInput}
                 loading={chatLoading}
                 modelName={modelName}
-                onInputChange={onChatInputChange}
+                onInputChange={setChatInput}
                 onSend={onChatSend}
-                onClear={onClearChat}
+                onClear={clearChatMessages}
               />
             )}
           </div>

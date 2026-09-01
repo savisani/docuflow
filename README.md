@@ -116,7 +116,7 @@ docuflow-desktop/
 | **Thinking Inspector / VRAM Telemetry** | ✅ Active | 350px collapsible sidebar with real-time VRAM monitor, live reasoning console, GPU auto-detect, live token streaming, interactive AI chat input |
 | **Top VRAM Status Bar** | ✅ Active | Persistent compact bar: active model badge, real-time VRAM usage pill |
 | **Interactive AI Chat** | ✅ Active | In-inspector chat input for direct Ollama model interaction, streaming responses, prompt tweaking |
-| **AI Image Generator** | ✅ Active | Cloudflare Workers (FLUX/SD Schnell) with batch generation |
+| **AI Image Generator** | ✅ Active | Cloudflare Workers (FLUX/SD Schnell) with batch generation, regeneration workflow |
 | **Local GPU Whisper Transcriber** | ✅ Active | Python-based, supports tiny/base/small/medium/large-v3 |
 | **Asset Management** | ✅ Active | Drag-drop import, asset library, protocol-based local file serving |
 | **Video Preview (Remotion)** | ✅ Active | Real-time preview with playhead, track visibility toggles |
@@ -176,6 +176,14 @@ npm run build:linux  # Linux
 
 | Date | Change | Files |
 |------|--------|-------|
+| 2026-09-01 | **Tab Switching Fix** — Changed from conditional rendering (ternary) to CSS `display:contents`/`none` so all three tab components render simultaneously, hidden via CSS. State now persists across tab switches. | `App.tsx`, `store.ts`, `EditorLayout.tsx` |
+| 2026-09-01 | **Transcription Progress** — Added `transcriptionStep`, `transcriptionStepLabel`, `transcriptionStartedAt` to Zustand store. Centralized transcription progress state. VoiceoverPanel shows real elapsed time instead of fake percentage. | `store.ts`, `VoiceoverPanel.tsx` |
+| 2026-09-01 | **AI Chat Provider Abstraction** — Added `chatWithProvider()` function that works with Ollama, OpenRouter, and Gemini. Chat UI now supports all providers with provider/model selector. | `aiService.ts`, `ThinkingInspector.tsx`, `SceneGenerator.tsx` |
+| 2026-09-01 | **Ollama Thinking Error Fix** — Added `modelSupportsThinking()` function to detect which models support the `think` parameter. Only sends `think: true` for models like qwen3/deepseek-r1. Models like gemma3 no longer get 400 errors. | `aiService.ts` |
+| 2026-09-01 | **Model Loaded Indicator** — Added poll-based model status indicator in TitleBar showing 🟠/🟢/🔴/⚫ status. Polls Ollama `/api/ps` every 5 seconds. | `TitleBar.tsx`, `store.ts` |
+| 2026-09-01 | **Image Regeneration** — Added "Regenerate image" button with refresh icon in hover overlay. Preserves original image until regeneration succeeds. Shows spinning animation during regeneration. | `ImageGenerator.tsx` |
+| 2026-09-01 | **AI Chat Project Context** — Added `buildProjectContext()` function that includes scenes, assets, timeline, and transcript in AI chat prompts. Context toggle button in chat UI. | `aiService.ts`, `ThinkingInspector.tsx`, `SceneGenerator.tsx` |
+| 2026-09-01 | **Error Handling** — Added provider-specific error messages in `chatWithProvider()`. Errors now include provider name for easier debugging. | `aiService.ts` |
 | 2026-09-01 | **Scene DSL Architecture** — Introduced intermediate Scene DSL between AI output and DocuFlow commands. AI now generates simple key-value text blocks (not JSON) with `text`, `visual`, `motion`, `transition`, `style`, `duration`. Deterministic compiler converts DSL to DocuFlow Command[] with proper motion animations (25 types) and transitions (14 types). Parser normalizes aliases. 117 tests passing. | `engine/sceneDSL/types.ts`, `parser.ts`, `compiler.ts`, `index.ts` |
 | 2026-09-01 | **Multi-language Transcript Support** — Added `originalText` and `originalLanguage` fields to TranscriptSegment and ProjectTranscriptSegment types. Added `translated` flag to Transcript. Added `translateToEnglish()` function for non-English transcripts. AI prompt sends both original + English translation for visual reasoning. | `engine/transcription/types.ts`, `types/project.ts`, `services/aiService.ts` |
 | 2026-09-01 | **SceneGenerator Refactored** — Timeline assembly now uses Scene DSL compiler instead of manual ShowCommand creation. Supports motion animations and transitions in generated timelines. | `components/generator/SceneGenerator.tsx` |

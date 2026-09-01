@@ -246,7 +246,16 @@ function App() {
     <div className="w-full h-screen flex flex-col overflow-hidden bg-slate-950 text-white">
       <TitleBar />
       <div className="flex-1 w-full h-full overflow-hidden flex flex-row">
-        {activeTab === 'studio' ? <EditorLayout /> : activeTab === 'scenes' ? <SceneGenerator /> : <ImageGenerator />}
+        {/* All tabs rendered simultaneously; hidden via CSS to preserve state */}
+        <div style={{ display: activeTab === 'studio' ? 'contents' : 'none' }} className="w-full h-full">
+          <EditorLayout />
+        </div>
+        <div style={{ display: activeTab === 'scenes' ? 'contents' : 'none' }} className="w-full h-full">
+          <SceneGenerator />
+        </div>
+        <div style={{ display: activeTab === 'generator' ? 'contents' : 'none' }} className="w-full h-full">
+          <ImageGenerator />
+        </div>
       </div>
       <DropZone visible={dropVisible} fileCount={dropFileCount} />
     </div>

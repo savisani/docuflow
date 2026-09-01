@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Settings, Wand2, Image as ImageIcon, Download, Film, Plus, Cloud, X, Sliders, Sparkles, ZoomIn, Save, CheckCircle, FolderOpen } from 'lucide-react';
+import { Settings, Wand2, Image as ImageIcon, Download, Film, Plus, Cloud, X, Sliders, Sparkles, ZoomIn, Save, CheckCircle, FolderOpen, RefreshCw } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { Button } from '../ui';
 import { v4 as uuidv4 } from 'uuid';
@@ -135,6 +135,11 @@ export const ImageGenerator: React.FC = () => {
 
   const [lightboxImage, setLightboxImage] = useState<{ url: string; prompt: string; aspectRatio: string } | null>(null);
 
+  // Regeneration state
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [regeneratePrompt, setRegeneratePrompt] = useState('');
+  const [regenerateOriginalUrl, setRegenerateOriginalUrl] = useState<string | null>(null);
+
   const [saveLocation, setSaveLocationState] = useState(loadSaveLocation);
 
   useEffect(() => { saveCloudflareConfig(cloudflareConfig); }, [cloudflareConfig]);
@@ -152,6 +157,52 @@ export const ImageGenerator: React.FC = () => {
     setAdvancedSettings(tempAdvanced);
     setShowSettings(false);
   }, [tempWorkerUrl, tempAdvanced]);
+
+  // Regeneration handler
+  const handleRegenerate = useCallback(async (imageId: string) => {
+    const image = generatedImages.find(img => img.id === imageId);
+    if (!image || !cloudflareConfig.workerUrl) return;
+
+    // Start regeneration - preserve original
+    setRegeneratingId(imageId);
+    setRegeneratePrompt(image.prompt);
+    setRegenerateOriginalUrl(image.url);
+    setError(null);
+
+    try {
+      const result = await generateWithCloudflare(cloudflareConfig, {
+        prompt: image.prompt.trim(),
+        model: advancedSettings.model,
+        steps: advancedSettings.steps,
+        aspectRatio: image.aspectRatio,
+        negativePrompt: negativePrompt || undefined,
+      });
+
+      const croppedUrl = await cropImageToAspectRatio(
+        result.url,
+        selectedRatio.width,
+        selectedRatio.height,
+      );
+
+      // Replace the original with the new image
+      const updatedImages = generatedImages.map(img =>
+        img.id === imageId
+          ? { ...img, url: croppedUrl, prompt: image.prompt }
+          : img
+      );
+      useDocuFlowStore.setState({ generatedImages: updatedImages });
+
+      setToast({ message: 'Image regenerated successfully', type: 'success' });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Regeneration failed';
+      setError(errorMsg);
+      // Preserve original on error - no change needed
+    } finally {
+      setRegeneratingId(null);
+      setRegeneratePrompt('');
+      setRegenerateOriginalUrl(null);
+    }
+  }, [generatedImages, cloudflareConfig, advancedSettings, negativePrompt, selectedRatio]);
 
   const handleSelectFolder = useCallback(async () => {
     const result = await window.docuflow.selectFolder();
@@ -621,9 +672,16 @@ export const ImageGenerator: React.FC = () => {
                   selectedImage === image.id
                     ? 'border-purple-500/50 ring-2 ring-purple-500/20'
                     : 'border-white/5 hover:border-white/10'
-                }`}
+                } ${regeneratingId === image.id ? 'ring-2 ring-amber-500/50' : ''}`}
                 onClick={() => setLightboxImage({ url: image.url, prompt: image.prompt, aspectRatio: image.aspectRatio })}
               >
+                {/* Regenerating overlay */}
+                {regeneratingId === image.id && (
+                  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-900/80 backdrop-blur-sm">
+                    <RefreshCw size={20} className="text-amber-400 animate-spin mb-2" />
+                    <p className="text-[10px] text-amber-300 font-medium">Regenerating...</p>
+                  </div>
+                )}
                 <div className="aspect-square bg-slate-800/50">
                   <img
                     src={image.url}
@@ -647,6 +705,21 @@ export const ImageGenerator: React.FC = () => {
                     title="View full size"
                   >
                     <ZoomIn size={14} />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRegenerate(image.id);
+                    }}
+                    disabled={regeneratingId === image.id || isGenerating}
+                    className="w-8 h-8 rounded-full bg-amber-500/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-amber-400 transition-colors disabled:opacity-50"
+                    title="Regenerate image"
+                  >
+                    {regeneratingId === image.id ? (
+                      <RefreshCw size={14} className="animate-spin" />
+                    ) : (
+                      <RefreshCw size={14} />
+                    )}
                   </button>
                   <button
                     onClick={(e) => {

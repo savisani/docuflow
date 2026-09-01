@@ -8,6 +8,7 @@ import { buildTimeline } from '../engine/timeline/builder';
 
 export type PreviewMode = 'timeline' | 'asset';
 export type ActiveTab = 'studio' | 'generator' | 'scenes';
+export type RightPanel = 'inspector' | 'commands' | 'console' | 'voiceover';
 
 export interface GeneratedImage {
   id: string;
@@ -105,12 +106,28 @@ interface DocuFlowState {
   panelVisibility: PanelVisibility;
   workspaceLayout: WorkspaceLayout;
   snapEnabled: boolean;
+  rightPanel: RightPanel;
+  rightPanelWidth: number;
+
+  // AI Chat state (persisted across tab switches)
+  chatMessages: Array<{ role: 'user' | 'assistant'; content: string; thinking?: string }>;
+  chatInput: string;
+  chatLoading: boolean;
+  chatProvider: 'ollama' | 'openrouter' | 'gemini';
+  chatModel: string;
+
+  // Model status (poll-based)
+  ollamaModelStatus: 'unknown' | 'loading' | 'loaded' | 'error';
+  ollamaModelName: string;
 
   voiceover: ProjectVoiceover | null;
   transcript: ProjectTranscript | null;
   sceneMarkers: ProjectSceneMarker[];
   transcriptionStatus: 'idle' | 'processing' | 'complete' | 'error';
   transcriptionError: string | null;
+  transcriptionStep: number;
+  transcriptionStepLabel: string;
+  transcriptionStartedAt: number | null;
 
   history: HistoryState[];
   historyIndex: number;
@@ -145,6 +162,15 @@ interface DocuFlowState {
   setAssetsWidth: (width: number) => void;
   setPreviewTimelineSplit: (split: number) => void;
   setSnapEnabled: (enabled: boolean) => void;
+  setRightPanel: (panel: RightPanel) => void;
+  setRightPanelWidth: (width: number) => void;
+  addChatMessage: (message: { role: 'user' | 'assistant'; content: string; thinking?: string }) => void;
+  setChatInput: (input: string) => void;
+  setChatLoading: (loading: boolean) => void;
+  setChatProvider: (provider: 'ollama' | 'openrouter' | 'gemini') => void;
+  setChatModel: (model: string) => void;
+  clearChatMessages: () => void;
+  setOllamaModelStatus: (status: 'unknown' | 'loading' | 'loaded' | 'error', modelName?: string) => void;
 
   setVoiceover: (voiceover: ProjectVoiceover | null) => void;
   setTranscript: (transcript: ProjectTranscript | null) => void;
@@ -153,6 +179,8 @@ interface DocuFlowState {
   removeSceneMarker: (id: string) => void;
   setTranscriptionStatus: (status: 'idle' | 'processing' | 'complete' | 'error') => void;
   setTranscriptionError: (error: string | null) => void;
+  setTranscriptionStep: (step: number, label: string) => void;
+  resetTranscriptionProgress: () => void;
   setAudioRole: (assetId: string, role: 'voiceover' | 'music' | 'sfx' | 'ambient' | 'unassigned') => void;
   getVoiceoverAsset: () => Asset | undefined;
 
@@ -198,9 +226,35 @@ function restoreState(snapshot: HistoryState): Partial<DocuFlowState> {
   };
 }
 
-function rebuildAndSet(commands: Command[], assets: Asset[], settings: ProjectSettings) {
-  const tl = buildTimeline(commands, assets, settings);
+/**
+ * Find the primary (voiceover) audio asset and return its duration in seconds.
+ * Returns undefined if no voiceover audio with a known duration exists.
+ */
+function getPrimaryAudioDuration(assets: Asset[], voiceover: ProjectVoiceover | null): number | undefined {
+  if (!voiceover) return undefined;
+  const asset = assets.find((a) => a.id === voiceover.assetId);
+  if (!asset || asset.type !== 'audio' || !asset.duration || asset.duration <= 0) return undefined;
+  return asset.duration;
+}
+
+function rebuildAndSet(commands: Command[], assets: Asset[], settings: ProjectSettings, voiceover: ProjectVoiceover | null) {
+  const primaryAudioDuration = getPrimaryAudioDuration(assets, voiceover);
+  const tl = buildTimeline(commands, assets, settings, primaryAudioDuration);
   useDocuFlowStore.setState({ timeline: tl });
+}
+
+/**
+ * Build timeline using current state's primary audio duration.
+ * Call this instead of buildTimeline directly to ensure audio duration is respected.
+ */
+function buildTimelineFromState(
+  commands: Command[],
+  assets: Asset[],
+  settings: ProjectSettings,
+  voiceover: ProjectVoiceover | null
+): ReturnType<typeof buildTimeline> {
+  const primaryAudioDuration = getPrimaryAudioDuration(assets, voiceover);
+  return buildTimeline(commands, assets, settings, primaryAudioDuration);
 }
 
 export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
@@ -232,12 +286,24 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
   panelVisibility: loadPanelVisibility(),
   workspaceLayout: loadWorkspaceLayout(),
   snapEnabled: true,
+  rightPanel: 'inspector',
+  rightPanelWidth: 288,
+  chatMessages: [],
+  chatInput: '',
+  chatLoading: false,
+  chatProvider: 'ollama',
+  chatModel: 'llama3.2',
+  ollamaModelStatus: 'unknown',
+  ollamaModelName: '',
 
   voiceover: null,
   transcript: null,
   sceneMarkers: [],
   transcriptionStatus: 'idle',
   transcriptionError: null,
+  transcriptionStep: -1,
+  transcriptionStepLabel: '',
+  transcriptionStartedAt: null,
 
   history: [{
     commands: [],
@@ -251,18 +317,25 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
   batchActive: false,
   batchSnapshot: null,
 
-  setProject: (project) => set({
-    project,
-    voiceover: project.voiceover ?? null,
-    transcript: project.transcript ?? null,
-    sceneMarkers: project.sceneMarkers ?? [],
-  }),
+  setProject: (project) => {
+    const state = get();
+    const newVoiceover = project.voiceover ?? null;
+    // Rebuild timeline with new voiceover audio duration constraint
+    const tl = buildTimelineFromState(state.commands, state.assets, state.settings, newVoiceover);
+    set({
+      project,
+      voiceover: newVoiceover,
+      transcript: project.transcript ?? null,
+      sceneMarkers: project.sceneMarkers ?? [],
+      timeline: tl,
+    });
+  },
   setAssets: (assets) => set({ assets }),
   addAsset: (asset) => {
     const state = get();
     const newAssets = [...state.assets, asset];
     const newState = { ...state, assets: newAssets };
-    const tl = buildTimeline(newState.commands, newAssets, newState.settings);
+    const tl = buildTimelineFromState(newState.commands, newAssets, newState.settings, state.voiceover);
     if (!state.batchActive) {
       const postSnap = captureState({ ...newState, timeline: tl });
       const newHistory = state.history.slice(0, state.historyIndex + 1);
@@ -276,7 +349,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
   removeAsset: (id) => {
     const state = get();
     const newAssets = state.assets.filter((a) => a.id !== id);
-    const tl = buildTimeline(state.commands, newAssets, state.settings);
+    const tl = buildTimelineFromState(state.commands, newAssets, state.settings, state.voiceover);
     if (!state.batchActive) {
       const postSnap = captureState({ ...state, assets: newAssets, timeline: tl });
       const newHistory = state.history.slice(0, state.historyIndex + 1);
@@ -290,13 +363,13 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
   setCommands: (commands) => {
     const state = get();
     set({ commands });
-    const tl = buildTimeline(commands, get().assets, get().settings);
+    const tl = buildTimelineFromState(commands, get().assets, get().settings, state.voiceover);
     set({ timeline: tl });
   },
   addCommand: (command) => {
     const state = get();
     const newCommands = [...state.commands, command];
-    const tl = buildTimeline(newCommands, state.assets, state.settings);
+    const tl = buildTimelineFromState(newCommands, state.assets, state.settings, state.voiceover);
     if (!state.batchActive) {
       const postSnap = captureState({ ...state, commands: newCommands, timeline: tl });
       const newHistory = state.history.slice(0, state.historyIndex + 1);
@@ -311,7 +384,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
     const state = get();
     const newCommands = state.commands.filter((c) => c.id !== id);
     const newSelectedId = state.selectedCommandId === id ? null : state.selectedCommandId;
-    const tl = buildTimeline(newCommands, state.assets, state.settings);
+    const tl = buildTimelineFromState(newCommands, state.assets, state.settings, state.voiceover);
     if (!state.batchActive) {
       const postSnap = captureState({ ...state, commands: newCommands, timeline: tl });
       const newHistory = state.history.slice(0, state.historyIndex + 1);
@@ -325,7 +398,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
   updateCommand: (id, updates) => {
     const state = get();
     const newCommands = state.commands.map((c) => (c.id === id ? { ...c, ...updates } as Command : c));
-    const tl = buildTimeline(newCommands, state.assets, state.settings);
+    const tl = buildTimelineFromState(newCommands, state.assets, state.settings, state.voiceover);
     if (!state.batchActive) {
       const postSnap = captureState({ ...state, commands: newCommands, timeline: tl });
       const newHistory = state.history.slice(0, state.historyIndex + 1);
@@ -360,7 +433,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
     } as Command;
 
     const newCommands = [...state.commands, command];
-    const tl = buildTimeline(newCommands, state.assets, state.settings);
+    const tl = buildTimelineFromState(newCommands, state.assets, state.settings, state.voiceover);
     const postSnap = captureState({ ...state, commands: newCommands, timeline: tl });
     const newHistory = state.history.slice(0, state.historyIndex + 1);
     newHistory.push(postSnap);
@@ -400,7 +473,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
     const newCommands = [...state.commands];
     const [removed] = newCommands.splice(fromIndex, 1);
     newCommands.splice(toIndex, 0, removed);
-    const tl = buildTimeline(newCommands, state.assets, state.settings);
+    const tl = buildTimelineFromState(newCommands, state.assets, state.settings, state.voiceover);
     if (!state.batchActive) {
       const postSnap = captureState({ ...state, commands: newCommands, timeline: tl });
       const newHistory = state.history.slice(0, state.historyIndex + 1);
@@ -434,18 +507,47 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       return { workspaceLayout: next };
     }),
   setSnapEnabled: (enabled) => set({ snapEnabled: enabled }),
+  setRightPanel: (panel) => set({ rightPanel: panel }),
+  setRightPanelWidth: (width) => set({ rightPanelWidth: width }),
+  addChatMessage: (message) => set((state) => ({ chatMessages: [...state.chatMessages, message] })),
+  setChatInput: (input) => set({ chatInput: input }),
+  setChatLoading: (loading) => set({ chatLoading: loading }),
+  setChatProvider: (provider) => set({ chatProvider: provider }),
+  setChatModel: (model) => set({ chatModel: model }),
+  clearChatMessages: () => set({ chatMessages: [] }),
+  setOllamaModelStatus: (status, modelName) => set({
+    ollamaModelStatus: status,
+    ...(modelName !== undefined ? { ollamaModelName: modelName } : {}),
+  }),
 
-  setVoiceover: (voiceover) => set({ voiceover }),
+  setVoiceover: (voiceover) => {
+    const state = get();
+    // Rebuild timeline with new audio duration constraint
+    const tl = buildTimelineFromState(state.commands, state.assets, state.settings, voiceover);
+    set({ voiceover, timeline: tl });
+  },
   setTranscript: (transcript) => set({ transcript }),
   setSceneMarkers: (sceneMarkers) => set({ sceneMarkers }),
   addSceneMarker: (marker) => set((s) => ({ sceneMarkers: [...s.sceneMarkers, marker] })),
   removeSceneMarker: (id) => set((s) => ({ sceneMarkers: s.sceneMarkers.filter((m) => m.id !== id) })),
-  setTranscriptionStatus: (transcriptionStatus) => set({ transcriptionStatus }),
+  setTranscriptionStatus: (transcriptionStatus) => {
+    if (transcriptionStatus === 'processing') {
+      set({ transcriptionStatus, transcriptionStartedAt: Date.now() });
+    } else {
+      set({ transcriptionStatus });
+    }
+  },
   setTranscriptionError: (transcriptionError) => set({ transcriptionError }),
+  setTranscriptionStep: (step, label) => set({ transcriptionStep: step, transcriptionStepLabel: label }),
+  resetTranscriptionProgress: () => set({
+    transcriptionStep: -1,
+    transcriptionStepLabel: '',
+    transcriptionStartedAt: null,
+  }),
   setAudioRole: (assetId, role) => {
     const state = get();
     const newAssets = state.assets.map((a) => a.id === assetId ? { ...a, audioRole: role } : a);
-    const tl = buildTimeline(state.commands, newAssets, state.settings);
+    const tl = buildTimelineFromState(state.commands, newAssets, state.settings, state.voiceover);
     if (!state.batchActive) {
       const postSnap = captureState({ ...state, assets: newAssets, timeline: tl });
       const newHistory = state.history.slice(0, state.historyIndex + 1);
@@ -503,7 +605,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
     const snapshot = state.history[newIndex];
     if (!snapshot) return;
     const restored = restoreState(snapshot);
-    const tl = buildTimeline(restored.commands || [], restored.assets || [], restored.settings || state.settings);
+    const tl = buildTimelineFromState(restored.commands || [], restored.assets || [], restored.settings || state.settings, restored.voiceover ?? state.voiceover);
     set({
       ...restored,
       historyIndex: newIndex,
@@ -521,7 +623,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
     const snapshot = state.history[newIndex];
     if (!snapshot) return;
     const restored = restoreState(snapshot);
-    const tl = buildTimeline(restored.commands || [], restored.assets || [], restored.settings || state.settings);
+    const tl = buildTimelineFromState(restored.commands || [], restored.assets || [], restored.settings || state.settings, restored.voiceover ?? state.voiceover);
     set({
       ...restored,
       historyIndex: newIndex,
@@ -539,7 +641,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       start: cmd.start + (('duration' in cmd) ? (cmd as any).duration + 0.5 : 3.5),
     } as Command;
     const newCommands = [...state.commands, newCmd];
-    const tl = buildTimeline(newCommands, state.assets, state.settings);
+    const tl = buildTimelineFromState(newCommands, state.assets, state.settings, state.voiceover);
     if (!state.batchActive) {
       const postSnap = captureState({ ...state, commands: newCommands, timeline: tl });
       const newHistory = state.history.slice(0, state.historyIndex + 1);
@@ -553,7 +655,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
 
   replaceCommands: (commands) => {
     const state = get();
-    const tl = buildTimeline(commands, state.assets, state.settings);
+    const tl = buildTimelineFromState(commands, state.assets, state.settings, state.voiceover);
     if (!state.batchActive) {
       const postSnap = captureState({ ...state, commands, timeline: tl });
       const newHistory = state.history.slice(0, state.historyIndex + 1);

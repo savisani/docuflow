@@ -82,10 +82,11 @@ export const Timeline: React.FC = () => {
   const effectiveTimeline = useMemo(() => {
     if (storeTimeline) return storeTimeline;
     if (commands.length > 0) {
-      return buildTimeline(commands, assets, settings);
+      const voiceoverAsset = voiceover ? assets.find(a => a.id === voiceover.assetId) : undefined;
+      return buildTimeline(commands, assets, settings, voiceoverAsset?.duration);
     }
     return null;
-  }, [storeTimeline, commands, assets, settings]);
+  }, [storeTimeline, commands, assets, settings, voiceover]);
 
   const voiceoverDuration = useMemo(() => {
     if (!voiceover) return 0;
@@ -408,7 +409,8 @@ export const Timeline: React.FC = () => {
 
     {
       const state = useDocuFlowStore.getState();
-      const tl = state.timeline || buildTimeline(state.commands, state.assets, state.settings);
+      const voiceoverAsset = state.voiceover ? state.assets.find(a => a.id === state.voiceover!.assetId) : undefined;
+      const tl = state.timeline || buildTimeline(state.commands, state.assets, state.settings, voiceoverAsset?.duration);
       const needsLayer = state.commands.filter(c => c.type === 'show' && (c as any).layer === undefined);
       if (needsLayer.length > 0) {
         const newCmds = state.commands.map(c => {
@@ -531,7 +533,8 @@ export const Timeline: React.FC = () => {
 
     if (asset.type === 'image' || asset.type === 'video') {
       const state = useDocuFlowStore.getState();
-      const tl = state.timeline || buildTimeline(state.commands, state.assets, state.settings);
+      const voiceoverAsset = state.voiceover ? state.assets.find(a => a.id === state.voiceover!.assetId) : undefined;
+      const tl = state.timeline || buildTimeline(state.commands, state.assets, state.settings, voiceoverAsset?.duration);
 
       let targetLayer = dragOverTrackId ? tl.layers[dragOverTrackId] : null;
 
@@ -586,7 +589,7 @@ export const Timeline: React.FC = () => {
     }
 
     const state = useDocuFlowStore.getState();
-    const tl = buildTimeline(state.commands, state.assets, state.settings);
+    const tl = buildTimeline(state.commands, state.assets, state.settings, state.voiceover ? state.assets.find(a => a.id === state.voiceover!.assetId)?.duration : undefined);
     state.setTimeline(tl);
   }, [getDropTimeFromEvent, snap, dragOverTrackId, addCommand]);
 
