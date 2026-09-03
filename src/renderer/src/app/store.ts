@@ -25,6 +25,8 @@ export interface GeneratedImage {
   provider?: string;
   /** Model used for generation */
   model?: string;
+  /** Scene generation type: 'scene-background' or 'scene-person' */
+  generationType?: 'scene-background' | 'scene-person';
 }
 
 export interface TrackVisibility {

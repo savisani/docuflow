@@ -1,7 +1,7 @@
 import { app, BrowserWindow, shell, ipcMain, protocol, dialog } from 'electron'
 import { join, extname } from 'path'
 import { readFile, writeFile } from 'fs/promises'
-import { existsSync, mkdirSync, readdirSync, statSync } from 'fs'
+import { existsSync, mkdirSync, readdirSync, statSync, readFileSync } from 'fs'
 import { spawn } from 'child_process'
 import { is } from '@electron-toolkit/utils'
 import { tmpdir } from 'os'
@@ -13,6 +13,7 @@ import {
   projectExists
 } from './services/projectFolder'
 import { registerAssetIpc } from './ipc/assets'
+import { registerPipelineIpc } from './ipc/pipeline'
 
 const ASSET_PROTOCOL = 'docuflow-asset'
 
@@ -302,6 +303,7 @@ function registerLocalModelManagerIpc(): void {
   // Generate image with progress (enhanced version)
   ipcMain.handle('image:generate-local-enhanced', async (event, params: {
     prompt: string
+    negativePrompt?: string
     width: number
     height: number
     outputPath: string
@@ -329,6 +331,10 @@ function registerLocalModelManagerIpc(): void {
         '--model_path', params.modelPath,
         '--device', params.device || 'auto',
       ]
+
+      if (params.negativePrompt) {
+        args.push('--negative_prompt', params.negativePrompt)
+      }
 
       if (params.seed !== undefined && params.seed >= 0) {
         args.push('--seed', String(params.seed))
@@ -618,6 +624,64 @@ function registerSaveImageIpc(): void {
     }
   })
 
+  ipcMain.handle('image:save', async (_event, params: {
+    imageBase64: string;
+    defaultName?: string;
+  }): Promise<{ success: boolean; path?: string; error?: string }> => {
+    try {
+      const result = await dialog.showSaveDialog({
+        title: 'Save Image',
+        defaultPath: params.defaultName || `docuflow-image-${Date.now()}.png`,
+        filters: [
+          { name: 'PNG Image', extensions: ['png'] },
+          { name: 'JPEG Image', extensions: ['jpg', 'jpeg'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      })
+
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: 'Save cancelled' }
+      }
+
+      const buffer = Buffer.from(params.imageBase64, 'base64')
+      await writeFile(result.filePath, buffer)
+      return { success: true, path: result.filePath }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Save failed' }
+    }
+  })
+
+  ipcMain.handle('image:saveFromPath', async (_event, params: {
+    sourcePath: string;
+    defaultName?: string;
+  }): Promise<{ success: boolean; path?: string; error?: string }> => {
+    try {
+      if (!params.sourcePath || !existsSync(params.sourcePath)) {
+        return { success: false, error: 'Source image not found' }
+      }
+
+      const result = await dialog.showSaveDialog({
+        title: 'Save Image',
+        defaultPath: params.defaultName || `docuflow-image-${Date.now()}.png`,
+        filters: [
+          { name: 'PNG Image', extensions: ['png'] },
+          { name: 'JPEG Image', extensions: ['jpg', 'jpeg'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      })
+
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: 'Save cancelled' }
+      }
+
+      const buffer = await readFile(params.sourcePath)
+      await writeFile(result.filePath, buffer)
+      return { success: true, path: result.filePath }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Save failed' }
+    }
+  })
+
   ipcMain.handle('image:saveToFolder', async (_event, params: {
     imageBase64: string;
     folderPath: string;
@@ -628,7 +692,7 @@ function registerSaveImageIpc(): void {
         return { success: false, error: 'No save location configured' }
       }
 
-      const { mkdirSync, existsSync } = await import('fs')
+      const { mkdirSync } = await import('fs')
       if (!existsSync(params.folderPath)) {
         mkdirSync(params.folderPath, { recursive: true })
       }
@@ -642,6 +706,444 @@ function registerSaveImageIpc(): void {
       return { success: false, error: err instanceof Error ? err.message : 'Save failed' }
     }
   })
+
+  // Save raw image bytes to a temp file (for persisting Cloudflare images to disk)
+  ipcMain.handle('image:saveBytes', async (_event, params: {
+    imageBase64: string;
+    filename?: string;
+  }): Promise<{ success: boolean; path?: string; error?: string }> => {
+    try {
+      const { tmpdir } = await import('os')
+      const fileName = params.filename || `docuflow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`
+      const filePath = join(tmpdir(), 'docuflow', fileName)
+      const dir = join(tmpdir(), 'docuflow')
+      if (!existsSync(dir)) {
+        const { mkdirSync } = await import('fs')
+        mkdirSync(dir, { recursive: true })
+      }
+      const buffer = Buffer.from(params.imageBase64, 'base64')
+      await writeFile(filePath, buffer)
+      return { success: true, path: filePath }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Save failed' }
+    }
+  })
+
+  // Read an image file and return as base64 (for blobUrlToBase64 fallback)
+  ipcMain.handle('image:readAsBase64', async (_event, filePath: string): Promise<string> => {
+    try {
+      if (!existsSync(filePath)) return '';
+      const buffer = await readFile(filePath);
+      return buffer.toString('base64');
+    } catch {
+      return '';
+    }
+  })
+}
+
+function registerUpscaleIpc(): void {
+  ipcMain.handle('image:upscale', async (event, params: {
+    inputPath: string;
+    outputPath: string;
+    scale?: number;
+    device?: string;
+  }): Promise<{ success: boolean; path?: string; inputSize?: string; outputSize?: string; time?: number; model?: string; device?: string; error?: string }> => {
+    const pythonPath = getPythonPath()
+    const scriptDir = join(getScriptPath(), '..')
+    const scriptPath = join(scriptDir, 'upscale_local.py')
+
+    if (!existsSync(params.inputPath)) {
+      console.error(`[UPSCALE] INPUT NOT FOUND: ${params.inputPath}`)
+      return { success: false, error: `Input file not found: ${params.inputPath}` }
+    }
+
+    let inputSizeBytes = 0
+    try { inputSizeBytes = statSync(params.inputPath).size } catch {}
+
+    if (!existsSync(pythonPath)) {
+      return { success: false, error: `Python not found: ${pythonPath}` }
+    }
+    if (!existsSync(scriptPath)) {
+      return { success: false, error: `Upscale script not found: ${scriptPath}` }
+    }
+
+    const scale = params.scale || 2
+    const device = params.device || 'auto'
+
+    console.log(`[UPSCALE] ═══════════════════════════════════════`)
+    console.log(`[UPSCALE] Input path:  ${params.inputPath}`)
+    console.log(`[UPSCALE] Input bytes:  ${inputSizeBytes}`)
+    console.log(`[UPSCALE] Output path: ${params.outputPath}`)
+    console.log(`[UPSCALE] Scale: ${scale}x  Device: ${device}`)
+
+    return new Promise((resolve) => {
+      const proc = spawn(pythonPath, [
+        scriptPath,
+        '--input', params.inputPath,
+        '--output', params.outputPath,
+        '--scale', String(scale),
+        '--device', device,
+      ], { stdio: ['pipe', 'pipe', 'pipe'], timeout: 300000 })
+
+      let stdout = ''
+      let stderr = ''
+      proc.stdout.on('data', (d: Buffer) => {
+        const raw = d.toString()
+        stdout += raw
+        const lines = raw.split('\n').filter(l => l.trim())
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line)
+            if (parsed.type === 'status') {
+              console.log(`[UPSCALE] Python: ${parsed.message}`)
+              event.sender.send('local-generation:progress', parsed)
+            }
+          } catch {}
+        }
+      })
+      proc.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
+      proc.on('close', (code) => {
+        console.log(`[UPSCALE] Process exit code: ${code}`)
+
+        if (code === 0) {
+          try {
+            const lines = stdout.trim().split('\n')
+            let lastJson: Record<string, unknown> | null = null
+            for (let i = lines.length - 1; i >= 0; i--) {
+              try { lastJson = JSON.parse(lines[i]); break } catch {}
+            }
+
+            if (lastJson && lastJson.success) {
+              const outPath = lastJson.path as string
+
+              if (!outPath || !existsSync(outPath)) {
+                console.error(`[UPSCALE] OUTPUT NOT FOUND: ${outPath}`)
+                resolve({ success: false, error: `Upscale output not found: ${outPath}` })
+                return
+              }
+
+              const outStat = statSync(outPath)
+              if (outStat.size === 0) {
+                console.error(`[UPSCALE] OUTPUT EMPTY: ${outPath}`)
+                resolve({ success: false, error: 'Upscale output is empty' })
+                return
+              }
+
+              const header = readFileSync(outPath).subarray(0, 8)
+              const isPNG = header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47
+              const isJPEG = header[0] === 0xFF && header[1] === 0xD8
+              if (!isPNG && !isJPEG) {
+                console.error(`[UPSCALE] OUTPUT NOT IMAGE. Header hex: ${header.toString('hex')}`)
+                resolve({ success: false, error: 'Output is not a valid image' })
+                return
+              }
+
+              console.log(`[UPSCALE] Output valid: ${isPNG ? 'PNG' : 'JPEG'}, ${outStat.size} bytes`)
+              console.log(`[UPSCALE] ${lastJson.input_size} → ${lastJson.output_size}`)
+              console.log(`[UPSCALE] Model: ${lastJson.model}  Device: ${lastJson.device}  Time: ${lastJson.time}s`)
+              console.log(`[UPSCALE] ═══════════════════════════════════════`)
+
+              resolve({
+                success: true,
+                path: outPath,
+                inputSize: lastJson.input_size as string,
+                outputSize: lastJson.output_size as string,
+                time: lastJson.time as number,
+                model: (lastJson.model as string) || 'RealESRGAN_x4plus_anime_6B',
+                device: lastJson.device as string,
+              })
+            } else {
+              const errMsg = (lastJson?.error as string) || 'Upscale returned failure'
+              console.error(`[UPSCALE] PYTHON FAILURE: ${errMsg}`)
+              resolve({ success: false, error: errMsg })
+            }
+          } catch (e) {
+            console.error(`[UPSCALE] PARSE ERROR: ${e}`)
+            resolve({ success: false, error: `Parse error: ${String(e)}` })
+          }
+        } else {
+          console.error(`[UPSCALE] EXIT ${code}: ${stderr.slice(0, 500)}`)
+          resolve({ success: false, error: stderr || `Exit code ${code}` })
+        }
+      })
+      proc.on('error', (err) => {
+        console.error(`[UPSCALE] SPAWN ERROR: ${err.message}`)
+        resolve({ success: false, error: `Spawn error: ${err.message}` })
+      })
+    })
+  })
+}
+
+function getBatchGenerateScriptPath(): string {
+  if (is.dev) {
+    return join(__dirname, '../../scripts/generate_batch.py')
+  }
+  return join(process.resourcesPath, 'scripts/generate_batch.py')
+}
+
+function getBatchUpscaleScriptPath(): string {
+  if (is.dev) {
+    return join(__dirname, '../../scripts/upscale_batch.py')
+  }
+  return join(process.resourcesPath, 'scripts/upscale_batch.py')
+}
+
+function registerBatchPipelineIpc(): void {
+  // Batch generate backgrounds — loads model once, generates all, releases
+  ipcMain.handle('pipeline:batch-generate', async (event, params: {
+    jobs: Array<{
+      sceneId: string;
+      prompt: string;
+      negativePrompt?: string;
+      width?: number;
+      height?: number;
+      steps?: number;
+      seed?: number;
+    }>;
+    modelPath: string;
+    device?: string;
+    outputDir: string;
+  }): Promise<{
+    success: boolean;
+    results?: Array<{
+      sceneId: string;
+      success: boolean;
+      path?: string;
+      error?: string;
+    }>;
+    summary?: { total: number; success: number; failed: number };
+    error?: string;
+  }> => {
+    const pythonPath = getPythonPath()
+    const scriptPath = getBatchGenerateScriptPath()
+
+    if (!existsSync(pythonPath)) {
+      return { success: false, error: `Python not found: ${pythonPath}` }
+    }
+    if (!existsSync(scriptPath)) {
+      return { success: false, error: `Batch generate script not found: ${scriptPath}` }
+    }
+
+    // Write jobs config to a temp file
+    const configPath = join(tmpdir(), 'docuflow', `batch_gen_${Date.now()}.json`)
+    const configDir = join(tmpdir(), 'docuflow')
+    if (!existsSync(configDir)) {
+      const { mkdirSync } = await import('fs')
+      mkdirSync(configDir, { recursive: true })
+    }
+
+    const config = {
+      model_path: params.modelPath,
+      device: params.device || 'auto',
+      default_steps: 20,
+      default_width: 512,
+      default_height: 512,
+      jobs: params.jobs.map(j => ({
+        scene_id: j.sceneId,
+        prompt: j.prompt,
+        negative_prompt: j.negativePrompt,
+        width: j.width,
+        height: j.height,
+        steps: j.steps,
+        seed: j.seed,
+      })),
+    }
+
+    const { writeFileSync } = await import('fs')
+    writeFileSync(configPath, JSON.stringify(config, null, 2))
+
+    console.log(`[BATCH-GEN] Starting batch: ${params.jobs.length} scenes`)
+    console.log(`[BATCH-GEN] Config: ${configPath}`)
+    console.log(`[BATCH-GEN] Output: ${params.outputDir}`)
+
+    return new Promise((resolve) => {
+      const proc = spawn(pythonPath, [
+        scriptPath,
+        '--input', configPath,
+        '--output_dir', params.outputDir,
+        '--device', params.device || 'auto',
+      ], { stdio: ['pipe', 'pipe', 'pipe'], timeout: 1800000 }) // 30 minutes for batch
+
+      let stdout = ''
+      let stderr = ''
+
+      proc.stdout.on('data', (data: Buffer) => {
+        const raw = data.toString()
+        stdout += raw
+        // Forward progress/status to renderer
+        const lines = raw.trim().split('\n')
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line)
+            if (parsed.type === 'progress' || parsed.type === 'status') {
+              event.sender.send('local-generation:progress', parsed)
+            }
+          } catch {}
+        }
+      })
+
+      proc.stderr.on('data', (data: Buffer) => {
+        stderr += data.toString()
+      })
+
+      proc.on('close', (code) => {
+        // Clean up temp config
+        try { require('fs').unlinkSync(configPath) } catch {}
+
+        if (code === 0) {
+          try {
+            const lines = stdout.trim().split('\n')
+            let lastJson: Record<string, unknown> | null = null
+            for (let i = lines.length - 1; i >= 0; i--) {
+              try { lastJson = JSON.parse(lines[i]); break } catch {}
+            }
+
+            if (lastJson && lastJson.success) {
+              console.log(`[BATCH-GEN] Completed: ${(lastJson.summary as any)?.success} success, ${(lastJson.summary as any)?.failed} failed`)
+              resolve({
+                success: true,
+                results: lastJson.results as any,
+                summary: lastJson.summary as any,
+              })
+            } else {
+              resolve({ success: false, error: (lastJson?.error as string) || 'Batch generation failed' })
+            }
+          } catch (e) {
+            resolve({ success: false, error: `Parse error: ${String(e)}` })
+          }
+        } else {
+          console.error(`[BATCH-GEN] EXIT ${code}: ${stderr.slice(0, 500)}`)
+          resolve({ success: false, error: stderr || `Exit code ${code}` })
+        }
+      })
+
+      proc.on('error', (err) => {
+        resolve({ success: false, error: `Spawn error: ${err.message}` })
+      })
+    })
+  })
+
+  // Batch upscale — loads model once, upscales all, releases
+  ipcMain.handle('pipeline:batch-upscale', async (event, params: {
+    jobs: Array<{
+      sceneId: string;
+      inputPath: string;
+    }>;
+    scale?: number;
+    device?: string;
+    outputDir: string;
+  }): Promise<{
+    success: boolean;
+    results?: Array<{
+      sceneId: string;
+      success: boolean;
+      path?: string;
+      inputSize?: string;
+      outputSize?: string;
+      time?: number;
+      error?: string;
+    }>;
+    summary?: { total: number; success: number; failed: number };
+    error?: string;
+  }> => {
+    const pythonPath = getPythonPath()
+    const scriptPath = getBatchUpscaleScriptPath()
+
+    if (!existsSync(pythonPath)) {
+      return { success: false, error: `Python not found: ${pythonPath}` }
+    }
+    if (!existsSync(scriptPath)) {
+      return { success: false, error: `Batch upscale script not found: ${scriptPath}` }
+    }
+
+    // Write jobs config to a temp file
+    const configPath = join(tmpdir(), 'docuflow', `batch_up_${Date.now()}.json`)
+    const configDir = join(tmpdir(), 'docuflow')
+    if (!existsSync(configDir)) {
+      const { mkdirSync } = await import('fs')
+      mkdirSync(configDir, { recursive: true })
+    }
+
+    const config = {
+      scale: params.scale || 2,
+      device: params.device || 'auto',
+      jobs: params.jobs.map(j => ({
+        scene_id: j.sceneId,
+        input_path: j.inputPath,
+      })),
+    }
+
+    const { writeFileSync } = await import('fs')
+    writeFileSync(configPath, JSON.stringify(config, null, 2))
+
+    console.log(`[BATCH-UP] Starting batch: ${params.jobs.length} images`)
+    console.log(`[BATCH-UP] Scale: ${params.scale || 2}x`)
+
+    return new Promise((resolve) => {
+      const proc = spawn(pythonPath, [
+        scriptPath,
+        '--input', configPath,
+        '--output_dir', params.outputDir,
+        '--scale', String(params.scale || 2),
+        '--device', params.device || 'auto',
+      ], { stdio: ['pipe', 'pipe', 'pipe'], timeout: 1800000 })
+
+      let stdout = ''
+      let stderr = ''
+
+      proc.stdout.on('data', (data: Buffer) => {
+        const raw = data.toString()
+        stdout += raw
+        const lines = raw.trim().split('\n')
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line)
+            if (parsed.type === 'status' || parsed.type === 'progress') {
+              event.sender.send('local-generation:progress', parsed)
+            }
+          } catch {}
+        }
+      })
+
+      proc.stderr.on('data', (data: Buffer) => {
+        stderr += data.toString()
+      })
+
+      proc.on('close', (code) => {
+        try { require('fs').unlinkSync(configPath) } catch {}
+
+        if (code === 0) {
+          try {
+            const lines = stdout.trim().split('\n')
+            let lastJson: Record<string, unknown> | null = null
+            for (let i = lines.length - 1; i >= 0; i--) {
+              try { lastJson = JSON.parse(lines[i]); break } catch {}
+            }
+
+            if (lastJson && lastJson.success) {
+              console.log(`[BATCH-UP] Completed: ${(lastJson.summary as any)?.success} success, ${(lastJson.summary as any)?.failed} failed`)
+              resolve({
+                success: true,
+                results: lastJson.results as any,
+                summary: lastJson.summary as any,
+              })
+            } else {
+              resolve({ success: false, error: (lastJson?.error as string) || 'Batch upscale failed' })
+            }
+          } catch (e) {
+            resolve({ success: false, error: `Parse error: ${String(e)}` })
+          }
+        } else {
+          console.error(`[BATCH-UP] EXIT ${code}: ${stderr.slice(0, 500)}`)
+          resolve({ success: false, error: stderr || `Exit code ${code}` })
+        }
+      })
+
+      proc.on('error', (err) => {
+        resolve({ success: false, error: `Spawn error: ${err.message}` })
+      })
+    })
+  })
 }
 
 app.whenReady().then(() => {
@@ -653,6 +1155,9 @@ app.whenReady().then(() => {
   registerTranscriptionIpc()
   registerSaveImageIpc()
   registerAssetIpc()
+  registerUpscaleIpc()
+  registerPipelineIpc()
+  registerBatchPipelineIpc()
   createWindow()
 
   app.on('activate', () => {

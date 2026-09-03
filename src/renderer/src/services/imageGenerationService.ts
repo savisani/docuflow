@@ -12,6 +12,7 @@ import { Asset } from '../types/assets';
 import { generateLogicalId } from '../engine/media/findAsset';
 import { generateWithCloudflare, CloudflareConfig } from '../utils/cloudflareApi';
 import { generateLocalImage, LocalGenerationProgress } from './localImageProvider';
+import { buildScenePrompts } from '../utils/promptBuilder';
 
 export type ImageProvider = 'cloudflare' | 'local';
 
@@ -122,13 +123,34 @@ export async function generateImage(
         ? await cropImageToAspectRatio(imageUrl, ratioW, ratioH)
         : imageUrl;
 
+      // Persist the image to disk so it survives blob URL expiration
+      // and can be used by the upscaler and download features
+      let diskPath: string | undefined;
+      try {
+        // Convert the (possibly cropped) URL to base64
+        const resp = await fetch(croppedUrl);
+        const blob = await resp.blob();
+        const arrayBuffer = await blob.arrayBuffer();
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+        const ext = croppedUrl.includes('image/jpeg') ? 'jpg' : 'png';
+        const saveResult = await window.docuflow.saveBytes({
+          imageBase64: base64,
+          filename: `docuflow-${Date.now()}-${imageId.slice(0, 8)}.${ext}`,
+        });
+        if (saveResult.success && saveResult.path) {
+          diskPath = saveResult.path;
+        }
+      } catch (e) {
+        console.warn('Failed to persist Cloudflare image to disk:', e);
+      }
+
       // Create GeneratedImage record
       const generatedImage: GeneratedImage = {
         id: imageId,
         prompt: prompt.trim(),
         style: '',
         aspectRatio,
-        url: croppedUrl,
+        url: diskPath ? window.docuflow.filePathToAssetUrl(diskPath) : croppedUrl,
         timestamp: Date.now(),
         source,
         sceneId,
@@ -148,7 +170,8 @@ export async function generateImage(
         filename: `generated-${Date.now()}-${imageId.slice(0, 8)}.png`,
         type: 'image',
         mimeType: 'image/png',
-        url: croppedUrl,
+        url: diskPath ? window.docuflow.filePathToAssetUrl(diskPath) : croppedUrl,
+        filePath: diskPath,
       };
       store.addAsset(asset);
     }
@@ -190,6 +213,7 @@ async function generateLocal(req: ImageGenerationRequest): Promise<ImageGenerati
   try {
     const result = await generateLocalImage({
       prompt: prompt.trim(),
+      negativePrompt: negativePrompt,
       width: w,
       height: h,
       modelPath: localModelPath,
@@ -322,6 +346,7 @@ export async function regenerateImage(
 
 /**
  * Crop an image to the target aspect ratio using canvas.
+ * Preserves original resolution (no downscaling).
  */
 function cropImageToAspectRatio(imageUrl: string, ratioW: number, ratioH: number): Promise<string> {
   return new Promise((resolve) => {
@@ -347,8 +372,9 @@ function cropImageToAspectRatio(imageUrl: string, ratioW: number, ratioH: number
       }
 
       const canvas = document.createElement('canvas');
-      canvas.width = 1024;
-      canvas.height = Math.round(1024 / targetRatio);
+      // Preserve original resolution instead of forcing 1024px
+      canvas.width = Math.round(sw);
+      canvas.height = Math.round(sh);
       const ctx = canvas.getContext('2d');
       if (!ctx) {
         resolve(imageUrl);
@@ -360,4 +386,135 @@ function cropImageToAspectRatio(imageUrl: string, ratioW: number, ratioH: number
     img.onerror = () => resolve(imageUrl);
     img.src = imageUrl;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Scene Generation (background + person)
+// ---------------------------------------------------------------------------
+
+export interface SceneGenerationRequest {
+  backgroundDescription: string;
+  personDescription: string;
+  aspectRatio?: string;
+  source?: 'image-generator' | 'scene-generator';
+  provider?: ImageProvider;
+  cloudflareConfig?: CloudflareConfig;
+  model?: string;
+  steps?: number;
+  localModelPath?: string;
+  device?: 'auto' | 'gpu' | 'cpu' | 'directml';
+  width?: number;
+  height?: number;
+  seed?: number;
+  onProgress?: (phase: 'background' | 'person', progress: LocalGenerationProgress) => void;
+}
+
+export interface SceneGenerationResult {
+  success: boolean;
+  background?: GeneratedImage;
+  person?: GeneratedImage;
+  error?: string;
+}
+
+/**
+ * Generate a background + person image pair.
+ * Builds two independent prompts and generates them sequentially
+ * through the existing single-image pipeline.
+ */
+export async function generateScenePair(
+  req: SceneGenerationRequest,
+): Promise<SceneGenerationResult> {
+  const {
+    backgroundDescription,
+    personDescription,
+    aspectRatio = '1:1',
+    source = 'image-generator',
+    provider = 'cloudflare',
+    cloudflareConfig,
+    model,
+    steps,
+    localModelPath,
+    device,
+    width,
+    height,
+    seed,
+    onProgress,
+  } = req;
+
+  if (!backgroundDescription.trim() || !personDescription.trim()) {
+    return { success: false, error: 'Both background and person descriptions are required' };
+  }
+
+  const prompts = buildScenePrompts(backgroundDescription, personDescription);
+
+  // Phase 1 — Background
+  onProgress?.('background', { type: 'status', message: 'Generating background...' });
+
+  const bgResult = await generateImage({
+    prompt: prompts.backgroundPrompt,
+    negativePrompt: prompts.backgroundNegative,
+    aspectRatio,
+    source,
+    provider,
+    cloudflareConfig,
+    model,
+    steps,
+    localModelPath,
+    device,
+    width,
+    height,
+    seed,
+  });
+
+  if (!bgResult.success || bgResult.images.length === 0) {
+    return {
+      success: false,
+      error: `Background generation failed: ${bgResult.error || 'Unknown error'}`,
+    };
+  }
+
+  // Tag the background image
+  const bgImage = bgResult.images[0];
+  const store = useDocuFlowStore.getState();
+  store.updateGeneratedImage(bgImage.id, { generationType: 'scene-background' });
+
+  // Phase 2 — Person
+  onProgress?.('person', { type: 'status', message: 'Generating person...' });
+
+  const personResult = await generateImage({
+    prompt: prompts.personPrompt,
+    negativePrompt: prompts.personNegative,
+    aspectRatio,
+    source,
+    provider,
+    cloudflareConfig,
+    model,
+    steps,
+    localModelPath,
+    device,
+    width,
+    height,
+    seed: seed !== undefined ? seed + 1 : undefined,
+  });
+
+  if (!personResult.success || personResult.images.length === 0) {
+    return {
+      success: false,
+      background: bgImage,
+      error: `Person generation failed: ${personResult.error || 'Unknown error'}`,
+    };
+  }
+
+  // Tag the person image
+  const personImage = personResult.images[0];
+  const store2 = useDocuFlowStore.getState();
+  store2.updateGeneratedImage(personImage.id, { generationType: 'scene-person' });
+
+  onProgress?.('person', { type: 'status', message: 'Scene generation complete' });
+
+  return {
+    success: true,
+    background: bgImage,
+    person: personImage,
+  };
 }

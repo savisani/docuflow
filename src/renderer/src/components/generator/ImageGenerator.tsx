@@ -1,9 +1,9 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Settings, Wand2, Image as ImageIcon, Download, Film, Plus, Cloud, X, Sliders, Sparkles, ZoomIn, Save, CheckCircle, FolderOpen, RefreshCw, Cpu, Monitor } from 'lucide-react';
+import { Settings, Wand2, Image as ImageIcon, Download, Film, Plus, Cloud, X, Sliders, Sparkles, ZoomIn, Save, CheckCircle, FolderOpen, RefreshCw, Cpu, Monitor, ArrowUp } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { Button } from '../ui';
 import { CLOUDFLARE_MODELS, CloudflareConfig } from '../../utils/cloudflareApi';
-import { generateImage, regenerateImage, ImageProvider } from '../../services/imageGenerationService';
+import { generateImage, regenerateImage, generateScenePair, ImageProvider } from '../../services/imageGenerationService';
 import { listLocalModels, detectHardware, importModel, LocalModel, LocalHardware, getRecommendedSettings, QUALITY_PRESETS, QualityPreset } from '../../services/localImageProvider';
 
 const ASPECT_RATIOS = [
@@ -53,6 +53,18 @@ function setSaveLocation(path: string) {
 }
 
 async function blobUrlToBase64(url: string): Promise<string> {
+  // For docuflow-asset:// URLs, read the file directly via IPC
+  if (url.startsWith('docuflow-asset://')) {
+    try {
+      const decoded = decodeURIComponent(url.replace('docuflow-asset://localhost/', ''));
+      // On Windows, strip leading slash from /C:/... -> C:/...
+      const filePath = decoded.startsWith('/') && decoded.charAt(2) === ':' ? decoded.slice(1) : decoded;
+      const base64 = await window.docuflow.readImageAsBase64(filePath);
+      return base64;
+    } catch {
+      // Fall through to fetch
+    }
+  }
   const resp = await fetch(url);
   const blob = await resp.blob();
   return new Promise((resolve, reject) => {
@@ -67,7 +79,7 @@ async function blobUrlToBase64(url: string): Promise<string> {
 }
 
 export const ImageGenerator: React.FC = () => {
-  const { generatedImages, addToTimeline } = useDocuFlowStore();
+  const { generatedImages, assets, addToTimeline } = useDocuFlowStore();
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -105,14 +117,27 @@ export const ImageGenerator: React.FC = () => {
   const [localProgress, setLocalProgress] = useState<{ percent: number; message: string } | null>(null);
   const [showLocalModelManager, setShowLocalModelManager] = useState(false);
 
-  const [lightboxImage, setLightboxImage] = useState<{ url: string; prompt: string; aspectRatio: string } | null>(null);
+  const [lightboxImage, setLightboxImage] = useState<{ id: string; url: string; prompt: string; aspectRatio: string } | null>(null);
 
   // Regeneration state
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [regeneratePrompt, setRegeneratePrompt] = useState('');
   const [regenerateOriginalUrl, setRegenerateOriginalUrl] = useState<string | null>(null);
 
+  // Upscale state
+  const [upscalingId, setUpscalingId] = useState<string | null>(null);
+  const [upscaleProgress, setUpscaleProgress] = useState<string | null>(null);
+
   const [saveLocation, setSaveLocationState] = useState(loadSaveLocation);
+
+  // Scene generation mode
+  const [sceneMode, setSceneMode] = useState<'standard' | 'scene'>(() => {
+    return (localStorage.getItem('docuflow-scene-mode') as 'standard' | 'scene') || 'standard';
+  });
+  const [bgDescription, setBgDescription] = useState('');
+  const [personDescription, setPersonDescription] = useState('');
+  const [sceneGenerating, setSceneGenerating] = useState(false);
+  const [sceneProgress, setSceneProgress] = useState<{ phase: 'background' | 'person'; message: string } | null>(null);
 
   // Derived values — must be before any useCallback that references them
   const currentModel = CLOUDFLARE_MODELS.find(m => m.id === advancedSettings.model);
@@ -288,8 +313,26 @@ export const ImageGenerator: React.FC = () => {
     }
   }, [prompt, isGenerating, imageProvider, cloudflareConfig, selectedLocalModel, advancedSettings, selectedAspectRatio, batchSize, negativePrompt, localQualityPreset, localDevice]);
 
-  const handleDownload = useCallback(async (url: string, filename: string) => {
+  const handleDownload = useCallback(async (url: string, filename: string, imageId?: string) => {
     try {
+      // For local images: use file path directly (avoids fetch→blob→base64 roundtrip)
+      if (imageId) {
+        const asset = assets.find(a => a.id === imageId);
+        if (asset?.filePath) {
+          const result = await window.docuflow.saveImageFromPath({
+            sourcePath: asset.filePath,
+            defaultName: filename,
+          });
+          if (result.success && result.path) {
+            setToast({ message: `Saved to ${result.path}`, type: 'success' });
+          } else if (result.error !== 'Save cancelled') {
+            setToast({ message: result.error || 'Save failed', type: 'error' });
+          }
+          return;
+        }
+      }
+
+      // Fallback: convert URL to base64 (works for data: URLs from cloud)
       const base64 = await blobUrlToBase64(url);
 
       if (saveLocation) {
@@ -317,11 +360,180 @@ export const ImageGenerator: React.FC = () => {
     } catch {
       setToast({ message: 'Failed to save image', type: 'error' });
     }
-  }, [saveLocation]);
+  }, [saveLocation, assets]);
+
+  const handleUpscale = useCallback(async (imageId: string, scale: number = 2) => {
+    if (upscalingId) return;
+
+    const image = generatedImages.find(img => img.id === imageId);
+    if (!image) {
+      console.error(`[UPSCALE] Image not found: ${imageId}`)
+      return;
+    }
+
+    const asset = assets.find(a => a.id === imageId);
+    console.log(`[UPSCALE] Selected imageId: ${imageId}`)
+    console.log(`[UPSCALE] Image URL: ${image.url?.slice(0, 80)}`)
+    console.log(`[UPSCALE] Asset filePath: ${asset?.filePath}`)
+    console.log(`[UPSCALE] Asset mimeType: ${asset?.mimeType}`)
+
+    if (!asset?.filePath) {
+      setToast({ message: 'Cannot upscale: no source file. Generate locally first.', type: 'error' });
+      return;
+    }
+
+    setUpscalingId(imageId);
+    setUpscaleProgress('Starting Real-ESRGAN...');
+
+    const removeProgressListener = window.docuflow.onLocalGenerationProgress((data) => {
+      if (data.message) {
+        setUpscaleProgress(data.message);
+      }
+    });
+
+    try {
+      const baseName = asset.filePath.substring(0, asset.filePath.lastIndexOf('.'));
+      const outputPath = `${baseName}-upscaled-${scale}x.png`;
+
+      console.log(`[UPSCALE] inputPath: ${asset.filePath}`)
+      console.log(`[UPSCALE] outputPath: ${outputPath}`)
+
+      setUpscaleProgress('Loading Real-ESRGAN model...');
+
+      const result = await window.docuflow.upscaleImage({
+        inputPath: asset.filePath,
+        outputPath,
+        scale,
+        device: localDevice === 'directml' ? 'cpu' : localDevice,
+      });
+
+      console.log(`[UPSCALE] IPC result:`, JSON.stringify(result))
+
+      if (result.success && result.path) {
+        const assetUrl = window.docuflow.filePathToAssetUrl(result.path);
+        console.log(`[UPSCALE] New asset URL: ${assetUrl?.slice(0, 80)}`)
+        console.log(`[UPSCALE] New asset filePath: ${result.path}`)
+
+        const store = useDocuFlowStore.getState();
+        const upscaledAssetId = crypto.randomUUID();
+
+        const upscaledAsset = {
+          id: upscaledAssetId,
+          logicalId: `image${store.assets.length + 1}`,
+          filename: `${asset.filename.replace(/\.\w+$/, '')}-upscaled-${scale}x.png`,
+          type: 'image' as const,
+          mimeType: 'image/png',
+          url: assetUrl,
+          filePath: result.path,
+        };
+        store.addAsset(upscaledAsset);
+
+        const upscaledImage = {
+          id: upscaledAssetId,
+          prompt: image.prompt,
+          style: '',
+          aspectRatio: image.aspectRatio,
+          url: assetUrl,
+          timestamp: Date.now(),
+          source: 'image-generator' as const,
+          provider: 'local',
+          model: `upscaled-${scale}x`,
+        };
+        store.addGeneratedImage(upscaledImage);
+
+        console.log(`[UPSCALE] Registered asset ${upscaledAssetId}`)
+
+        const inputSize = result.inputSize || 'unknown';
+        const outputSize = result.outputSize || 'unknown';
+        const time = result.time ?? '?';
+        const model = result.model || 'RealESRGAN';
+        const device = result.device || 'GPU';
+        setToast({
+          message: `Upscaled ${inputSize} → ${outputSize} (${time}s, ${model}, ${device})`,
+          type: 'success',
+        });
+      } else {
+        console.error(`[UPSCALE] Failed: ${result.error}`)
+        setToast({ message: result.error || 'Upscale failed', type: 'error' });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[UPSCALE] Exception: ${msg}`)
+      setToast({ message: `Upscale failed: ${msg}`, type: 'error' });
+    } finally {
+      removeProgressListener();
+      setUpscalingId(null);
+      setUpscaleProgress(null);
+    }
+  }, [upscalingId, generatedImages, assets, localDevice]);
 
   const handleAddToTimeline = useCallback((imageId: string) => {
     addToTimeline(imageId);
   }, [addToTimeline]);
+
+  // Persist scene mode
+  useEffect(() => { localStorage.setItem('docuflow-scene-mode', sceneMode); }, [sceneMode]);
+
+  const handleGenerateScene = useCallback(async () => {
+    if (!bgDescription.trim() || !personDescription.trim() || sceneGenerating) return;
+
+    if (imageProvider === 'cloudflare' && !cloudflareConfig.workerUrl) {
+      setError('Please configure your Cloudflare Worker URL in Settings first.');
+      return;
+    }
+
+    if (imageProvider === 'local' && !selectedLocalModel) {
+      setError('Please select a local model first.');
+      return;
+    }
+
+    setSceneGenerating(true);
+    setError(null);
+    setSceneProgress({ phase: 'background', message: 'Generating background...' });
+
+    try {
+      const preset = QUALITY_PRESETS[localQualityPreset];
+      const result = await generateScenePair({
+        backgroundDescription: bgDescription.trim(),
+        personDescription: personDescription.trim(),
+        aspectRatio: selectedAspectRatio,
+        source: 'image-generator',
+        provider: imageProvider,
+        cloudflareConfig,
+        model: advancedSettings.model,
+        steps: imageProvider === 'local' ? preset.steps : advancedSettings.steps,
+        localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
+        device: imageProvider === 'local' ? localDevice : undefined,
+        width: imageProvider === 'local' ? preset.width : undefined,
+        height: imageProvider === 'local' ? preset.height : undefined,
+        onProgress: (phase, progress) => {
+          setSceneProgress({
+            phase,
+            message: progress.message || `Generating ${phase}...`,
+          });
+        },
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || 'Scene generation failed');
+      }
+
+      setBgDescription('');
+      setPersonDescription('');
+      setToast({ message: 'Scene generated: background + person', type: 'success' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error occurred';
+      setError(message);
+      console.error('Scene generation failed:', err);
+    } finally {
+      setSceneGenerating(false);
+      setSceneProgress(null);
+    }
+  }, [
+    bgDescription, personDescription, sceneGenerating, imageProvider,
+    cloudflareConfig, selectedLocalModel, advancedSettings, selectedAspectRatio,
+    localQualityPreset, localDevice,
+  ]);
 
   return (
     <div className="w-full h-full flex flex-col bg-slate-950 text-white overflow-hidden">
@@ -334,6 +546,14 @@ export const ImageGenerator: React.FC = () => {
         }`}>
           {toast.type === 'success' ? <CheckCircle size={14} /> : <X size={14} />}
           <span className="text-[11px] font-medium max-w-[300px] truncate">{toast.message}</span>
+        </div>
+      )}
+
+      {/* Upscale Progress */}
+      {upscaleProgress && (
+        <div className="fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-lg shadow-lg backdrop-blur-sm bg-blue-500/90 text-white transition-all">
+          <ArrowUp size={14} className="animate-bounce" />
+          <span className="text-[11px] font-medium">{upscaleProgress}</span>
         </div>
       )}
 
@@ -359,11 +579,23 @@ export const ImageGenerator: React.FC = () => {
               <p className="text-[12px] text-white/70 max-w-[500px] truncate">{lightboxImage.prompt}</p>
               <span className="text-[10px] px-2 py-0.5 rounded bg-white/10 text-white/50">{lightboxImage.aspectRatio}</span>
               <button
-                onClick={() => handleDownload(lightboxImage.url, `image-${Date.now()}.png`)}
+                onClick={() => handleDownload(lightboxImage.url, `image-${Date.now()}.png`, lightboxImage.id)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 text-white text-[11px] hover:bg-white/20 transition-colors"
               >
                 <Download size={12} />
                 <span>Save</span>
+              </button>
+              <button
+                onClick={() => handleUpscale(lightboxImage.id, 2)}
+                disabled={upscalingId === lightboxImage.id || !assets.find(a => a.id === lightboxImage.id)?.filePath}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-[11px] hover:bg-emerald-500/30 transition-colors disabled:opacity-50"
+              >
+                {upscalingId === lightboxImage.id ? (
+                  <ArrowUp size={12} className="animate-bounce" />
+                ) : (
+                  <ArrowUp size={12} />
+                )}
+                <span>{upscalingId === lightboxImage.id ? 'Upscaling...' : 'Upscale 2x'}</span>
               </button>
             </div>
           </div>
@@ -393,6 +625,31 @@ export const ImageGenerator: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center gap-1.5">
+              {/* Mode Toggle */}
+              <div className="flex items-center bg-slate-800/60 rounded-md border border-white/5 p-0.5">
+                <button
+                  onClick={() => setSceneMode('standard')}
+                  className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-medium transition-all ${
+                    sceneMode === 'standard'
+                      ? 'bg-purple-500/20 text-purple-300'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <ImageIcon size={10} />
+                  <span>Standard</span>
+                </button>
+                <button
+                  onClick={() => setSceneMode('scene')}
+                  className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-medium transition-all ${
+                    sceneMode === 'scene'
+                      ? 'bg-purple-500/20 text-purple-300'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Wand2 size={10} />
+                  <span>Scene</span>
+                </button>
+              </div>
               {/* Provider Toggle */}
               <div className="flex items-center bg-slate-800/60 rounded-md border border-white/5 p-0.5">
                 <button
@@ -671,45 +928,90 @@ export const ImageGenerator: React.FC = () => {
           )}
 
           {/* Prompt + Generate */}
-          <div className="flex gap-2">
-            <textarea
-              value={prompt}
-              onChange={(e) => { setPrompt(e.target.value); setError(null); }}
-              placeholder="Describe the image you want to create..."
-              rows={2}
-              disabled={isGenerating}
-              className="flex-1 bg-slate-800/80 border border-slate-700/50 rounded-lg px-3 py-2 text-[12px] text-slate-200 placeholder:text-slate-500 resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all disabled:opacity-60"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleGenerate();
-                }
-              }}
-            />
-            <div className="flex flex-col gap-1.5">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleMagicPolish}
-                loading={polishing}
-                disabled={!prompt.trim() || isGenerating}
-                icon={<Sparkles size={12} />}
-                className="px-2 py-1 text-[10px] border border-white/10 hover:border-purple-500/30 hover:text-purple-300"
-              >
-                Polish
-              </Button>
-              <Button
-                variant="primary"
-                onClick={handleGenerate}
-                disabled={!prompt.trim() || isGenerating}
-                loading={isGenerating}
-                icon={<Wand2 size={12} />}
-                className="px-3 py-1 text-[10px] bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 border-0"
-              >
-                Generate
-              </Button>
+          {sceneMode === 'scene' ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1 block">
+                    Background Description
+                  </label>
+                  <textarea
+                    value={bgDescription}
+                    onChange={(e) => { setBgDescription(e.target.value); setError(null); }}
+                    placeholder="Describe the environment/background..."
+                    rows={2}
+                    disabled={sceneGenerating}
+                    className="w-full bg-slate-800/80 border border-slate-700/50 rounded-lg px-3 py-2 text-[12px] text-slate-200 placeholder:text-slate-500 resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all disabled:opacity-60"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1 block">
+                    Person Description
+                  </label>
+                  <textarea
+                    value={personDescription}
+                    onChange={(e) => { setPersonDescription(e.target.value); setError(null); }}
+                    placeholder="Describe the person, appearance, clothing..."
+                    rows={2}
+                    disabled={sceneGenerating}
+                    className="w-full bg-slate-800/80 border border-slate-700/50 rounded-lg px-3 py-2 text-[12px] text-slate-200 placeholder:text-slate-500 resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all disabled:opacity-60"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  variant="primary"
+                  onClick={handleGenerateScene}
+                  disabled={!bgDescription.trim() || !personDescription.trim() || sceneGenerating}
+                  loading={sceneGenerating}
+                  icon={<Wand2 size={12} />}
+                  className="px-4 py-1.5 text-[10px] bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 border-0"
+                >
+                  {sceneGenerating ? 'Generating Scene...' : 'Generate Scene'}
+                </Button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex gap-2">
+              <textarea
+                value={prompt}
+                onChange={(e) => { setPrompt(e.target.value); setError(null); }}
+                placeholder="Describe the image you want to create..."
+                rows={2}
+                disabled={isGenerating}
+                className="flex-1 bg-slate-800/80 border border-slate-700/50 rounded-lg px-3 py-2 text-[12px] text-slate-200 placeholder:text-slate-500 resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all disabled:opacity-60"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleGenerate();
+                  }
+                }}
+              />
+              <div className="flex flex-col gap-1.5">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleMagicPolish}
+                  loading={polishing}
+                  disabled={!prompt.trim() || isGenerating}
+                  icon={<Sparkles size={12} />}
+                  className="px-2 py-1 text-[10px] border border-white/10 hover:border-purple-500/30 hover:text-purple-300"
+                >
+                  Polish
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleGenerate}
+                  disabled={!prompt.trim() || isGenerating}
+                  loading={isGenerating}
+                  icon={<Wand2 size={12} />}
+                  className="px-3 py-1 text-[10px] bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 border-0"
+                >
+                  Generate
+                </Button>
+              </div>
+            </div>
+          )}
 
           {error && (
             <p className="mt-1.5 text-[10px] text-red-400 flex items-center gap-1">
@@ -730,6 +1032,20 @@ export const ImageGenerator: React.FC = () => {
                   className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-300"
                   style={{ width: `${localProgress.percent}%` }}
                 />
+              </div>
+            </div>
+          )}
+
+          {/* Scene Generation Progress */}
+          {sceneProgress && sceneGenerating && (
+            <div className="mt-2 p-2 rounded-md bg-purple-500/10 border border-purple-500/20">
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${sceneProgress.phase === 'background' ? 'bg-amber-400' : 'bg-emerald-400'} animate-pulse`} />
+                <span className="text-[10px] text-purple-300">{sceneProgress.message}</span>
+              </div>
+              <div className="flex gap-1.5 mt-1.5">
+                <div className={`flex-1 h-1 rounded-full ${sceneProgress.phase === 'background' ? 'bg-amber-400/50' : 'bg-emerald-400/50'}`} />
+                <div className={`flex-1 h-1 rounded-full ${sceneProgress.phase === 'person' ? 'bg-emerald-400/50' : 'bg-slate-700'}`} />
               </div>
             </div>
           )}
@@ -807,7 +1123,7 @@ export const ImageGenerator: React.FC = () => {
 
       {/* Gallery */}
       <div className="flex-1 overflow-y-auto px-4 py-4 relative">
-        {isGenerating && (
+        {(isGenerating || sceneGenerating) && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-sm">
             <div className="relative mb-3">
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500/30 to-pink-500/30 flex items-center justify-center animate-pulse">
@@ -816,7 +1132,7 @@ export const ImageGenerator: React.FC = () => {
               <div className="absolute inset-0 rounded-2xl border-2 border-purple-500/20 animate-ping" style={{ animationDuration: '2s' }} />
             </div>
             <p className="text-[12px] font-medium text-slate-200 mb-0.5">
-              Generating {batchSize} image{batchSize > 1 ? 's' : ''}...
+              {sceneGenerating ? 'Generating scene...' : `Generating ${batchSize} image${batchSize > 1 ? 's' : ''}...`}
             </p>
             <p className="text-[10px] text-slate-400">Using {currentModel?.label || 'Cloudflare Workers AI'}</p>
           </div>
@@ -844,7 +1160,7 @@ export const ImageGenerator: React.FC = () => {
                     ? 'border-purple-500/50 ring-2 ring-purple-500/20'
                     : 'border-white/5 hover:border-white/10'
                 } ${regeneratingId === image.id ? 'ring-2 ring-amber-500/50' : ''}`}
-                onClick={() => setLightboxImage({ url: image.url, prompt: image.prompt, aspectRatio: image.aspectRatio })}
+                onClick={() => setLightboxImage({ id: image.id, url: image.url, prompt: image.prompt, aspectRatio: image.aspectRatio })}
               >
                 {/* Regenerating overlay */}
                 {regeneratingId === image.id && (
@@ -860,6 +1176,16 @@ export const ImageGenerator: React.FC = () => {
                     className="w-full h-full object-cover"
                     loading="lazy"
                   />
+                  {/* Scene generation label */}
+                  {image.generationType && (
+                    <div className={`absolute top-2 left-2 px-2 py-0.5 rounded text-[8px] font-semibold uppercase tracking-wider ${
+                      image.generationType === 'scene-background'
+                        ? 'bg-amber-500/90 text-white'
+                        : 'bg-emerald-500/90 text-white'
+                    }`}>
+                      {image.generationType === 'scene-background' ? 'Background' : 'Person'}
+                    </div>
+                  )}
                 </div>
 
                 {/* Hover overlay */}
@@ -870,7 +1196,7 @@ export const ImageGenerator: React.FC = () => {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      setLightboxImage({ url: image.url, prompt: image.prompt, aspectRatio: image.aspectRatio });
+                      setLightboxImage({ id: image.id, url: image.url, prompt: image.prompt, aspectRatio: image.aspectRatio });
                     }}
                     className="w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-white hover:bg-white/30 transition-colors"
                     title="View full size"
@@ -895,12 +1221,27 @@ export const ImageGenerator: React.FC = () => {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDownload(image.url, `generated-${image.id}.png`);
+                      handleDownload(image.url, `generated-${image.id}.png`, image.id);
                     }}
                     className="w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-white hover:bg-white/30 transition-colors"
                     title="Save to location"
                   >
                     <Save size={14} />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleUpscale(image.id, 2);
+                    }}
+                    disabled={upscalingId === image.id || isGenerating || !assets.find(a => a.id === image.id)?.filePath}
+                    className="w-8 h-8 rounded-full bg-emerald-500/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-emerald-400 transition-colors disabled:opacity-50"
+                    title="Upscale 2x"
+                  >
+                    {upscalingId === image.id ? (
+                      <ArrowUp size={14} className="animate-bounce" />
+                    ) : (
+                      <ArrowUp size={14} />
+                    )}
                   </button>
                   <button
                     onClick={(e) => {

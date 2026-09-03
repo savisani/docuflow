@@ -25,12 +25,21 @@ export interface DocuFlowAPI {
     imageBase64: string;
     defaultName?: string;
   }): Promise<{ success: boolean; path?: string; error?: string }>
+  saveImageFromPath(params: {
+    sourcePath: string;
+    defaultName?: string;
+  }): Promise<{ success: boolean; path?: string; error?: string }>
   selectFolder(): Promise<{ canceled: boolean; filePath: string }>
   saveImageToFolder(params: {
     imageBase64: string;
     folderPath: string;
     fileName?: string;
   }): Promise<{ success: boolean; path?: string; error?: string }>
+  saveBytes(params: {
+    imageBase64: string;
+    filename?: string;
+  }): Promise<{ success: boolean; path?: string; error?: string }>
+  readImageAsBase64(filePath: string): Promise<string>
   transcribeAudio(params: {
     audioPath: string;
     modelSize?: string;
@@ -59,6 +68,78 @@ export interface DocuFlowAPI {
     device?: string
   }): Promise<{ success: boolean; path?: string; error?: string }>
   cancelLocalGeneration(): Promise<{ success: boolean }>
+  upscaleImage(params: {
+    inputPath: string;
+    outputPath: string;
+    scale?: number;
+    device?: string;
+  }): Promise<{ success: boolean; path?: string; inputSize?: string; outputSize?: string; time?: number; model?: string; device?: string; error?: string }>
+  compositeImages(params: {
+    backgroundPath: string;
+    foregroundPath: string;
+    maskPath?: string;
+    outputPath: string;
+    width: number;
+    height: number;
+  }): Promise<{ success: boolean; path?: string; error?: string }>
+  checkImageQuality(params: {
+    imagePath: string;
+    expectedWidth: number;
+    expectedHeight: number;
+    requirePerson: boolean;
+  }): Promise<{
+    passed: boolean;
+    score: number;
+    issues: Array<{ code: string; severity: string; message: string }>;
+    recommendations: string[];
+    identitySimilarityScore?: number;
+  }>
+  batchGenerate(params: {
+    jobs: Array<{
+      sceneId: string;
+      prompt: string;
+      negativePrompt?: string;
+      width?: number;
+      height?: number;
+      steps?: number;
+      seed?: number;
+    }>;
+    modelPath: string;
+    device?: string;
+    outputDir: string;
+  }): Promise<{
+    success: boolean;
+    results?: Array<{
+      sceneId: string;
+      success: boolean;
+      path?: string;
+      error?: string;
+    }>;
+    summary?: { total: number; success: number; failed: number };
+    error?: string;
+  }>
+  batchUpscale(params: {
+    jobs: Array<{
+      sceneId: string;
+      inputPath: string;
+    }>;
+    scale?: number;
+    device?: string;
+    outputDir: string;
+  }): Promise<{
+    success: boolean;
+    results?: Array<{
+      sceneId: string;
+      success: boolean;
+      path?: string;
+      inputSize?: string;
+      outputSize?: string;
+      time?: number;
+      error?: string;
+    }>;
+    summary?: { total: number; success: number; failed: number };
+    error?: string;
+  }>
   onLocalGenerationProgress(callback: (data: { type: string; step?: number; total?: number; percent?: number; message?: string }) => void): (() => void)
 }
 

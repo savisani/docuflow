@@ -78,6 +78,13 @@ const docuflowAPI = {
     return ipcRenderer.invoke('image:save', params)
   },
 
+  saveImageFromPath: (params: {
+    sourcePath: string;
+    defaultName?: string;
+  }): Promise<{ success: boolean; path?: string; error?: string }> => {
+    return ipcRenderer.invoke('image:saveFromPath', params)
+  },
+
   selectFolder: (): Promise<{ canceled: boolean; filePath: string }> => {
     return ipcRenderer.invoke('dialog:selectFolder')
   },
@@ -88,6 +95,17 @@ const docuflowAPI = {
     fileName?: string;
   }): Promise<{ success: boolean; path?: string; error?: string }> => {
     return ipcRenderer.invoke('image:saveToFolder', params)
+  },
+
+  saveBytes: (params: {
+    imageBase64: string;
+    filename?: string;
+  }): Promise<{ success: boolean; path?: string; error?: string }> => {
+    return ipcRenderer.invoke('image:saveBytes', params)
+  },
+
+  readImageAsBase64: (filePath: string): Promise<string> => {
+    return ipcRenderer.invoke('image:readAsBase64', filePath)
   },
 
   transcribeAudio: (params: {
@@ -113,7 +131,7 @@ const docuflowAPI = {
   },
 
   // Local model management
-  listLocalModels: (): Promise<{ models: Array<{ name: string; path: string; size_bytes: number; size_label: string; type: string; has_required_files: boolean }> }> => {
+  listLocalModels: (): Promise<{ models: Array<{ name: string; path: string; size_bytes: number; size_label: string; type: string; format?: string; has_required_files: boolean }> }> => {
     return ipcRenderer.invoke('local-models:list')
   },
 
@@ -131,6 +149,7 @@ const docuflowAPI = {
 
   generateLocalImageEnhanced: (params: {
     prompt: string
+    negativePrompt?: string
     width: number
     height: number
     outputPath: string
@@ -144,6 +163,93 @@ const docuflowAPI = {
 
   cancelLocalGeneration: (): Promise<{ success: boolean }> => {
     return ipcRenderer.invoke('local-models:cancel-generation')
+  },
+
+  upscaleImage: (params: {
+    inputPath: string;
+    outputPath: string;
+    scale?: number;
+    device?: string;
+  }): Promise<{ success: boolean; path?: string; inputSize?: string; outputSize?: string; time?: number; model?: string; device?: string; error?: string }> => {
+    return ipcRenderer.invoke('image:upscale', params)
+  },
+
+  compositeImages: (params: {
+    backgroundPath: string;
+    foregroundPath: string;
+    maskPath?: string;
+    outputPath: string;
+    width: number;
+    height: number;
+  }): Promise<{ success: boolean; path?: string; error?: string }> => {
+    return ipcRenderer.invoke('pipeline:composite', params)
+  },
+
+  checkImageQuality: (params: {
+    imagePath: string;
+    expectedWidth: number;
+    expectedHeight: number;
+    requirePerson: boolean;
+  }): Promise<{
+    passed: boolean;
+    score: number;
+    issues: Array<{ code: string; severity: string; message: string }>;
+    recommendations: string[];
+    identitySimilarityScore?: number;
+  }> => {
+    return ipcRenderer.invoke('pipeline:checkQuality', params)
+  },
+
+  batchGenerate: (params: {
+    jobs: Array<{
+      sceneId: string;
+      prompt: string;
+      negativePrompt?: string;
+      width?: number;
+      height?: number;
+      steps?: number;
+      seed?: number;
+    }>;
+    modelPath: string;
+    device?: string;
+    outputDir: string;
+  }): Promise<{
+    success: boolean;
+    results?: Array<{
+      sceneId: string;
+      success: boolean;
+      path?: string;
+      error?: string;
+    }>;
+    summary?: { total: number; success: number; failed: number };
+    error?: string;
+  }> => {
+    return ipcRenderer.invoke('pipeline:batch-generate', params)
+  },
+
+  batchUpscale: (params: {
+    jobs: Array<{
+      sceneId: string;
+      inputPath: string;
+    }>;
+    scale?: number;
+    device?: string;
+    outputDir: string;
+  }): Promise<{
+    success: boolean;
+    results?: Array<{
+      sceneId: string;
+      success: boolean;
+      path?: string;
+      inputSize?: string;
+      outputSize?: string;
+      time?: number;
+      error?: string;
+    }>;
+    summary?: { total: number; success: number; failed: number };
+    error?: string;
+  }> => {
+    return ipcRenderer.invoke('pipeline:batch-upscale', params)
   },
 
   onLocalGenerationProgress: (callback: (data: { type: string; step?: number; total?: number; percent?: number; message?: string }) => void): (() => void) => {

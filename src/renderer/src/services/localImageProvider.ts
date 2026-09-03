@@ -11,6 +11,7 @@ export interface LocalModel {
   size_bytes: number
   size_label: string
   type: string
+  format?: 'diffusers' | 'single-file'
   has_required_files: boolean
 }
 
@@ -102,6 +103,7 @@ export async function generateLocalImage(
 
     const result = await window.docuflow.generateLocalImageEnhanced({
       prompt: req.prompt,
+      negativePrompt: req.negativePrompt,
       width: req.width || 512,
       height: req.height || 512,
       outputPath,
