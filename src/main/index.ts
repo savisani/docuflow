@@ -1,7 +1,7 @@
 import { app, BrowserWindow, shell, ipcMain, protocol, dialog } from 'electron'
 import { join, extname } from 'path'
 import { readFile, writeFile } from 'fs/promises'
-import { existsSync, mkdirSync, readdirSync, statSync, readFileSync } from 'fs'
+import { existsSync, mkdirSync, readdirSync, statSync, readFileSync, writeFileSync } from 'fs'
 import { spawn } from 'child_process'
 import { is } from '@electron-toolkit/utils'
 import { tmpdir } from 'os'
@@ -186,6 +186,51 @@ function registerProjectIpc(): void {
   ipcMain.handle('project:exists', async (_event, projectName: string) => {
     return projectExists(projectName)
   })
+
+  ipcMain.handle('project:save', async (_event, projectName: string, projectData: any) => {
+    try {
+      const filePath = getProjectFilePath(projectName)
+      const dir = join(filePath, '..')
+      if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true })
+      }
+      writeFileSync(filePath, JSON.stringify(projectData, null, 2), 'utf-8')
+      return { success: true, path: filePath }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('project:load', async (_event, projectName: string) => {
+    try {
+      const filePath = getProjectFilePath(projectName)
+      if (!existsSync(filePath)) {
+        return { success: false, error: 'Project file not found' }
+      }
+      const data = readFileSync(filePath, 'utf-8')
+      return { success: true, data: JSON.parse(data) }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('project:list', async () => {
+    try {
+      const root = getProjectsRoot()
+      if (!existsSync(root)) return { success: true, projects: [] }
+      const entries = readdirSync(root, { withFileTypes: true })
+      const projects = entries
+        .filter(e => e.isDirectory())
+        .map(e => {
+          const projectFile = join(root, e.name, 'project.json')
+          const exists = existsSync(projectFile)
+          return { name: e.name, hasFile: exists }
+        })
+      return { success: true, projects }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
 }
 
 function getScriptPath(): string {
@@ -311,10 +356,12 @@ function registerLocalModelManagerIpc(): void {
     steps?: number
     seed?: number
     device?: string
+    generationId?: string
   }): Promise<{ success: boolean; path?: string; error?: string }> => {
     return new Promise((resolve) => {
       const scriptPath = getScriptPath()
       const pythonPath = getPythonPath()
+      const genId = params.generationId || `gen-${Date.now()}`
 
       let resolvedOutputPath = params.outputPath
       if (resolvedOutputPath.includes('%TEMP%')) {
@@ -327,9 +374,10 @@ function registerLocalModelManagerIpc(): void {
         '--output_path', resolvedOutputPath,
         '--width', String(params.width),
         '--height', String(params.height),
-        '--steps', String(params.steps || 20),
+        '--steps', String(params.steps || 10),
         '--model_path', params.modelPath,
         '--device', params.device || 'auto',
+        '--generation_id', genId,
       ]
 
       if (params.negativePrompt) {
@@ -340,10 +388,14 @@ function registerLocalModelManagerIpc(): void {
         args.push('--seed', String(params.seed))
       }
 
+      console.log(`[image-gen] SPAWN genId=${genId} python=${pythonPath} model=${params.modelPath}`)
+
       const proc = spawn(pythonPath, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 600000, // 10 minutes for slow generation
+        timeout: 600000,
       })
+
+      console.log(`[image-gen] PID=${proc.pid} genId=${genId}`)
 
       let stdout = ''
       let stderr = ''
@@ -351,12 +403,11 @@ function registerLocalModelManagerIpc(): void {
       proc.stdout.on('data', (data: Buffer) => {
         const msg = data.toString()
         stdout += msg
-        // Forward progress/status lines to renderer
         const lines = msg.trim().split('\n')
         for (const line of lines) {
           try {
             const parsed = JSON.parse(line)
-            if (parsed.type === 'progress' || parsed.type === 'status') {
+            if (parsed.type === 'progress' || parsed.type === 'status' || parsed.type === 'log') {
               event.sender.send('local-generation:progress', parsed)
             }
           } catch {}
@@ -368,6 +419,7 @@ function registerLocalModelManagerIpc(): void {
       })
 
       proc.on('close', (code) => {
+        console.log(`[image-gen] CLOSE PID=${proc.pid} genId=${genId} code=${code}`)
         if (code === 0) {
           try {
             const lastLine = stdout.trim().split('\n').pop() || '{}'
@@ -388,16 +440,17 @@ function registerLocalModelManagerIpc(): void {
       })
 
       proc.on('error', (err) => {
+        console.log(`[image-gen] ERROR PID=${proc.pid} genId=${genId} err=${err.message}`)
         resolve({ success: false, error: `Failed to start Python: ${err.message}` })
       })
 
       // Store process reference for cancellation
-      const genId = `gen-${Date.now()}`
+      const procGenId = genId
       ;(global as any).__localGenProcesses = (global as any).__localGenProcesses || {}
-      ;(global as any).__localGenProcesses[genId] = proc
+      ;(global as any).__localGenProcesses[procGenId] = proc
 
       proc.on('close', () => {
-        delete (global as any).__localGenProcesses?.[genId]
+        delete (global as any).__localGenProcesses?.[procGenId]
       })
     })
   })
@@ -411,6 +464,37 @@ function registerLocalModelManagerIpc(): void {
       } catch {}
     }
     return { success: true }
+  })
+
+  // Get detailed GPU/VRAM status
+  ipcMain.handle('local-models:gpu-status', async () => {
+    try {
+      const pythonPath = getPythonPath()
+      const scriptPath = getScriptPath()
+
+      return new Promise((resolve) => {
+        const proc = spawn(pythonPath, [
+          scriptPath, 'gpu-status'
+        ], { stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000 })
+
+        let stdout = ''
+        proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
+        proc.on('close', (code) => {
+          if (code === 0) {
+            try {
+              resolve(JSON.parse(stdout.trim()))
+            } catch {
+              resolve({ cuda: false, device_name: 'CPU', total_vram_gb: 0, allocated_vram_gb: 0, reserved_vram_gb: 0, free_vram_gb: 0 })
+            }
+          } else {
+            resolve({ cuda: false, device_name: 'CPU', total_vram_gb: 0, allocated_vram_gb: 0, reserved_vram_gb: 0, free_vram_gb: 0 })
+          }
+        })
+        proc.on('error', () => resolve({ cuda: false, device_name: 'CPU', total_vram_gb: 0, allocated_vram_gb: 0, reserved_vram_gb: 0, free_vram_gb: 0 }))
+      })
+    } catch {
+      return { cuda: false, device_name: 'CPU', total_vram_gb: 0, allocated_vram_gb: 0, reserved_vram_gb: 0, free_vram_gb: 0 }
+    }
   })
 
   // Get default models directory
@@ -935,7 +1019,7 @@ function registerBatchPipelineIpc(): void {
     const config = {
       model_path: params.modelPath,
       device: params.device || 'auto',
-      default_steps: 20,
+      default_steps: 10,
       default_width: 512,
       default_height: 512,
       jobs: params.jobs.map(j => ({
@@ -1169,4 +1253,37 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+// === APP SHUTDOWN CLEANUP ===
+// Kill all running Python generation processes on app quit
+function killAllPythonProcesses(): void {
+  const processes = (global as any).__localGenProcesses || {}
+  const ids = Object.keys(processes)
+  if (ids.length > 0) {
+    console.log(`[DocuFlow] Cleaning up ${ids.length} running Python process(es)...`)
+    for (const id of ids) {
+      try {
+        processes[id].kill('SIGTERM')
+      } catch {}
+    }
+    // Force kill after 3 seconds if still alive
+    setTimeout(() => {
+      for (const id of Object.keys(processes)) {
+        try {
+          if (processes[id] && !processes[id].killed) {
+            processes[id].kill('SIGKILL')
+          }
+        } catch {}
+      }
+    }, 3000)
+  }
+}
+
+app.on('before-quit', () => {
+  killAllPythonProcesses()
+})
+
+app.on('will-quit', () => {
+  killAllPythonProcesses()
 })

@@ -59,22 +59,22 @@ export async function findModelByName(name: string): Promise<LocalSDModel | unde
 }
 
 /**
- * Get recommended settings for a specific model based on hardware.
+ * Get recommended settings for a specific model based on hardware - GPU ONLY.
  */
 export function getModelRecommendedSettings(
   model: LocalSDModel,
   vramMb: number
 ): { width: number; height: number; steps: number } {
-  // Single-file models (like RV6) are typically fp16-based SD1.5
-  // Diffusers directories could be SD1.5 or larger
+  // GPU-only policy: all settings assume CUDA GPU is available
   if (vramMb >= 6000) {
-    return { width: 512, height: 512, steps: 25 }
+    return { width: 512, height: 512, steps: 15 }
   } else if (vramMb >= 4000) {
-    return { width: 512, height: 512, steps: 20 }
+    return { width: 512, height: 512, steps: 10 }
   } else if (vramMb >= 2000) {
-    return { width: 384, height: 384, steps: 15 }
+    return { width: 384, height: 384, steps: 10 }
   } else {
-    return { width: 256, height: 256, steps: 10 }
+    // Less than 2GB VRAM - generation will likely fail, but try with minimal settings
+    return { width: 256, height: 256, steps: 8 }
   }
 }
 

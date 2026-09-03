@@ -178,14 +178,14 @@ export const AssetLibrary: React.FC = () => {
 
         {/* Search + Filter */}
         <div className="flex items-center gap-2">
-          <div className="flex-1 flex items-center gap-2 bg-slate-800/60 border border-white/5 rounded-lg px-2 py-1.5">
-            <Search size={12} className="text-slate-500" />
+          <div className="flex-1 flex items-center gap-2 bg-df-surface-2/60 border border-df-border rounded-df-lg px-2 py-1.5">
+            <Search size={12} className="text-df-text-muted" />
             <input
               type="text"
               placeholder="Search assets..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="flex-1 bg-transparent text-[11px] text-slate-200 placeholder:text-slate-600 outline-none"
+              className="flex-1 bg-transparent text-df-sm text-df-text-primary placeholder:text-slate-600 outline-none"
             />
           </div>
           <Tooltip content="Filter by type">
@@ -199,40 +199,40 @@ export const AssetLibrary: React.FC = () => {
         <div className="flex items-center gap-1 overflow-x-auto pb-1">
           <button
             onClick={() => setFilterType('all')}
-            className={`px-2 py-1 rounded-lg text-[10px] font-medium whitespace-nowrap transition-colors ${
+            className={`px-2 py-1 rounded-df-lg text-df-xs font-medium whitespace-nowrap transition-colors ${
               filterType === 'all'
-                ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                : 'text-slate-500 hover:text-white hover:bg-white/5 border border-transparent'
+                ? 'bg-df-accent-muted text-df-accent border border-df-accent/30'
+                : 'text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-2 border border-transparent'
             }`}
           >
             All
           </button>
           <button
             onClick={() => setFilterType('image')}
-            className={`px-2 py-1 rounded-lg text-[10px] font-medium whitespace-nowrap transition-colors ${
+            className={`px-2 py-1 rounded-df-lg text-df-xs font-medium whitespace-nowrap transition-colors ${
               filterType === 'image'
-                ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                : 'text-slate-500 hover:text-white hover:bg-white/5 border border-transparent'
+                ? 'bg-df-accent-muted text-df-accent border border-df-accent/30'
+                : 'text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-2 border border-transparent'
             }`}
           >
             <Image size={10} className="inline mr-1" /> Images
           </button>
           <button
             onClick={() => setFilterType('video')}
-            className={`px-2 py-1 rounded-lg text-[10px] font-medium whitespace-nowrap transition-colors ${
+            className={`px-2 py-1 rounded-df-lg text-df-xs font-medium whitespace-nowrap transition-colors ${
               filterType === 'video'
-                ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                : 'text-slate-500 hover:text-white hover:bg-white/5 border border-transparent'
+                ? 'bg-df-accent-muted text-df-accent border border-df-accent/30'
+                : 'text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-2 border border-transparent'
             }`}
           >
             <Film size={10} className="inline mr-1" /> Video
           </button>
           <button
             onClick={() => setFilterType('audio')}
-            className={`px-2 py-1 rounded-lg text-[10px] font-medium whitespace-nowrap transition-colors ${
+            className={`px-2 py-1 rounded-df-lg text-df-xs font-medium whitespace-nowrap transition-colors ${
               filterType === 'audio'
-                ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                : 'text-slate-500 hover:text-white hover:bg-white/5 border border-transparent'
+                ? 'bg-df-accent-muted text-df-accent border border-df-accent/30'
+                : 'text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-2 border border-transparent'
             }`}
           >
             <Music size={10} className="inline mr-1" /> Audio
@@ -261,10 +261,10 @@ export const AssetLibrary: React.FC = () => {
               <div className="flex items-center gap-1 overflow-x-auto pb-1">
                 <button
                   onClick={() => setFilterRole('all')}
-                  className={`px-2 py-1 rounded-lg text-[10px] font-medium whitespace-nowrap transition-colors ${
+                  className={`px-2 py-1 rounded-df-lg text-df-xs font-medium whitespace-nowrap transition-colors ${
                     filterRole === 'all'
-                      ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                      : 'text-slate-500 hover:text-white hover:bg-white/5 border border-transparent'
+                      ? 'bg-df-accent-muted text-df-accent border border-df-accent/30'
+                      : 'text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-2 border border-transparent'
                   }`}
                 >
                   All
@@ -277,10 +277,10 @@ export const AssetLibrary: React.FC = () => {
                     <button
                       key={role}
                       onClick={() => setFilterRole(role)}
-                      className={`px-2 py-1 rounded-lg text-[10px] font-medium whitespace-nowrap transition-colors flex items-center gap-1 ${
+                      className={`px-2 py-1 rounded-df-lg text-df-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1 ${
                         filterRole === role
-                          ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                          : 'text-slate-500 hover:text-white hover:bg-white/5 border border-transparent'
+                          ? 'bg-df-accent-muted text-df-accent border border-df-accent/30'
+                          : 'text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-2 border border-transparent'
                       }`}
                     >
                       <config.icon size={10} />
@@ -309,18 +309,18 @@ export const AssetLibrary: React.FC = () => {
           )}
 
           {filteredAssets.length === 0 && assets.length > 0 && (
-            <div className="text-center py-8 text-slate-500">
+            <div className="text-center py-8 text-df-text-muted">
               <Search size={24} className="mx-auto mb-2 text-slate-600" />
               <p className="text-sm">No assets match your filters</p>
-              <p className="text-[10px] mt-1">Try adjusting your search or filters</p>
+              <p className="text-df-xs mt-1">Try adjusting your search or filters</p>
             </div>
           )}
 
           {assets.length === 0 && !isDragOver && (
             <div className="text-center py-8 px-2">
               <Film size={32} className="mx-auto mb-3 text-slate-600" />
-              <p className="text-sm text-slate-400 mb-1">No assets imported yet</p>
-              <p className="text-[10px] text-slate-500">Click Import or drag files here</p>
+              <p className="text-sm text-df-text-muted mb-1">No assets imported yet</p>
+              <p className="text-df-xs text-df-text-muted">Click Import or drag files here</p>
             </div>
           )}
         </div>
@@ -328,18 +328,18 @@ export const AssetLibrary: React.FC = () => {
         {/* Dropzone */}
         <div
           className={`
-            shrink-0 rounded-lg border-2 border-dashed transition-all duration-200 p-3
+            shrink-0 rounded-df-lg border-2 border-dashed transition-all duration-200 p-3
             ${isDragOver
               ? 'border-indigo-500/60 bg-indigo-500/10'
-              : 'border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]'}
+              : 'border-df-border bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]'}
           `}
           onDragOver={handlePanelDragOver}
           onDragLeave={handlePanelDragLeave}
           onDrop={handlePanelDrop}
         >
           <div className="flex flex-col items-center gap-1.5 text-center">
-            <Upload size={16} className={isDragOver ? 'text-indigo-400' : 'text-slate-500'} />
-            <p className={`text-[11px] font-medium ${isDragOver ? 'text-indigo-300' : 'text-slate-400'}`}>
+            <Upload size={16} className={isDragOver ? 'text-df-accent' : 'text-df-text-muted'} />
+            <p className={`text-df-sm font-medium ${isDragOver ? 'text-df-accent' : 'text-df-text-muted'}`}>
               {isDragOver ? 'Drop to import' : 'Drag files here to import'}
             </p>
             <p className="text-[9px] text-slate-600">Images, video, and audio</p>
@@ -359,7 +359,7 @@ interface AssetGroupProps {
   onSelect: (asset: Asset) => void;
   onToggleHidden: (id: string) => void;
   onDragStart: (e: React.DragEvent, asset: Asset) => void;
-  roleConfig?: { icon: React.ComponentType<{ size?: number }>; color: string };
+  roleConfig?: { label: string; icon: React.ComponentType<{ size?: number }>; color: string };
 }
 
 const AssetGroup: React.FC<AssetGroupProps> = ({
@@ -376,7 +376,7 @@ const AssetGroup: React.FC<AssetGroupProps> = ({
   <Section title={title} className="space-y-1">
     <div className="flex items-center justify-between mb-1">
       <div className="flex items-center gap-1">
-        {roleConfig?.icon && <roleConfig.icon size={10} style={{ color: roleConfig.color }} />}
+        {roleConfig?.icon && <span style={{ color: roleConfig.color }}><roleConfig.icon size={10} /></span>}
       </div>
       <Badge variant="default" className="text-[9px]">{count}</Badge>
     </div>
@@ -404,7 +404,7 @@ interface AssetItemProps {
   onSelect: () => void;
   onToggleHidden: () => void;
   onDragStart: (e: React.DragEvent) => void;
-  roleConfig?: { icon: React.ComponentType<{ size?: number }>; color: string };
+  roleConfig?: { label: string; icon: React.ComponentType<{ size?: number }>; color: string };
 }
 
 const AssetItem: React.FC<AssetItemProps> = ({
@@ -426,10 +426,10 @@ const AssetItem: React.FC<AssetItemProps> = ({
       onDragStart={onDragStart}
       onClick={onSelect}
       className={`
-        group flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-all duration-150
+        group flex items-center gap-2 px-2 py-1.5 rounded-df-lg cursor-pointer transition-all duration-150
         ${selected
-          ? 'bg-indigo-500/15 border border-indigo-500/30'
-          : 'hover:bg-white/5 border border-transparent'}
+          ? 'bg-indigo-500/15 border border-df-accent/30'
+          : 'hover:bg-df-surface-2 border border-transparent'}
         ${hidden ? 'opacity-40' : ''}
       `}
     >
@@ -439,26 +439,26 @@ const AssetItem: React.FC<AssetItemProps> = ({
         </div>
       </Tooltip>
 
-      <div className="w-8 h-8 rounded-lg bg-slate-800/80 flex items-center justify-center overflow-hidden shrink-0 border border-white/5">
+      <div className="w-8 h-8 rounded-df-lg bg-df-surface-2/80 flex items-center justify-center overflow-hidden shrink-0 border border-df-border">
         {asset.type === 'image' && asset.url ? (
           <img src={asset.url} alt="" className="w-full h-full object-cover" />
         ) : asset.type === 'video' && asset.url ? (
           <video src={asset.url} className="w-full h-full object-cover" muted />
         ) : (
-          <Icon size={14} className={roleConfig ? `text-[${roleConfig.color}]` : 'text-slate-500'} />
+          <Icon size={14} className={roleConfig ? `text-[${roleConfig.color}]` : 'text-df-text-muted'} />
         )}
       </div>
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <div className="text-[10px] font-mono text-indigo-400 truncate">{asset.logicalId}</div>
+          <div className="text-df-xs font-mono text-df-accent truncate">{asset.logicalId}</div>
           {roleConfig && <Badge variant="default" className="text-[9px]">{roleConfig.label}</Badge>}
         </div>
-        <div className="text-[10px] text-slate-500 truncate flex items-center gap-1.5">
+        <div className="text-df-xs text-df-text-muted truncate flex items-center gap-1.5">
           <span>{asset.filename}</span>
-          {duration && <span className="text-slate-600">•</span>}
+          {duration && <span className="text-df-text-dim">•</span>}
           {duration && <span>{duration}</span>}
-          {dimensions && <span className="text-slate-600">•</span>}
+          {dimensions && <span className="text-df-text-dim">•</span>}
           {dimensions && <span>{dimensions}</span>}
         </div>
       </div>
@@ -466,7 +466,7 @@ const AssetItem: React.FC<AssetItemProps> = ({
       <Tooltip content={hidden ? 'Show asset' : 'Hide asset'}>
         <button
           onClick={(e) => { e.stopPropagation(); onToggleHidden(); }}
-          className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-white transition-opacity p-0.5"
+          className="opacity-0 group-hover:opacity-100 text-df-text-muted hover:text-df-text-primary transition-opacity p-0.5"
         >
           {hidden ? <EyeOff size={12} /> : <Eye size={12} />}
         </button>

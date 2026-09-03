@@ -22,3 +22,6 @@ image-generator/dist/
 
 # Electron builder output
 dist_electron/
+
+# Kilo AI agent folder
+.kilo/

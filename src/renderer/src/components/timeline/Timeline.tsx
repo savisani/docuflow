@@ -636,7 +636,7 @@ export const Timeline: React.FC = () => {
       videoTracks.push({
         id: layer.id,
         label: layer.assetId,
-        color: '#3b82f6',
+        color: 'var(--color-track-video)',
         clips,
         type: 'video',
         zIndex: layer.zIndex,
@@ -651,11 +651,16 @@ export const Timeline: React.FC = () => {
 
       const startSec = track.startFrame / fps;
       const endSec = track.endFrame / fps;
-      const color = track.type === 'music' ? '#10b981' : track.type === 'sfx' ? '#f59e0b' : track.type === 'ambient' ? '#06b6d4' : '#8b5cf6';
+      const colorMap: Record<string, string> = {
+        music: 'var(--color-track-music)',
+        sfx: 'var(--color-track-sfx)',
+        ambient: 'var(--color-track-ambient)',
+        voiceover: 'var(--color-track-voiceover)',
+      };
       audioTracks.push({
         id: track.id,
         label: track.assetId,
-        color,
+        color: colorMap[track.type] || 'var(--color-track-music)',
         clips: [
           {
             id: track.id,
@@ -676,7 +681,7 @@ export const Timeline: React.FC = () => {
       textTracks.push({
         id: text.id,
         label: text.content.substring(0, 20),
-        color: '#ec4899',
+        color: 'var(--color-track-text)',
         clips: [
           {
             id: text.id,
@@ -704,7 +709,7 @@ export const Timeline: React.FC = () => {
     return {
       id: `voiceover-${asset.id}`,
       label: asset.logicalId,
-      color: '#8b5cf6',
+      color: 'var(--color-track-voiceover)',
       clips: [{
         id: `voiceover-clip-${asset.id}`,
         start: startSec,
@@ -735,7 +740,7 @@ export const Timeline: React.FC = () => {
     const groups: { id: string; label: string; tracks: typeof tracks; visibilityKey: keyof typeof trackVisibility; icon: any; color: string }[] = [
       { id: 'video', label: 'IMAGES & VIDEO', tracks: tracks.filter((t) => t.type === 'video'), visibilityKey: 'video', icon: Film, color: 'var(--color-track-video)' },
       { id: 'text', label: 'TEXT', tracks: tracks.filter((t) => t.type === 'text'), visibilityKey: 'text', icon: Type, color: 'var(--color-track-text)' },
-      { id: 'audio', label: 'AUDIO', tracks: allAudioTracks as any, visibilityKey: 'sfx', icon: Volume2, color: '#8b5cf6' },
+      { id: 'audio', label: 'AUDIO', tracks: allAudioTracks as any, visibilityKey: 'sfx', icon: Volume2, color: 'var(--color-track-voiceover)' },
     ];
     return groups.filter((g) => {
       if (g.id === 'video') return true;
@@ -758,20 +763,21 @@ export const Timeline: React.FC = () => {
 
   return (
     <Panel title="Timeline" icon={<Film size={10} />} className="h-full min-h-0 flex flex-col relative overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/5 shrink-0">
+      {/* Toolbar */}
+      <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-df-divider shrink-0">
         <Tooltip content="Play/Pause (Space)">
           <IconButton size="sm" variant={playing ? 'primary' : 'ghost'} aria-label={playing ? 'Pause' : 'Play'} onClick={handlePlayPause}>
             {playing ? <Pause size={13} /> : <Play size={13} />}
           </IconButton>
         </Tooltip>
         <LabelValue label="Time" value={formatTime(currentTime)} labelWidth="36px" />
-        <Divider vertical className="h-4 mx-1" />
+        <Divider vertical className="h-4 mx-0.5" />
         <Tooltip content={snapEnabled ? 'Snap ON (S)' : 'Snap OFF (S)'}>
           <IconButton size="sm" variant={snapEnabled ? 'primary' : 'ghost'} aria-label={snapEnabled ? 'Disable Snap' : 'Enable Snap'} onClick={() => setSnapEnabled(!snapEnabled)}>
             <Magnet size={13} />
           </IconButton>
         </Tooltip>
-        <Divider vertical className="h-4 mx-1" />
+        <Divider vertical className="h-4 mx-0.5" />
         <Tooltip content="Undo (Ctrl+Z)">
           <IconButton size="sm" variant="ghost" aria-label="Undo" onClick={undo} disabled={historyIndex <= 0}>
             <Undo2 size={13} />
@@ -792,13 +798,13 @@ export const Timeline: React.FC = () => {
             <Volume2 size={13} />
           </IconButton>
         </Tooltip>
-        <Divider vertical className="h-4 mx-1" />
+        <Divider vertical className="h-4 mx-0.5" />
         <Tooltip content="Zoom Out (Ctrl+-)">
           <IconButton size="sm" variant="ghost" aria-label="Zoom Out" onClick={() => setZoom((z) => Math.max(0.25, z * 0.8))}>
             <ZoomOut size={13} />
           </IconButton>
         </Tooltip>
-        <span className="text-[10px] text-slate-500 w-12 text-center font-mono">{Math.round(zoom * 100)}%</span>
+        <span className="text-df-xs text-df-text-muted w-12 text-center font-mono">{Math.round(zoom * 100)}%</span>
         <Tooltip content="Zoom In (Ctrl++)">
           <IconButton size="sm" variant="ghost" aria-label="Zoom In" onClick={() => setZoom((z) => Math.min(8, z * 1.25))}>
             <ZoomIn size={13} />
@@ -817,6 +823,7 @@ export const Timeline: React.FC = () => {
         </Tooltip>
       </div>
 
+      {/* Scroll container */}
       <div
         ref={scrollContainerRef}
         className="flex-1 min-h-0 overflow-y-auto overflow-x-auto relative"
@@ -826,28 +833,26 @@ export const Timeline: React.FC = () => {
         style={dragState ? { userSelect: 'none', WebkitUserSelect: 'none' } : undefined}
       >
         <div className="flex" style={{ width: scrollInnerWidth, minHeight: '100%' }}>
-          {/* Left label column - sticky */}
+          {/* Left label column */}
           <div
-            className="sticky left-0 z-20 bg-slate-900 border-r border-white/10 shrink-0 flex flex-col"
+            className="sticky left-0 z-20 bg-df-surface-1 border-r border-df-border shrink-0 flex flex-col"
             style={{ width: LABEL_WIDTH }}
           >
-            {/* Ruler spacer to align with ruler height */}
-            <div className="border-b border-white/5" style={{ height: RULER_HEIGHT }} />
+            <div className="border-b border-df-divider" style={{ height: RULER_HEIGHT }} />
 
-            {/* Track labels */}
             {trackGroups.map((group, groupIdx) => (
               <React.Fragment key={group.id}>
                 {/* Group header label */}
                 <div
-                  className="flex items-center px-2 border-b border-white/5 hover:bg-slate-800/80 transition-colors"
+                  className="flex items-center px-2 border-b border-df-divider hover:bg-df-surface-2 transition-colors"
                   style={{ height: TRACK_HEIGHT }}
                 >
                   <div className="flex-1 flex items-center gap-1.5">
-                    <div className="w-5 h-5 rounded flex items-center justify-center shrink-0" style={{ backgroundColor: group.color + '20' }}>
+                    <div className="w-5 h-5 rounded-df-sm flex items-center justify-center shrink-0" style={{ backgroundColor: group.color + '20' }}>
                       <group.icon size={10} style={{ color: group.color }} />
                     </div>
-                    <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">{group.label}</span>
-                    <Badge variant={group.tracks.length > 0 ? 'info' : 'default'} className="text-[9px]">{group.tracks.length}</Badge>
+                    <span className="text-df-xs text-df-text-secondary font-semibold uppercase tracking-wider">{group.label}</span>
+                    <Badge variant={group.tracks.length > 0 ? 'info' : 'default'} className="text-df-xs">{group.tracks.length}</Badge>
                   </div>
                   <Tooltip content={trackVisibility[group.visibilityKey] ? 'Hide track group' : 'Show track group'}>
                     <IconButton size="sm" variant="ghost" aria-label={trackVisibility[group.visibilityKey] ? 'Hide' : 'Show'} onClick={() => setTrackVisibility(group.visibilityKey, !trackVisibility[group.visibilityKey])} className="opacity-0 group-hover/row:opacity-100 transition-opacity">
@@ -856,36 +861,35 @@ export const Timeline: React.FC = () => {
                   </Tooltip>
                 </div>
 
-                {/* Individual track labels */}
+                {/* Track labels */}
                 {group.tracks.map((track, trackIdx) => (
                   <div
                     key={track.id}
-                    className="flex items-center px-2 border-b border-white/5 hover:bg-slate-800/60 transition-colors"
+                    className="flex items-center px-2 border-b border-df-divider hover:bg-df-surface-2 transition-colors"
                     style={{
                       height: TRACK_HEIGHT,
-                      backgroundColor: groupIdx % 2 === 0 ? 'rgba(15, 23, 42, 0.95)' : 'rgba(30, 41, 59, 0.95)',
+                      backgroundColor: groupIdx % 2 === 0 ? 'rgba(17, 17, 17, 0.95)' : 'rgba(24, 24, 24, 0.95)',
                     }}
                   >
-                    <div className="w-1.5 h-1.5 rounded-full mr-2 shrink-0 ring-2 ring-offset-1 ring-offset-transparent" style={{ backgroundColor: track.color, boxShadow: `0 0 6px ${track.color}40` }} />
-                    <span className="text-[11px] text-slate-300 truncate">{track.label}</span>
+                    <div className="w-1.5 h-1.5 rounded-full mr-2 shrink-0" style={{ backgroundColor: track.color }} />
+                    <span className="text-df-sm text-df-text-primary truncate">{track.label}</span>
                   </div>
                 ))}
 
-                {/* Empty state label */}
                 {group.tracks.length === 0 && (
-                  <div className="flex items-center px-2 border-b border-white/5" style={{ height: TRACK_HEIGHT }}>
-                    <span className="text-[10px] text-slate-600 italic">Empty</span>
+                  <div className="flex items-center px-2 border-b border-df-divider" style={{ height: TRACK_HEIGHT }}>
+                    <span className="text-df-xs text-df-text-dim italic">Empty</span>
                   </div>
                 )}
               </React.Fragment>
             ))}
           </div>
 
-          {/* Right content area - ruler + clips + playhead */}
+          {/* Right content area */}
           <div className="flex-1 relative min-w-0">
-            {/* Ruler - sticky top */}
+            {/* Ruler */}
             <div
-              className="sticky top-0 z-10 border-b border-white/5 bg-slate-900/95 backdrop-blur-sm cursor-pointer"
+              className="sticky top-0 z-10 border-b border-df-divider bg-df-surface-1 cursor-pointer"
               style={{ height: RULER_HEIGHT }}
               onClick={(e) => {
                 if (dragState) return;
@@ -895,38 +899,38 @@ export const Timeline: React.FC = () => {
               <div className="relative" style={{ width: scrollInnerWidth - LABEL_WIDTH, height: RULER_HEIGHT }}>
                 {timeMarks.map((t) => (
                   <div key={t} className="absolute bottom-0 flex flex-col items-center" style={{ left: t * PIXELS_PER_SECOND * zoom }}>
-                    <span className="text-[10px] text-slate-500 font-mono leading-none mb-0.5">{formatTime(t)}</span>
-                    <div className="w-px h-2.5 bg-white/10" />
+                    <span className="text-df-xs text-df-text-muted font-mono leading-none mb-0.5">{formatTime(t)}</span>
+                    <div className="w-px h-2.5 bg-df-border" />
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Track rows - clip bodies */}
+            {/* Track rows */}
             <div className="relative">
               {trackGroups.map((group, groupIdx) => (
                 <React.Fragment key={group.id}>
                   {/* Group header body */}
                   <div
-                    className="border-b border-white/5/50 bg-slate-900/40"
+                    className="border-b border-df-divider bg-df-surface-1/40"
                     style={{ height: TRACK_HEIGHT }}
                     onDragOver={handleDragOver}
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
                   >
                     {dropTime !== null && (
-                      <div className="absolute top-0 bottom-0 w-0.5 bg-indigo-500 pointer-events-none z-10" style={{ left: dropTime * PIXELS_PER_SECOND * zoom }} />
+                      <div className="absolute top-0 bottom-0 w-0.5 bg-df-accent pointer-events-none z-10" style={{ left: dropTime * PIXELS_PER_SECOND * zoom }} />
                     )}
                   </div>
 
-                  {/* Individual track bodies with clips */}
+                  {/* Track bodies with clips */}
                   {group.tracks.map((track, trackIdx) => (
                     <div
                       key={track.id}
-                      className={`relative overflow-hidden border-b border-white/5/50 ${dragOverTrackId === track.id ? 'bg-indigo-500/20 border-indigo-400' : ''}`}
+                      className={`relative overflow-hidden border-b border-df-divider ${dragOverTrackId === track.id ? 'bg-df-accent-muted border-df-accent' : ''}`}
                       style={{
                         height: TRACK_HEIGHT,
-                        backgroundColor: dragOverTrackId === track.id ? undefined : (groupIdx % 2 === 0 ? 'rgba(15, 23, 42, 0.2)' : 'rgba(30, 41, 59, 0.2)'),
+                        backgroundColor: dragOverTrackId === track.id ? undefined : (groupIdx % 2 === 0 ? 'rgba(17, 17, 17, 0.2)' : 'rgba(24, 24, 24, 0.2)'),
                       }}
                       onDragOver={(e) => handleDragOver(e, track.id)}
                       onDragLeave={handleDragLeave}
@@ -941,26 +945,15 @@ export const Timeline: React.FC = () => {
                         const isImage = asset?.type === 'image';
                         const isAudio = asset?.type === 'audio';
 
-                        const typeAccent: Record<string, string> = {
-                          video: '#6366f1',
-                          image: '#6366f1',
-                          text: '#f59e0b',
-                          sfx: '#10b981',
-                          music: '#10b981',
-                          ambient: '#06b6d4',
-                          voiceover: '#8b5cf6',
-                        };
-                        const accent = typeAccent[track.type] || '#6366f1';
-
                         return (
                           <div
                             key={clip.id}
                             className={`
-                              absolute top-0.5 bottom-0.5 rounded-md flex items-center overflow-hidden cursor-grab active:cursor-grabbing
-                              border border-white/[0.08]
+                              absolute top-0.5 bottom-0.5 rounded-df-sm flex items-center overflow-hidden cursor-grab active:cursor-grabbing
+                              border border-df-border
                               ${isSelected
-                                ? 'ring-2 ring-indigo-500/80 ring-offset-1 ring-offset-slate-900 z-10 border-indigo-500/40'
-                                : 'hover:border-white/20 hover:brightness-110'}
+                                ? 'ring-2 ring-df-accent/60 ring-offset-1 ring-offset-df-surface-1 z-10 border-df-accent/40'
+                                : 'hover:border-df-border-strong hover:brightness-110'}
                             `}
                             style={{
                               left,
@@ -968,7 +961,7 @@ export const Timeline: React.FC = () => {
                               backgroundColor: track.color + 'dd',
                               color: 'white',
                               borderLeftWidth: '3px',
-                              borderLeftColor: accent,
+                              borderLeftColor: track.color,
                             }}
                             onMouseDown={(e) => handleClipMouseDown(e, clip, track.type, 'move')}
                           >
@@ -987,16 +980,16 @@ export const Timeline: React.FC = () => {
                               </div>
                             )}
                             <div className="flex-1 px-1 min-w-0 overflow-hidden">
-                              <span className="text-[10px] leading-none truncate block whitespace-nowrap">{displayName}</span>
+                              <span className="text-df-xs leading-none truncate block whitespace-nowrap">{displayName}</span>
                             </div>
                             <div
-                              className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-white/30 z-20 group/resize"
+                              className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-white/30 z-20"
                               onMouseDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip, track.type, 'resize-left'); }}
                             >
                               <div className="absolute left-0.5 top-1/2 -translate-y-1/2 w-0.5 h-3 bg-white/40 rounded-full" />
                             </div>
                             <div
-                              className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-white/30 z-20 group/resize"
+                              className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-white/30 z-20"
                               onMouseDown={(e) => { e.stopPropagation(); handleClipMouseDown(e, clip, track.type, 'resize-right'); }}
                             >
                               <div className="absolute right-0.5 top-1/2 -translate-y-1/2 w-0.5 h-3 bg-white/40 rounded-full" />
@@ -1007,9 +1000,8 @@ export const Timeline: React.FC = () => {
                     </div>
                   ))}
 
-                  {/* Empty state body */}
                   {group.tracks.length === 0 && (
-                    <div className="border-b border-white/5/50 w-full" style={{ height: TRACK_HEIGHT }} />
+                    <div className="border-b border-df-divider w-full" style={{ height: TRACK_HEIGHT }} />
                   )}
                 </React.Fragment>
               ))}
@@ -1017,12 +1009,12 @@ export const Timeline: React.FC = () => {
 
             {/* Playhead */}
             <div
-              className={`absolute top-0 bottom-0 w-0.5 bg-red-500 z-30 ${isDraggingPlayhead ? 'shadow-[0_0_12px_rgba(239,68,68,0.8)]' : 'shadow-[0_0_8px_rgba(239,68,68,0.6)] pointer-events-auto cursor-ew-resize'}`}
+              className={`absolute top-0 bottom-0 w-0.5 bg-df-error z-30 ${isDraggingPlayhead ? 'shadow-[0_0_12px_rgba(239,83,80,0.8)]' : 'shadow-[0_0_8px_rgba(239,83,80,0.6)] pointer-events-auto cursor-ew-resize'}`}
               style={{ left: playheadX }}
               onMouseDown={handlePlayheadMouseDown}
             >
-              <div className={`absolute -top-0.5 -left-1.5 w-3 h-3 bg-red-500 rotate-45 rounded-sm shadow-lg shadow-red-500/50 ${isDraggingPlayhead ? '' : 'cursor-grab active:cursor-grabbing'}`} />
-              <div className="absolute top-full left-0 w-px h-8 bg-red-500/30 pointer-events-none" style={{ transform: 'translateX(-50%)' }} />
+              <div className={`absolute -top-0.5 -left-1.5 w-3 h-3 bg-df-error rotate-45 rounded-df-xs shadow-medium ${isDraggingPlayhead ? '' : 'cursor-grab active:cursor-grabbing'}`} />
+              <div className="absolute top-full left-0 w-px h-8 bg-df-error/30 pointer-events-none" style={{ transform: 'translateX(-50%)' }} />
             </div>
           </div>
         </div>

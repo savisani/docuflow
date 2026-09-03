@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Settings, Wand2, Image as ImageIcon, Download, Film, Plus, Cloud, X, Sliders, Sparkles, ZoomIn, Save, CheckCircle, FolderOpen, RefreshCw, Cpu, Monitor, ArrowUp } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { Button } from '../ui';
@@ -79,7 +79,7 @@ async function blobUrlToBase64(url: string): Promise<string> {
 }
 
 export const ImageGenerator: React.FC = () => {
-  const { generatedImages, assets, addToTimeline } = useDocuFlowStore();
+  const { generatedImages, assets, addToTimeline, setLoadedModel } = useDocuFlowStore();
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -116,8 +116,15 @@ export const ImageGenerator: React.FC = () => {
   const [localDevice, setLocalDevice] = useState<'auto' | 'gpu' | 'cpu' | 'directml'>('auto');
   const [localProgress, setLocalProgress] = useState<{ percent: number; message: string } | null>(null);
   const [showLocalModelManager, setShowLocalModelManager] = useState(false);
+  const [localSteps, setLocalSteps] = useState<number>(() => {
+    const stored = localStorage.getItem('docuflow-local-steps');
+    return stored ? parseInt(stored, 10) : 0; // 0 means use quality preset
+  });
 
   const [lightboxImage, setLightboxImage] = useState<{ id: string; url: string; prompt: string; aspectRatio: string } | null>(null);
+
+  // Guard against double generation (React StrictMode or rapid clicks)
+  const generationLockRef = useRef<string | null>(null);
 
   // Regeneration state
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
@@ -147,6 +154,7 @@ export const ImageGenerator: React.FC = () => {
   useEffect(() => { saveAdvancedSettings(advancedSettings); }, [advancedSettings]);
   useEffect(() => { localStorage.setItem('docuflow-image-provider', imageProvider); }, [imageProvider]);
   useEffect(() => { localStorage.setItem('docuflow-local-model-path', selectedLocalModel); }, [selectedLocalModel]);
+  useEffect(() => { localStorage.setItem('docuflow-local-steps', String(localSteps)); }, [localSteps]);
 
   // Load local models and hardware when switching to local provider
   useEffect(() => {
@@ -190,6 +198,7 @@ export const ImageGenerator: React.FC = () => {
 
     try {
       const preset = QUALITY_PRESETS[localQualityPreset];
+      const effectiveSteps = localSteps > 0 ? localSteps : preset.steps;
       const result = await regenerateImage(
         imageId,
         image.prompt,
@@ -197,7 +206,7 @@ export const ImageGenerator: React.FC = () => {
           provider: imageProvider,
           cloudflareConfig,
           model: advancedSettings.model,
-          steps: imageProvider === 'local' ? preset.steps : advancedSettings.steps,
+          steps: imageProvider === 'local' ? effectiveSteps : advancedSettings.steps,
           negativePrompt: negativePrompt || undefined,
           localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
           device: imageProvider === 'local' ? localDevice : undefined,
@@ -257,6 +266,14 @@ export const ImageGenerator: React.FC = () => {
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim() || isGenerating) return;
 
+    // Prevent double generation (StrictMode or rapid clicks)
+    const lockKey = `gen-${Date.now()}`;
+    if (generationLockRef.current) {
+      console.warn('[ImageGenerator] Generation already in progress, ignoring duplicate request');
+      return;
+    }
+    generationLockRef.current = lockKey;
+
     if (imageProvider === 'cloudflare' && !cloudflareConfig.workerUrl) {
       setError('Please configure your Cloudflare Worker URL in Settings first.');
       return;
@@ -271,8 +288,15 @@ export const ImageGenerator: React.FC = () => {
     setError(null);
     setLocalProgress(null);
 
+    // Track loaded model for global status
+    if (imageProvider === 'local' && selectedLocalModel) {
+      const modelName = selectedLocalModel.split(/[\\/]/).pop()?.replace(/\.(safetensors|ckpt|pt|bin)$/i, '') || 'Unknown';
+      setLoadedModel(modelName, 'loading');
+    }
+
     try {
       const preset = QUALITY_PRESETS[localQualityPreset];
+      const effectiveSteps = localSteps > 0 ? localSteps : preset.steps;
       const result = await generateImage({
         prompt: prompt.trim(),
         aspectRatio: selectedAspectRatio,
@@ -281,7 +305,7 @@ export const ImageGenerator: React.FC = () => {
         provider: imageProvider,
         cloudflareConfig,
         model: advancedSettings.model,
-        steps: imageProvider === 'local' ? preset.steps : advancedSettings.steps,
+        steps: imageProvider === 'local' ? effectiveSteps : advancedSettings.steps,
         count: imageProvider === 'local' ? 1 : batchSize,
         localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
         device: imageProvider === 'local' ? localDevice : undefined,
@@ -290,8 +314,20 @@ export const ImageGenerator: React.FC = () => {
         onProgress: imageProvider === 'local' ? (p) => {
           if (p.type === 'progress' && p.percent !== undefined) {
             setLocalProgress({ percent: p.percent, message: `Generating... ${p.percent}%` });
+            // Update model state to 'generating' on first progress
+            if (p.percent > 0 && imageProvider === 'local' && selectedLocalModel) {
+              const modelName = selectedLocalModel.split(/[\\/]/).pop()?.replace(/\.(safetensors|ckpt|pt|bin)$/i, '') || 'Unknown';
+              setLoadedModel(modelName, 'generating');
+            }
           } else if (p.type === 'status' && p.message) {
             setLocalProgress({ percent: 0, message: p.message });
+            // If status mentions "Loading model", set to 'loading'
+            if (p.message.toLowerCase().includes('loading model') || p.message.toLowerCase().includes('moving pipeline')) {
+              if (imageProvider === 'local' && selectedLocalModel) {
+                const modelName = selectedLocalModel.split(/[\\/]/).pop()?.replace(/\.(safetensors|ckpt|pt|bin)$/i, '') || 'Unknown';
+                setLoadedModel(modelName, 'loading');
+              }
+            }
           }
         } : undefined,
       });
@@ -303,15 +339,23 @@ export const ImageGenerator: React.FC = () => {
       setPrompt('');
       setIsPolished(false);
       setPrePolishPrompt('');
+      // Mark model as loaded (still in GPU memory) after successful generation
+      if (imageProvider === 'local' && selectedLocalModel) {
+        const modelName = selectedLocalModel.split(/[\\/]/).pop()?.replace(/\.(safetensors|ckpt|pt|bin)$/i, '') || 'Unknown';
+        setLoadedModel(modelName, 'loaded');
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error occurred';
       setError(message);
       console.error('Image generation failed:', err);
+      // On failure, clear loaded model state
+      setLoadedModel(null, 'unloaded');
     } finally {
+      generationLockRef.current = null;
       setIsGenerating(false);
       setLocalProgress(null);
     }
-  }, [prompt, isGenerating, imageProvider, cloudflareConfig, selectedLocalModel, advancedSettings, selectedAspectRatio, batchSize, negativePrompt, localQualityPreset, localDevice]);
+  }, [prompt, isGenerating, imageProvider, cloudflareConfig, selectedLocalModel, advancedSettings, selectedAspectRatio, batchSize, negativePrompt, localQualityPreset, localDevice, setLoadedModel]);
 
   const handleDownload = useCallback(async (url: string, filename: string, imageId?: string) => {
     try {
@@ -496,6 +540,8 @@ export const ImageGenerator: React.FC = () => {
       const result = await generateScenePair({
         backgroundDescription: bgDescription.trim(),
         personDescription: personDescription.trim(),
+        backgroundNegativePrompt: negativePrompt || undefined,
+        personNegativePrompt: negativePrompt || undefined,
         aspectRatio: selectedAspectRatio,
         source: 'image-generator',
         provider: imageProvider,
@@ -530,41 +576,41 @@ export const ImageGenerator: React.FC = () => {
       setSceneProgress(null);
     }
   }, [
-    bgDescription, personDescription, sceneGenerating, imageProvider,
+    bgDescription, personDescription, negativePrompt, sceneGenerating, imageProvider,
     cloudflareConfig, selectedLocalModel, advancedSettings, selectedAspectRatio,
     localQualityPreset, localDevice,
   ]);
 
   return (
-    <div className="w-full h-full flex flex-col bg-slate-950 text-white overflow-hidden">
+    <div className="w-full h-full flex flex-col bg-df-bg text-df-text-primary overflow-hidden">
       {/* Toast Notification */}
       {toast && (
-        <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-lg shadow-lg backdrop-blur-sm transition-all ${
+        <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-df-lg shadow-heavy transition-all ${
           toast.type === 'success'
-            ? 'bg-emerald-500/90 text-white'
-            : 'bg-red-500/90 text-white'
+            ? 'bg-df-success text-white'
+            : 'bg-df-error text-white'
         }`}>
           {toast.type === 'success' ? <CheckCircle size={14} /> : <X size={14} />}
-          <span className="text-[11px] font-medium max-w-[300px] truncate">{toast.message}</span>
+          <span className="text-df-sm font-medium max-w-[300px] truncate">{toast.message}</span>
         </div>
       )}
 
       {/* Upscale Progress */}
       {upscaleProgress && (
-        <div className="fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-lg shadow-lg backdrop-blur-sm bg-blue-500/90 text-white transition-all">
+        <div className="fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-df-lg shadow-heavy bg-df-accent text-white transition-all">
           <ArrowUp size={14} className="animate-bounce" />
-          <span className="text-[11px] font-medium">{upscaleProgress}</span>
+          <span className="text-df-sm font-medium">{upscaleProgress}</span>
         </div>
       )}
 
       {/* Full-screen Lightbox */}
       {lightboxImage && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90"
           onClick={() => setLightboxImage(null)}
         >
           <button
-            className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-white hover:bg-white/20 transition-colors"
+            className="absolute top-4 right-4 w-10 h-10 rounded-full bg-df-surface-3/80 flex items-center justify-center text-df-text-primary hover:bg-df-surface-4 transition-colors"
             onClick={() => setLightboxImage(null)}
           >
             <X size={20} />
@@ -576,11 +622,11 @@ export const ImageGenerator: React.FC = () => {
               className="max-w-full max-h-[80vh] object-contain rounded-lg"
             />
             <div className="flex items-center gap-3">
-              <p className="text-[12px] text-white/70 max-w-[500px] truncate">{lightboxImage.prompt}</p>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-white/10 text-white/50">{lightboxImage.aspectRatio}</span>
+              <p className="text-df-base text-df-text-secondary max-w-[500px] truncate">{lightboxImage.prompt}</p>
+              <span className="text-df-xs px-2 py-0.5 rounded-df-sm bg-df-surface-3 text-df-text-muted">{lightboxImage.aspectRatio}</span>
               <button
                 onClick={() => handleDownload(lightboxImage.url, `image-${Date.now()}.png`, lightboxImage.id)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 text-white text-[11px] hover:bg-white/20 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-df-lg bg-df-surface-3 text-df-text-primary text-df-sm hover:bg-df-surface-4 transition-colors"
               >
                 <Download size={12} />
                 <span>Save</span>
@@ -588,7 +634,7 @@ export const ImageGenerator: React.FC = () => {
               <button
                 onClick={() => handleUpscale(lightboxImage.id, 2)}
                 disabled={upscalingId === lightboxImage.id || !assets.find(a => a.id === lightboxImage.id)?.filePath}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-[11px] hover:bg-emerald-500/30 transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-df-lg bg-df-success-muted text-df-success text-df-sm hover:bg-df-success/20 transition-colors disabled:opacity-50"
               >
                 {upscalingId === lightboxImage.id ? (
                   <ArrowUp size={12} className="animate-bounce" />
@@ -603,36 +649,36 @@ export const ImageGenerator: React.FC = () => {
       )}
 
       {/* Compact Control Panel */}
-      <div className="w-full shrink-0 border-b border-white/5 bg-slate-900/40">
+      <div className="w-full shrink-0 border-b border-df-divider bg-df-surface-1">
         <div className="w-full px-4 py-3">
           {/* Header row */}
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+              <div className={`w-7 h-7 rounded-df-md flex items-center justify-center ${
                 imageProvider === 'local'
-                  ? 'bg-gradient-to-br from-emerald-500 to-teal-600'
-                  : 'bg-gradient-to-br from-purple-500 to-pink-600'
+                  ? 'bg-df-success'
+                  : 'bg-df-accent'
               }`}>
                 {imageProvider === 'local' ? <Cpu size={14} className="text-white" /> : <Cloud size={14} className="text-white" />}
               </div>
               <div>
-                <h1 className="text-[13px] font-bold text-white">
+                <h1 className="text-df-md font-bold text-df-text-primary">
                   {imageProvider === 'local' ? 'Local Image Generator' : 'AI Image Generator'}
                 </h1>
-                <p className="text-[10px] text-slate-400">
+                <p className="text-df-xs text-df-text-muted">
                   {imageProvider === 'local' ? 'Offline Stable Diffusion' : 'Powered by Cloudflare Workers AI'}
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-1.5">
               {/* Mode Toggle */}
-              <div className="flex items-center bg-slate-800/60 rounded-md border border-white/5 p-0.5">
+              <div className="flex items-center bg-df-surface-2 rounded-df-md border border-df-border p-px">
                 <button
                   onClick={() => setSceneMode('standard')}
-                  className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-medium transition-all ${
+                  className={`flex items-center gap-1 px-2 py-1 rounded-df-sm text-df-xs font-medium transition-all ${
                     sceneMode === 'standard'
-                      ? 'bg-purple-500/20 text-purple-300'
-                      : 'text-slate-400 hover:text-white'
+                      ? 'bg-df-accent-muted text-df-accent'
+                      : 'text-df-text-muted hover:text-df-text-primary'
                   }`}
                 >
                   <ImageIcon size={10} />
@@ -640,10 +686,10 @@ export const ImageGenerator: React.FC = () => {
                 </button>
                 <button
                   onClick={() => setSceneMode('scene')}
-                  className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-medium transition-all ${
+                  className={`flex items-center gap-1 px-2 py-1 rounded-df-sm text-df-xs font-medium transition-all ${
                     sceneMode === 'scene'
-                      ? 'bg-purple-500/20 text-purple-300'
-                      : 'text-slate-400 hover:text-white'
+                      ? 'bg-df-accent-muted text-df-accent'
+                      : 'text-df-text-muted hover:text-df-text-primary'
                   }`}
                 >
                   <Wand2 size={10} />
@@ -651,13 +697,13 @@ export const ImageGenerator: React.FC = () => {
                 </button>
               </div>
               {/* Provider Toggle */}
-              <div className="flex items-center bg-slate-800/60 rounded-md border border-white/5 p-0.5">
+              <div className="flex items-center bg-df-surface-2 rounded-df-md border border-df-border p-px">
                 <button
                   onClick={() => setImageProvider('cloudflare')}
-                  className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-medium transition-all ${
+                  className={`flex items-center gap-1 px-2 py-1 rounded-df-sm text-df-xs font-medium transition-all ${
                     imageProvider === 'cloudflare'
-                      ? 'bg-purple-500/20 text-purple-300'
-                      : 'text-slate-400 hover:text-white'
+                      ? 'bg-df-accent-muted text-df-accent'
+                      : 'text-df-text-muted hover:text-df-text-primary'
                   }`}
                 >
                   <Cloud size={10} />
@@ -665,10 +711,10 @@ export const ImageGenerator: React.FC = () => {
                 </button>
                 <button
                   onClick={() => setImageProvider('local')}
-                  className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-medium transition-all ${
+                  className={`flex items-center gap-1 px-2 py-1 rounded-df-sm text-df-xs font-medium transition-all ${
                     imageProvider === 'local'
-                      ? 'bg-emerald-500/20 text-emerald-300'
-                      : 'text-slate-400 hover:text-white'
+                      ? 'bg-df-success-muted text-df-success'
+                      : 'text-df-text-muted hover:text-df-text-primary'
                   }`}
                 >
                   <Cpu size={10} />
@@ -677,10 +723,10 @@ export const ImageGenerator: React.FC = () => {
               </div>
               <button
                 onClick={() => setShowAdvanced(!showAdvanced)}
-                className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all ${
+                className={`flex items-center gap-1 px-2 py-1 rounded-df-md text-df-xs font-medium transition-all ${
                   showAdvanced
-                    ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
-                    : 'bg-slate-800/60 text-slate-400 border border-white/5 hover:text-white hover:border-white/10'
+                    ? 'bg-df-accent-muted text-df-accent border border-df-accent/30'
+                    : 'bg-df-surface-2 text-df-text-muted border border-df-border hover:text-df-text-primary hover:border-df-border-strong'
                 }`}
               >
                 <Sliders size={10} />
@@ -688,7 +734,7 @@ export const ImageGenerator: React.FC = () => {
               </button>
               <button
                 onClick={() => setShowSettings(!showSettings)}
-                className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-slate-800/60 text-slate-400 border border-white/5 hover:text-white hover:border-white/10 transition-all"
+                className="flex items-center gap-1 px-2 py-1 rounded-df-md text-df-xs font-medium bg-df-surface-2 text-df-text-muted border border-df-border hover:text-df-text-primary hover:border-df-border-strong transition-all"
               >
                 <Settings size={10} />
                 <span>Settings</span>
@@ -698,10 +744,10 @@ export const ImageGenerator: React.FC = () => {
 
           {/* Settings Panel */}
           {showSettings && (
-            <div className="mb-3 p-3 rounded-lg bg-slate-800/50 border border-white/10">
+            <div className="mb-3 p-3 rounded-df-lg bg-df-surface-2 border border-df-border">
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-[12px] font-semibold text-white">Settings</h3>
-                <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-white">
+                <h3 className="text-df-base font-semibold text-df-text-primary">Settings</h3>
+                <button onClick={() => setShowSettings(false)} className="text-df-text-muted hover:text-df-text-primary">
                   <X size={12} />
                 </button>
               </div>
@@ -711,7 +757,7 @@ export const ImageGenerator: React.FC = () => {
                 <>
                   {/* Worker URL */}
                   <div className="mb-3">
-                    <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1 block">
+                    <label className="text-df-xs font-medium text-df-text-muted uppercase tracking-wider mb-1 block">
                       Cloudflare Worker URL
                     </label>
                     <div className="flex gap-2">
@@ -720,7 +766,7 @@ export const ImageGenerator: React.FC = () => {
                         value={tempWorkerUrl}
                         onChange={(e) => setTempWorkerUrl(e.target.value)}
                         placeholder="https://your-worker.workers.dev"
-                        className="flex-1 bg-slate-700/50 border border-white/10 rounded-md px-2 py-1.5 text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        className="flex-1 bg-df-surface-3 border border-df-border rounded-df-md px-2 py-1.5 text-df-sm text-df-text-primary placeholder:text-df-text-dim focus:outline-none focus:ring-1 focus:ring-df-accent"
                       />
                       <Button variant="primary" onClick={handleSaveSettings} className="px-3 py-1.5 text-[10px]">
                         Save
@@ -746,9 +792,13 @@ export const ImageGenerator: React.FC = () => {
                       </p>
                       <div className="flex gap-1.5 mt-1.5">
                         {localHardware.cuda && <span className="text-[8px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-300">CUDA</span>}
-                        {localHardware.directml && <span className="text-[8px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300">DirectML</span>}
-                        <span className="text-[8px] px-1.5 py-0.5 rounded bg-slate-600/50 text-slate-300">CPU</span>
+                        {!localHardware.cuda && <span className="text-[8px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-300">No GPU</span>}
                       </div>
+                      {!localHardware.cuda && (
+                        <p className="mt-1.5 text-[8px] text-red-400">
+                          CPU fallback is disabled. NVIDIA CUDA GPU required.
+                        </p>
+                      )}
                     </div>
                   )}
 
@@ -793,6 +843,34 @@ export const ImageGenerator: React.FC = () => {
                     )}
                   </div>
 
+                  {/* Steps Selector */}
+                  <div className="mb-3">
+                    <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1 block">
+                      Inference Steps: {localSteps > 0 ? localSteps : QUALITY_PRESETS[localQualityPreset].steps}
+                      {localSteps > 0 && (
+                        <span className="ml-1 text-[8px] text-slate-500">(custom)</span>
+                      )}
+                    </label>
+                    <div className="grid grid-cols-7 gap-1">
+                      {[8, 10, 12, 15, 20, 25, 30].map((s) => (
+                        <button
+                          key={s}
+                          onClick={() => setLocalSteps(s)}
+                          className={`px-1 py-1 rounded text-[9px] font-medium transition-all ${
+                            (localSteps > 0 ? localSteps : QUALITY_PRESETS[localQualityPreset].steps) === s
+                              ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                              : 'bg-slate-700/50 text-slate-400 border border-white/5 hover:text-white hover:border-white/10'
+                          }`}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-[8px] text-slate-500">
+                      Lower = faster | Higher = better quality but slower
+                    </p>
+                  </div>
+
                   {/* Quality Preset */}
                   <div className="mb-3">
                     <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1 block">
@@ -802,7 +880,7 @@ export const ImageGenerator: React.FC = () => {
                       {(Object.entries(QUALITY_PRESETS) as [QualityPreset, typeof QUALITY_PRESETS[QualityPreset]][]).map(([key, preset]) => (
                         <button
                           key={key}
-                          onClick={() => setLocalQualityPreset(key)}
+                          onClick={() => { setLocalQualityPreset(key); setLocalSteps(0); }}
                           className={`px-2 py-1.5 rounded-md text-[10px] font-medium transition-all ${
                             localQualityPreset === key
                               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
@@ -818,21 +896,18 @@ export const ImageGenerator: React.FC = () => {
                     </p>
                   </div>
 
-                  {/* Device Selection */}
+                  {/* Device Selection - GPU Only */}
                   <div className="mb-3">
                     <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1 block">
                       Device
                     </label>
-                    <select
-                      value={localDevice}
-                      onChange={(e) => setLocalDevice(e.target.value as 'auto' | 'gpu' | 'cpu' | 'directml')}
-                      className="w-full bg-slate-700/50 border border-white/10 rounded-md px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                    >
-                      <option value="auto">Auto (Best Available)</option>
-                      <option value="gpu">GPU (CUDA)</option>
-                      <option value="directml">DirectML</option>
-                      <option value="cpu">CPU Only</option>
-                    </select>
+                    <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-green-500/10 border border-green-500/20">
+                      <Cpu size={12} className="text-green-400" />
+                      <span className="text-[10px] text-green-300 font-medium">GPU (CUDA) Only</span>
+                    </div>
+                    <p className="mt-1 text-[8px] text-slate-500">
+                      CPU fallback disabled. Generation requires NVIDIA GPU.
+                    </p>
                   </div>
                 </>
               )}
@@ -938,10 +1013,10 @@ export const ImageGenerator: React.FC = () => {
                   <textarea
                     value={bgDescription}
                     onChange={(e) => { setBgDescription(e.target.value); setError(null); }}
-                    placeholder="Describe the environment/background..."
+                    placeholder={"Describe the environment/background...\nNegative prompt: people, humans, characters"}
                     rows={2}
                     disabled={sceneGenerating}
-                    className="w-full bg-slate-800/80 border border-slate-700/50 rounded-lg px-3 py-2 text-[12px] text-slate-200 placeholder:text-slate-500 resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all disabled:opacity-60"
+                    className="w-full bg-df-surface-2 border border-df-border rounded-df-lg px-3 py-2 text-df-base text-df-text-primary placeholder:text-df-text-dim resize-none focus:outline-none focus:ring-2 focus:ring-df-accent focus:border-df-accent transition-all disabled:opacity-60"
                   />
                 </div>
                 <div className="flex-1">
@@ -951,10 +1026,10 @@ export const ImageGenerator: React.FC = () => {
                   <textarea
                     value={personDescription}
                     onChange={(e) => { setPersonDescription(e.target.value); setError(null); }}
-                    placeholder="Describe the person, appearance, clothing..."
+                    placeholder={"Describe the person, appearance, clothing...\nNegative prompt: deformed, bad anatomy, extra fingers"}
                     rows={2}
                     disabled={sceneGenerating}
-                    className="w-full bg-slate-800/80 border border-slate-700/50 rounded-lg px-3 py-2 text-[12px] text-slate-200 placeholder:text-slate-500 resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all disabled:opacity-60"
+                    className="w-full bg-df-surface-2 border border-df-border rounded-df-lg px-3 py-2 text-df-base text-df-text-primary placeholder:text-df-text-dim resize-none focus:outline-none focus:ring-2 focus:ring-df-accent focus:border-df-accent transition-all disabled:opacity-60"
                   />
                 </div>
               </div>
@@ -965,7 +1040,7 @@ export const ImageGenerator: React.FC = () => {
                   disabled={!bgDescription.trim() || !personDescription.trim() || sceneGenerating}
                   loading={sceneGenerating}
                   icon={<Wand2 size={12} />}
-                  className="px-4 py-1.5 text-[10px] bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 border-0"
+                  className="px-4 py-1.5 text-df-xs bg-df-accent hover:bg-df-accent-hover border-0"
                 >
                   {sceneGenerating ? 'Generating Scene...' : 'Generate Scene'}
                 </Button>
@@ -979,7 +1054,7 @@ export const ImageGenerator: React.FC = () => {
                 placeholder="Describe the image you want to create..."
                 rows={2}
                 disabled={isGenerating}
-                className="flex-1 bg-slate-800/80 border border-slate-700/50 rounded-lg px-3 py-2 text-[12px] text-slate-200 placeholder:text-slate-500 resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all disabled:opacity-60"
+                className="flex-1 bg-df-surface-2 border border-df-border rounded-df-lg px-3 py-2 text-df-base text-df-text-primary placeholder:text-df-text-dim resize-none focus:outline-none focus:ring-2 focus:ring-df-accent focus:border-df-accent transition-all disabled:opacity-60"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
@@ -995,7 +1070,7 @@ export const ImageGenerator: React.FC = () => {
                   loading={polishing}
                   disabled={!prompt.trim() || isGenerating}
                   icon={<Sparkles size={12} />}
-                  className="px-2 py-1 text-[10px] border border-white/10 hover:border-purple-500/30 hover:text-purple-300"
+                  className="px-2 py-1 text-df-xs border border-df-border hover:border-df-accent/30 hover:text-df-accent"
                 >
                   Polish
                 </Button>
@@ -1005,7 +1080,7 @@ export const ImageGenerator: React.FC = () => {
                   disabled={!prompt.trim() || isGenerating}
                   loading={isGenerating}
                   icon={<Wand2 size={12} />}
-                  className="px-3 py-1 text-[10px] bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 border-0"
+                  className="px-3 py-1 text-df-xs bg-df-accent hover:bg-df-accent-hover border-0"
                 >
                   Generate
                 </Button>
@@ -1014,8 +1089,8 @@ export const ImageGenerator: React.FC = () => {
           )}
 
           {error && (
-            <p className="mt-1.5 text-[10px] text-red-400 flex items-center gap-1">
-              <span className="inline-block w-1 h-1 rounded-full bg-red-400 shrink-0" />
+            <p className="mt-1.5 text-df-xs text-df-error flex items-center gap-1">
+              <span className="inline-block w-1 h-1 rounded-full bg-df-error shrink-0" />
               {error}
             </p>
           )}
@@ -1054,7 +1129,7 @@ export const ImageGenerator: React.FC = () => {
           <div className="mt-2 flex items-end gap-3 flex-wrap">
             {/* Aspect Ratio */}
             <div>
-              <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1 block">
+              <label className="text-df-xs font-medium text-df-text-muted uppercase tracking-wider mb-1 block">
                 Aspect Ratio
               </label>
               <div className="flex gap-1">
@@ -1063,10 +1138,10 @@ export const ImageGenerator: React.FC = () => {
                     key={ratio.id}
                     onClick={() => !isGenerating && setSelectedAspectRatio(ratio.id)}
                     disabled={isGenerating}
-                    className={`px-2 py-1 rounded-md text-[10px] font-medium transition-all ${
+                    className={`px-2 py-1 rounded-df-md text-df-xs font-medium transition-all ${
                       selectedAspectRatio === ratio.id
-                        ? 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 text-white border border-purple-500/30'
-                        : 'bg-slate-800/60 text-slate-400 border border-white/5 hover:text-white hover:border-white/10'
+                        ? 'bg-df-accent-muted text-df-text-primary border border-df-accent/30'
+                        : 'bg-df-surface-2 text-df-text-muted border border-df-border hover:text-df-text-primary hover:border-df-border-strong'
                     }`}
                   >
                     {ratio.label}
@@ -1077,7 +1152,7 @@ export const ImageGenerator: React.FC = () => {
 
             {/* Batch Size */}
             <div>
-              <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1 block">
+              <label className="text-df-xs font-medium text-df-text-muted uppercase tracking-wider mb-1 block">
                 Batch
               </label>
               <div className="flex gap-1">
@@ -1086,10 +1161,10 @@ export const ImageGenerator: React.FC = () => {
                     key={size}
                     onClick={() => !isGenerating && setBatchSize(size)}
                     disabled={isGenerating}
-                    className={`w-7 h-6 rounded-md text-[10px] font-medium transition-all ${
+                    className={`w-7 h-6 rounded-df-md text-df-xs font-medium transition-all ${
                       batchSize === size
-                        ? 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 text-white border border-purple-500/30'
-                        : 'bg-slate-800/60 text-slate-400 border border-white/5 hover:text-white hover:border-white/10'
+                        ? 'bg-df-accent-muted text-df-text-primary border border-df-accent/30'
+                        : 'bg-df-surface-2 text-df-text-muted border border-df-border hover:text-df-text-primary hover:border-df-border-strong'
                     }`}
                   >
                     {size}
@@ -1100,8 +1175,8 @@ export const ImageGenerator: React.FC = () => {
 
             {/* Negative Prompt */}
             <div className="flex-1 min-w-[150px]">
-              <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1 block">
-                Negative Prompt <span className="text-slate-600 font-normal">(optional)</span>
+              <label className="text-df-xs font-medium text-df-text-muted uppercase tracking-wider mb-1 block">
+                Negative Prompt <span className="text-df-text-dim font-normal">(optional)</span>
               </label>
               <input
                 type="text"
@@ -1109,13 +1184,27 @@ export const ImageGenerator: React.FC = () => {
                 onChange={(e) => setNegativePrompt(e.target.value)}
                 disabled={isGenerating}
                 placeholder="blurry, low quality, watermark"
-                className="w-full bg-slate-800/80 border border-slate-700/50 rounded-md px-2 py-1 text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-all disabled:opacity-60"
+                className="w-full bg-df-surface-2 border border-df-border rounded-df-md px-2 py-1 text-df-sm text-df-text-primary placeholder:text-df-text-dim focus:outline-none focus:ring-1 focus:ring-df-accent transition-all disabled:opacity-60"
               />
             </div>
 
             {/* Model info */}
-            <div className="text-[9px] text-slate-500 whitespace-nowrap">
-              {currentModel?.label || 'FLUX'} &middot; {advancedSettings.steps} steps &middot; {batchSize}x
+            <div className="text-df-xs text-df-text-dim whitespace-nowrap">
+              {imageProvider === 'local' ? (
+                <>
+                  <span className="text-df-text-secondary">
+                    Model: {selectedLocalModel ? localModels.find(m => m.path === selectedLocalModel)?.name || 'Unknown' : 'None'}
+                  </span>
+                  <span className="mx-1">&middot;</span>
+                  <span>{localSteps > 0 ? localSteps : QUALITY_PRESETS[localQualityPreset].steps} steps</span>
+                  <span className="mx-1">&middot;</span>
+                  <span className="text-df-success">CUDA</span>
+                </>
+              ) : (
+                <>
+                  {currentModel?.label || 'FLUX'} &middot; {advancedSettings.steps} steps &middot; {batchSize}x
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -1124,28 +1213,33 @@ export const ImageGenerator: React.FC = () => {
       {/* Gallery */}
       <div className="flex-1 overflow-y-auto px-4 py-4 relative">
         {(isGenerating || sceneGenerating) && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-df-bg/80">
             <div className="relative mb-3">
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500/30 to-pink-500/30 flex items-center justify-center animate-pulse">
-                <Cloud size={24} className="text-purple-400 animate-spin" style={{ animationDuration: '3s' }} />
+              <div className="w-14 h-14 rounded-df-xl bg-df-accent-muted flex items-center justify-center animate-pulse">
+                <Cloud size={24} className="text-df-accent animate-spin" style={{ animationDuration: '3s' }} />
               </div>
-              <div className="absolute inset-0 rounded-2xl border-2 border-purple-500/20 animate-ping" style={{ animationDuration: '2s' }} />
             </div>
-            <p className="text-[12px] font-medium text-slate-200 mb-0.5">
+            <p className="text-df-base font-medium text-df-text-primary mb-0.5">
               {sceneGenerating ? 'Generating scene...' : `Generating ${batchSize} image${batchSize > 1 ? 's' : ''}...`}
             </p>
-            <p className="text-[10px] text-slate-400">Using {currentModel?.label || 'Cloudflare Workers AI'}</p>
+            <p className="text-df-xs text-df-text-muted">
+              {imageProvider === 'local' ? (
+                <>Using {localModels.find(m => m.path === selectedLocalModel)?.name || 'Local Model'} on CUDA</>
+              ) : (
+                <>Using {currentModel?.label || 'Cloudflare Workers AI'}</>
+              )}
+            </p>
           </div>
         )}
 
         {generatedImages.length === 0 && !isGenerating ? (
           <div className="h-full flex items-center justify-center">
-            <div className="glass-panel max-w-sm w-full text-center p-6">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center mx-auto mb-3">
-                <ImageIcon size={22} className="text-purple-400" />
+            <div className="bg-df-surface-1 border border-df-border rounded-df-xl max-w-sm w-full text-center p-6">
+              <div className="w-12 h-12 rounded-df-xl bg-df-accent-muted flex items-center justify-center mx-auto mb-3">
+                <ImageIcon size={22} className="text-df-accent" />
               </div>
-              <h3 className="text-[13px] font-semibold text-slate-300 mb-1">No images generated yet</h3>
-              <p className="text-[11px] text-slate-500">
+              <h3 className="text-df-md font-semibold text-df-text-primary mb-1">No images generated yet</h3>
+              <p className="text-df-sm text-df-text-muted">
                 Enter a prompt above and click Generate to create your first AI image
               </p>
             </div>
@@ -1155,21 +1249,21 @@ export const ImageGenerator: React.FC = () => {
             {generatedImages.map((image) => (
               <div
                 key={image.id}
-                className={`group relative rounded-xl overflow-hidden border transition-all duration-200 cursor-pointer ${
+                className={`group relative rounded-df-xl overflow-hidden border transition-all duration-200 cursor-pointer ${
                   selectedImage === image.id
-                    ? 'border-purple-500/50 ring-2 ring-purple-500/20'
-                    : 'border-white/5 hover:border-white/10'
-                } ${regeneratingId === image.id ? 'ring-2 ring-amber-500/50' : ''}`}
+                    ? 'border-df-accent/50 ring-2 ring-df-accent/20'
+                    : 'border-df-border hover:border-df-border-strong'
+                } ${regeneratingId === image.id ? 'ring-2 ring-df-warning/50' : ''}`}
                 onClick={() => setLightboxImage({ id: image.id, url: image.url, prompt: image.prompt, aspectRatio: image.aspectRatio })}
               >
                 {/* Regenerating overlay */}
                 {regeneratingId === image.id && (
-                  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-900/80 backdrop-blur-sm">
-                    <RefreshCw size={20} className="text-amber-400 animate-spin mb-2" />
-                    <p className="text-[10px] text-amber-300 font-medium">Regenerating...</p>
+                  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-df-surface-1/80">
+                    <RefreshCw size={20} className="text-df-warning animate-spin mb-2" />
+                    <p className="text-df-xs text-df-warning font-medium">Regenerating...</p>
                   </div>
                 )}
-                <div className="aspect-square bg-slate-800/50">
+                <div className="aspect-square bg-df-surface-2">
                   <img
                     src={image.url}
                     alt={image.prompt}
@@ -1198,7 +1292,7 @@ export const ImageGenerator: React.FC = () => {
                       e.stopPropagation();
                       setLightboxImage({ id: image.id, url: image.url, prompt: image.prompt, aspectRatio: image.aspectRatio });
                     }}
-                    className="w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-white hover:bg-white/30 transition-colors"
+                    className="w-8 h-8 rounded-full bg-df-surface-3/80 flex items-center justify-center text-df-text-primary hover:bg-df-surface-4 transition-colors"
                     title="View full size"
                   >
                     <ZoomIn size={14} />
@@ -1209,7 +1303,7 @@ export const ImageGenerator: React.FC = () => {
                       handleRegenerate(image.id);
                     }}
                     disabled={regeneratingId === image.id || isGenerating}
-                    className="w-8 h-8 rounded-full bg-amber-500/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-amber-400 transition-colors disabled:opacity-50"
+                    className="w-8 h-8 rounded-full bg-df-warning/80 flex items-center justify-center text-white hover:bg-df-warning transition-colors disabled:opacity-50"
                     title="Regenerate image"
                   >
                     {regeneratingId === image.id ? (
@@ -1223,7 +1317,7 @@ export const ImageGenerator: React.FC = () => {
                       e.stopPropagation();
                       handleDownload(image.url, `generated-${image.id}.png`, image.id);
                     }}
-                    className="w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-white hover:bg-white/30 transition-colors"
+                    className="w-8 h-8 rounded-full bg-df-surface-3/80 flex items-center justify-center text-df-text-primary hover:bg-df-surface-4 transition-colors"
                     title="Save to location"
                   >
                     <Save size={14} />
@@ -1234,7 +1328,7 @@ export const ImageGenerator: React.FC = () => {
                       handleUpscale(image.id, 2);
                     }}
                     disabled={upscalingId === image.id || isGenerating || !assets.find(a => a.id === image.id)?.filePath}
-                    className="w-8 h-8 rounded-full bg-emerald-500/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-emerald-400 transition-colors disabled:opacity-50"
+                    className="w-8 h-8 rounded-full bg-df-success/80 flex items-center justify-center text-white hover:bg-df-success transition-colors disabled:opacity-50"
                     title="Upscale 2x"
                   >
                     {upscalingId === image.id ? (
@@ -1248,7 +1342,7 @@ export const ImageGenerator: React.FC = () => {
                       e.stopPropagation();
                       handleAddToTimeline(image.id);
                     }}
-                    className="w-8 h-8 rounded-full bg-indigo-500/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-indigo-400 transition-colors"
+                    className="w-8 h-8 rounded-full bg-df-accent/80 flex items-center justify-center text-white hover:bg-df-accent transition-colors"
                     title="Add to Timeline"
                   >
                     <Film size={14} />
@@ -1257,8 +1351,8 @@ export const ImageGenerator: React.FC = () => {
 
                 {/* Bottom info */}
                 <div className="absolute bottom-0 left-0 right-0 p-2 translate-y-full group-hover:translate-y-0 transition-transform">
-                  <p className="text-[9px] text-white/80 line-clamp-1">{image.prompt}</p>
-                  <span className="text-[8px] px-1 py-0.5 rounded bg-white/10 text-white/60">{image.aspectRatio}</span>
+                  <p className="text-df-xs text-df-text-primary/80 line-clamp-1">{image.prompt}</p>
+                  <span className="text-df-xs px-1 py-0.5 rounded-df-sm bg-df-surface-3 text-df-text-muted">{image.aspectRatio}</span>
                 </div>
               </div>
             ))}

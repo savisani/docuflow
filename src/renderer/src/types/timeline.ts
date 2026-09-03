@@ -9,6 +9,17 @@ export interface AnimatedProperty {
   easing: EasingType;
 }
 
+export interface Keyframe {
+  time: number;
+  value: number;
+  easing: EasingType;
+}
+
+export interface KeyframeTrack {
+  property: string;
+  keyframes: Keyframe[];
+}
+
 export interface AssetSegment {
   assetId: string;
   assetUrl: string;
@@ -41,6 +52,7 @@ export interface LayerState {
   cropHeight: number;
   zIndex: number;
   animations: AnimatedProperty[];
+  keyframeTracks: KeyframeTrack[];
   assetSegments: AssetSegment[];
 }
 

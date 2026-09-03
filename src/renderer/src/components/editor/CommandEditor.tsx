@@ -192,7 +192,7 @@ export const CommandEditor: React.FC = () => {
 
   return (
     <Panel title="Command Editor" icon={<Terminal size={10} />} className="h-full flex flex-col">
-      <div className="flex items-center justify-between gap-2 p-3 border-b border-white/5 mb-3 shrink-0">
+      <div className="flex items-center justify-between gap-2 p-3 border-b border-df-border mb-3 shrink-0">
         <div className="flex items-center gap-2">
           <Tooltip content="Parse & Apply (Ctrl+Enter)">
             <Button size="sm" variant="primary" onClick={handleParseAndApply}>
@@ -255,7 +255,7 @@ export const CommandEditor: React.FC = () => {
             }
           }}
           placeholder={`Paste commands here...\n\nExample:\n{\n  "commands": [\n    {\n      "type": "show",\n      "asset": "image1.jpg",\n      "start": 0,\n      "duration": 5\n    }\n  ]\n}`}
-          className="w-full h-full bg-[var(--color-bg)] text-[var(--color-text-primary)] font-mono text-[11px] p-3 resize-none outline-none placeholder:text-[var(--color-text-muted)]"
+          className="w-full h-full bg-[var(--color-bg)] text-[var(--color-text-primary)] font-mono text-df-sm p-3 resize-none outline-none placeholder:text-[var(--color-text-muted)]"
           spellCheck={false}
         />
       </div>
@@ -263,13 +263,13 @@ export const CommandEditor: React.FC = () => {
       {(errors.length > 0 || parseSuccess) && (
         <div className="border-t border-[var(--color-divider)] shrink-0 max-h-24 overflow-y-auto">
           {parseSuccess && (
-            <div className="px-3 py-1.5 text-[11px] text-[var(--color-success)] bg-[var(--color-success-muted)] flex items-center gap-1">
+            <div className="px-3 py-1.5 text-df-sm text-[var(--color-success)] bg-[var(--color-success-muted)] flex items-center gap-1">
               <CheckCircle size={10} />
               Commands applied successfully
             </div>
           )}
           {errors.map((error, i) => (
-            <div key={i} className="px-3 py-1 text-[11px] text-[var(--color-error)] bg-[var(--color-error-muted)] flex items-start gap-1">
+            <div key={i} className="px-3 py-1 text-df-sm text-[var(--color-error)] bg-[var(--color-error-muted)] flex items-start gap-1">
               <AlertTriangle size={10} className="mt-0.5 shrink-0" />
               <span>
                 {error.line > 0 && <span className="font-mono opacity-70">L{error.line}: </span>}

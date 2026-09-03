@@ -232,6 +232,13 @@ export interface CameraRotateCommand extends BaseCommand {
   easing?: EasingType;
 }
 
+export interface SetKeyframesCommand extends BaseCommand {
+  type: 'setKeyframes';
+  target: string;
+  property: string;
+  keyframes: { time: number; value: number; easing?: EasingType }[];
+}
+
 export type Command =
   | ShowCommand
   | HideCommand
@@ -262,7 +269,8 @@ export type Command =
   | Rotate3DCommand
   | DepthCommand
   | CameraMoveCommand
-  | CameraRotateCommand;
+  | CameraRotateCommand
+  | SetKeyframesCommand;
 
 export const COMMAND_TYPES = [
   'show', 'hide', 'replace', 'cut',
@@ -273,4 +281,5 @@ export const COMMAND_TYPES = [
   'text', 'subtitle',
   'move3D', 'rotate3D', 'depth',
   'cameraMove', 'cameraRotate',
+  'setKeyframes',
 ] as const;

@@ -8,44 +8,40 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   iconPosition?: 'left' | 'right';
 }
 
-const buttonStyles = {
-  base: `
-    inline-flex items-center justify-center gap-1.5
-    font-medium rounded-lg
-    transition-all duration-150
-    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900
-    disabled:opacity-40 disabled:cursor-not-allowed
-    select-none active:scale-[0.98]
+const buttonBase = `
+  inline-flex items-center justify-center gap-1.5
+  font-medium rounded-df-md
+  transition-all duration-df-fast ease-df-out
+  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-df-accent
+  disabled:opacity-30 disabled:cursor-not-allowed
+  select-none active:scale-[0.97]
+`;
+
+const buttonVariants = {
+  primary: `
+    bg-df-accent hover:bg-df-accent-hover
+    active:bg-df-accent-active text-white
+    shadow-df-subtle
   `,
-  variant: {
-    primary: `
-      bg-indigo-600 hover:bg-indigo-500
-      active:bg-indigo-700 text-white
-      shadow-lg shadow-indigo-500/20
-      focus-visible:ring-indigo-500
-    `,
-    secondary: `
-      bg-slate-800/80 hover:bg-slate-700/80
-      border border-slate-700/50 text-slate-200
-      focus-visible:ring-indigo-500
-    `,
-    ghost: `
-      bg-transparent hover:bg-white/5
-      text-slate-400 hover:text-white
-      focus-visible:ring-indigo-500
-    `,
-    danger: `
-      bg-red-500/10 hover:bg-red-500/20
-      text-red-400 border border-red-500/30
-      focus-visible:ring-red-500
-    `,
-  },
-  size: {
-    sm: 'h-[28px] px-2.5 py-1 text-xs font-medium rounded-md whitespace-nowrap',
-    md: 'h-[32px] px-3 text-[12px]',
-    lg: 'h-[36px] px-4 text-[13px]',
-  },
-  loading: 'relative pr-6',
+  secondary: `
+    bg-df-surface-2 hover:bg-df-surface-3
+    border border-df-border text-df-text-primary
+    hover:border-df-border-strong
+  `,
+  ghost: `
+    bg-transparent hover:bg-df-violet-muted
+    text-df-text-secondary hover:text-df-text-primary
+  `,
+  danger: `
+    bg-df-error-muted hover:bg-df-error/20
+    text-df-error border border-df-error/30
+  `,
+};
+
+const buttonSizes = {
+  sm: 'h-[24px] px-2 py-1 text-df-xs rounded-df-sm',
+  md: 'h-[28px] px-2.5 text-df-sm',
+  lg: 'h-[32px] px-3 text-df-sm',
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
@@ -55,19 +51,13 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       <button
         ref={ref}
         disabled={isLoading}
-        className={`
-          ${buttonStyles.base}
-          ${buttonStyles.variant[variant]}
-          ${buttonStyles.size[size]}
-          ${isLoading ? buttonStyles.loading : ''}
-          ${className}
-        `}
+        className={`${buttonBase} ${buttonVariants[variant]} ${buttonSizes[size]} ${isLoading ? 'relative pr-6' : ''} ${className}`}
         {...props}
       >
         {isLoading ? (
-          <svg className="absolute right-2 animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg className="absolute right-2 animate-spin h-3 w-3 opacity-60" viewBox="0 0 24 24" fill="none">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
         ) : icon && iconPosition === 'left' ? (
           <span className="flex-shrink-0">{icon}</span>
@@ -90,8 +80,15 @@ export interface IconButtonProps extends React.ButtonHTMLAttributes<HTMLButtonEl
 
 const iconButtonSizes = {
   sm: 'w-[24px] h-[24px]',
-  md: 'w-[30px] h-[30px]',
-  lg: 'w-[36px] h-[36px]',
+  md: 'w-[28px] h-[28px]',
+  lg: 'w-[32px] h-[32px]',
+};
+
+const iconButtonVariants = {
+  ghost: 'hover:bg-df-violet-muted text-df-text-secondary hover:text-df-text-primary',
+  secondary: 'bg-df-surface-2 hover:bg-df-surface-3 border border-df-border text-df-text-primary',
+  primary: 'bg-df-accent hover:bg-df-accent-hover text-white',
+  danger: 'bg-df-error-muted hover:bg-df-error/20 text-df-error border border-df-error/30',
 };
 
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
@@ -102,14 +99,12 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
       className={`
         inline-flex items-center justify-center
         ${iconButtonSizes[size]}
-        rounded-lg
-        transition-all duration-150
-        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900
-        disabled:opacity-40 disabled:cursor-not-allowed
-        ${variant === 'ghost' && 'hover:bg-white/5 text-slate-400 hover:text-white focus-visible:ring-indigo-500'}
-        ${variant === 'secondary' && 'bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 text-slate-200 focus-visible:ring-indigo-500'}
-        ${variant === 'primary' && 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/20 focus-visible:ring-indigo-500'}
-        ${variant === 'danger' && 'bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 focus-visible:ring-red-500'}
+        rounded-df-md
+        transition-all duration-df-fast ease-df-out
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-df-accent
+        disabled:opacity-30 disabled:cursor-not-allowed
+        active:scale-[0.97]
+        ${iconButtonVariants[variant]}
         ${className}
       `}
       {...props}
@@ -133,7 +128,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     return (
       <div className="w-full">
         {label && (
-          <label htmlFor={inputId} className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider mb-1">
+          <label htmlFor={inputId} className="block text-df-xs font-medium text-df-text-muted mb-1">
             {label}
           </label>
         )}
@@ -141,19 +136,19 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           ref={ref}
           id={inputId}
           className={`
-            w-full bg-slate-800/80 border border-slate-700/50
-            rounded-lg px-2.5 py-1.5 text-[12px] text-slate-200
-            placeholder:text-slate-500
-            transition-all duration-150
-            focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500 focus-visible:border-indigo-500
-            disabled:bg-slate-900/50 disabled:text-slate-500
-            ${error ? 'border-red-500 focus-visible:ring-red-500' : ''}
+            w-full bg-df-surface-2 border border-df-border
+            rounded-df-md px-2 py-1 text-df-sm text-df-text-primary
+            placeholder:text-df-text-dim
+            transition-all duration-df-fast ease-df-out
+            focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-df-accent focus-visible:border-df-accent
+            disabled:bg-df-surface-1 disabled:text-df-text-muted
+            ${error ? 'border-df-error focus-visible:ring-df-error' : ''}
             ${className}
           `}
           {...props}
         />
-        {error && <p className="mt-1 text-[10px] text-red-400">{error}</p>}
-        {hint && !error && <p className="mt-1 text-[10px] text-slate-500">{hint}</p>}
+        {error && <p className="mt-1 text-df-xs text-df-error">{error}</p>}
+        {hint && !error && <p className="mt-1 text-df-xs text-df-text-dim">{hint}</p>}
       </div>
     );
   }
@@ -173,7 +168,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
     return (
       <div className="w-full">
         {label && (
-          <label htmlFor={selectId} className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider mb-1">
+          <label htmlFor={selectId} className="block text-df-xs font-medium text-df-text-muted mb-1">
             {label}
           </label>
         )}
@@ -181,14 +176,14 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
           ref={ref}
           id={selectId}
           className={`
-            w-full bg-slate-800/80 border border-slate-700/50
-            rounded-lg px-2.5 py-1.5 text-[12px] text-slate-200
-            appearance-none bg-[url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")] bg-no-repeat bg-[right_8px center]
-            pr-10
-            transition-all duration-150
-            focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500 focus-visible:border-indigo-500
-            disabled:bg-slate-900/50 disabled:text-slate-500
-            ${error ? 'border-red-500 focus-visible:ring-red-500' : ''}
+            w-full bg-df-surface-2 border border-df-border
+            rounded-df-md px-2 py-1 text-df-sm text-df-text-primary
+            appearance-none bg-[url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235c5c78' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")] bg-no-repeat bg-[right_6px center]
+            pr-8
+            transition-all duration-df-fast ease-df-out
+            focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-df-accent focus-visible:border-df-accent
+            disabled:bg-df-surface-1 disabled:text-df-text-muted
+            ${error ? 'border-df-error focus-visible:ring-df-error' : ''}
             ${className}
           `}
           {...props}
@@ -197,7 +192,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
         </select>
-        {error && <p className="mt-1 text-[10px] text-red-400">{error}</p>}
+        {error && <p className="mt-1 text-df-xs text-df-error">{error}</p>}
       </div>
     );
   }
@@ -219,11 +214,11 @@ export const Section: React.FC<SectionProps> = ({ title, icon, children, classNa
   if (!collapsible) {
     return (
       <div className={className}>
-        <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-300 uppercase tracking-widest mb-2 pb-1.5 border-b border-white/5">
-          {icon && <span>{icon}</span>}
+        <div className="flex items-center gap-1.5 text-df-xs font-semibold text-df-text-muted mb-1.5 pb-1 border-b border-df-divider">
+          {icon && <span className="text-df-text-muted">{icon}</span>}
           {title}
         </div>
-        <div className="space-y-2">{children}</div>
+        <div className="space-y-1.5">{children}</div>
       </div>
     );
   }
@@ -231,16 +226,26 @@ export const Section: React.FC<SectionProps> = ({ title, icon, children, classNa
     <div className={className}>
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between gap-2 px-1 py-1.5 text-left text-[10px] font-bold text-slate-300 uppercase tracking-widest hover:text-white transition-colors"
+        className="w-full flex items-center justify-between gap-2 px-0.5 py-1 text-left text-df-xs font-semibold text-df-text-muted hover:text-df-text-primary transition-colors duration-df-fast"
         aria-expanded={open}
       >
         <div className="flex items-center gap-1.5">
-          {icon && <span>{icon}</span>}
+          {icon && <span className="text-df-text-muted">{icon}</span>}
           {title}
         </div>
-        <span className={`transition-transform duration-150 ${open ? 'rotate-0' : '-rotate-90'}`}>▶</span>
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          className={`text-df-text-muted transition-transform duration-df-fast ${open ? 'rotate-0' : '-rotate-90'}`}
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
       </button>
-      {open && <div className="mt-2 space-y-2 animate-slide-down">{children}</div>}
+      {open && <div className="mt-1 space-y-1.5 animate-slide-down">{children}</div>}
     </div>
   );
 };
@@ -252,7 +257,7 @@ export interface TooltipProps {
   delay?: number;
 }
 
-export const Tooltip: React.FC<TooltipProps> = ({ content, children, position = 'top', delay = 200 }) => {
+export const Tooltip: React.FC<TooltipProps> = ({ content, children, position = 'top', delay = 400 }) => {
   const [visible, setVisible] = React.useState(false);
   const timeoutRef = React.useRef<ReturnType<typeof setTimeout>>();
 
@@ -277,9 +282,9 @@ export const Tooltip: React.FC<TooltipProps> = ({ content, children, position = 
       {visible && (
         <div
           className={`
-            fixed z-[50] px-2.5 py-1.5 text-[11px] font-mono text-slate-200
-            bg-slate-800 border border-slate-700/50 rounded-lg
-            shadow-xl shadow-black/30 whitespace-nowrap max-w-xs
+            fixed z-50 px-2 py-1 text-df-xs text-df-text-secondary
+            bg-df-surface-3 border border-df-border rounded-df-sm
+            shadow-df-medium whitespace-nowrap max-w-xs
             animate-fade-in pointer-events-none
             ${positions[position]}
           `}
@@ -298,10 +303,10 @@ export interface LabelValueProps {
   valueClassName?: string;
 }
 
-export const LabelValue: React.FC<LabelValueProps> = ({ label, value, labelWidth = '80px', valueClassName = '' }) => (
+export const LabelValue: React.FC<LabelValueProps> = ({ label, value, labelWidth = '72px', valueClassName = '' }) => (
   <div className="flex items-center gap-2">
-    <label className="text-[11px] text-slate-400 shrink-0" style={{ width: labelWidth }}>{label}</label>
-    <span className={`flex-1 text-[11px] text-slate-200 font-mono ${valueClassName}`}>{value}</span>
+    <label className="text-df-xs text-df-text-muted shrink-0" style={{ width: labelWidth }}>{label}</label>
+    <span className={`flex-1 text-df-xs text-df-text-primary font-mono ${valueClassName}`}>{value}</span>
   </div>
 );
 
@@ -314,7 +319,7 @@ export const Divider: React.FC<DividerProps> = ({ className = '', vertical = fal
   <div
     className={`
       ${vertical ? 'w-px h-full' : 'h-px w-full'}
-      bg-white/5
+      bg-df-divider
       ${className}
     `}
   />
@@ -327,15 +332,15 @@ export interface BadgeProps {
 }
 
 const badgeVariants = {
-  default: 'bg-slate-700/50 text-slate-300',
-  success: 'bg-emerald-500/15 text-emerald-400',
-  warning: 'bg-amber-500/15 text-amber-400',
-  error: 'bg-red-500/15 text-red-400',
-  info: 'bg-indigo-500/15 text-indigo-400',
+  default: 'bg-df-surface-3 text-df-text-secondary',
+  success: 'bg-df-success-muted text-df-success',
+  warning: 'bg-df-warning-muted text-df-warning',
+  error: 'bg-df-error-muted text-df-error',
+  info: 'bg-df-accent-muted text-df-accent',
 };
 
 export const Badge: React.FC<BadgeProps> = ({ variant = 'default', children, className = '' }) => (
-  <span className={`inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-medium ${badgeVariants[variant]} ${className}`}>
+  <span className={`inline-flex items-center px-1.5 py-0.5 rounded-df-xs text-df-xs font-medium ${badgeVariants[variant]} ${className}`}>
     {children}
   </span>
 );
@@ -349,7 +354,7 @@ export const Slider: React.FC<SliderProps> = ({ label, valueLabel = true, min = 
   <div className="w-full">
     {label && (
       <div className="flex items-center gap-2 mb-1">
-        <label className="text-[11px] text-slate-400 shrink-0" style={{ width: '80px' }}>{label}</label>
+        <label className="text-df-xs text-df-text-muted shrink-0" style={{ width: '72px' }}>{label}</label>
       </div>
     )}
     <div className="flex items-center gap-2">
@@ -358,12 +363,12 @@ export const Slider: React.FC<SliderProps> = ({ label, valueLabel = true, min = 
         min={min}
         max={max}
         step={step}
-        className="flex-1 h-1.5 bg-slate-700/50 rounded-full appearance-none cursor-pointer accent-indigo-500"
+        className="flex-1 h-1 bg-df-surface-3 rounded-full appearance-none cursor-pointer accent-df-accent"
         {...props}
       />
       {valueLabel && (
-        <span className="text-[11px] text-slate-300 font-mono w-10 text-right shrink-0">
-          {props.value != null ? (props.value * 100).toFixed(0) + '%' : ''}
+        <span className="text-df-xs text-df-text-secondary font-mono w-10 text-right shrink-0">
+          {props.value != null ? (Number(props.value) * 100).toFixed(0) + '%' : ''}
         </span>
       )}
     </div>
@@ -381,10 +386,10 @@ export const Toggle: React.FC<ToggleProps> = ({ label, className = '', id, ...pr
       <input
         type="checkbox"
         id={toggleId}
-        className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-800 text-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 transition-colors"
+        className="w-3 h-3 rounded border-df-border-strong bg-df-surface-2 text-df-accent focus-visible:ring-2 focus-visible:ring-df-accent focus-visible:ring-offset-1 focus-visible:ring-offset-df-bg transition-colors"
         {...props}
       />
-      {label && <span className="text-[11px] text-slate-300">{label}</span>}
+      {label && <span className="text-df-xs text-df-text-secondary">{label}</span>}
     </label>
   );
 };
@@ -408,18 +413,18 @@ export const Dialog: React.FC<DialogProps> = ({ open, onClose, title, children, 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[30] flex items-center justify-center animate-fade-in" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <div className={`relative ${dialogSizes[size]} w-full mx-4 bg-slate-900/90 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl animate-slide-down flex flex-col`} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
-          <h2 className="text-[13px] font-semibold text-white">{title}</h2>
+    <div className="fixed inset-0 z-30 flex items-center justify-center animate-fade-in" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/80" />
+      <div className={`relative ${dialogSizes[size]} w-full mx-4 bg-df-surface-1 border border-df-border rounded-df-lg shadow-df-heavy animate-scale-in flex flex-col`} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-df-divider">
+          <h2 className="text-df-md font-semibold text-df-text-primary">{title}</h2>
           <IconButton size="sm" variant="ghost" aria-label="Close" onClick={onClose}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </IconButton>
         </div>
         <div className="p-4 overflow-y-auto">{children}</div>
         {actions && (
-          <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-white/5">
+          <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-df-divider">
             {actions}
           </div>
         )}
@@ -455,8 +460,8 @@ export const Dropdown: React.FC<DropdownProps> = ({ trigger, content, align = 'l
         <div
           ref={contentRef}
           className={`
-            fixed z-[40] mt-1 min-w-[180px] bg-slate-800/95 backdrop-blur-xl border border-white/10
-            rounded-xl shadow-2xl shadow-black/30 animate-slide-down overflow-hidden
+            fixed z-40 mt-1 min-w-[160px] bg-df-surface-2 border border-df-border
+            rounded-df-lg shadow-df-heavy animate-slide-down overflow-hidden
             ${align === 'right' ? 'right-0' : 'left-0'}
           `}
         >
@@ -495,7 +500,7 @@ export const NumberInput: React.FC<NumberInputProps> = ({ label, value, onChange
   return (
     <div className="w-full">
       {label && (
-        <label htmlFor={inputId} className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider mb-1">
+        <label htmlFor={inputId} className="block text-df-xs font-medium text-df-text-muted mb-1">
           {label}
         </label>
       )}
@@ -504,9 +509,9 @@ export const NumberInput: React.FC<NumberInputProps> = ({ label, value, onChange
           <button
             type="button"
             onClick={handleDecrement}
-            className="px-1.5 bg-slate-800/80 border border-r-0 border-slate-700/50 rounded-l-lg text-slate-400 hover:text-white hover:bg-slate-700/80 transition-colors text-[10px] font-mono"
+            className="px-1.5 bg-df-surface-2 border border-df-border border-r-0 rounded-l-df-md text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-3 transition-colors text-df-xs font-mono"
           >
-            -
+            −
           </button>
         )}
         <input
@@ -517,10 +522,10 @@ export const NumberInput: React.FC<NumberInputProps> = ({ label, value, onChange
           min={min}
           max={max}
           step={step}
-          className={`w-full bg-slate-800/80 border border-slate-700/50 text-center text-[11px] text-slate-200 font-mono
-            placeholder:text-slate-500 transition-all duration-150
-            focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500 focus-visible:border-indigo-500
-            ${showButtons ? 'rounded-none border-l-0 border-r-0' : 'rounded-lg'}
+          className={`w-full bg-df-surface-2 border border-df-border text-center text-df-xs text-df-text-primary font-mono
+            placeholder:text-df-text-dim transition-all duration-df-fast ease-df-out
+            focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-df-accent focus-visible:border-df-accent
+            ${showButtons ? 'rounded-none border-l-0 border-r-0' : 'rounded-df-md'}
             ${className}`}
           {...props}
         />
@@ -528,7 +533,7 @@ export const NumberInput: React.FC<NumberInputProps> = ({ label, value, onChange
           <button
             type="button"
             onClick={handleIncrement}
-            className="px-1.5 bg-slate-800/80 border border-l-0 border-slate-700/50 rounded-r-lg text-slate-400 hover:text-white hover:bg-slate-700/80 transition-colors text-[10px] font-mono"
+            className="px-1.5 bg-df-surface-2 border border-df-border border-l-0 rounded-r-df-md text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-3 transition-colors text-df-xs font-mono"
           >
             +
           </button>
@@ -549,21 +554,20 @@ export interface TabsProps {
 
 export const Tabs: React.FC<TabsProps> = ({ tabs, activeTab, onChange, className = '' }) => (
   <div className={className}>
-    <div className="flex border-b border-white/5">
+    <div className="flex border-b border-df-divider">
       {tabs.map((tab) => (
         <button
           key={tab.id}
           onClick={() => onChange(tab.id)}
           className={`
-            flex items-center gap-1.5 px-3 py-2 text-[12px] font-medium
-            border-b-2 border-transparent
-            transition-colors duration-150
+            flex items-center gap-1.5 px-2.5 py-1.5 text-df-xs font-medium
+            border-b-2 transition-colors duration-df-fast
             ${activeTab === tab.id
-              ? 'text-indigo-400 border-indigo-500'
-              : 'text-slate-400 hover:text-white hover:bg-white/5'}
+              ? 'text-df-accent border-df-accent'
+              : 'text-df-text-muted border-transparent hover:text-df-text-primary hover:bg-df-violet-muted'}
           `}
         >
-          {tab.icon && <span>{tab.icon}</span>}
+          {tab.icon && <span className="text-df-text-muted">{tab.icon}</span>}
           {tab.label}
         </button>
       ))}

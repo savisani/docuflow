@@ -100,6 +100,7 @@ export async function generateLocalImage(
 
   try {
     const outputPath = `%TEMP%\\docuflow-local-${Date.now()}.png`
+    const generationId = `ui-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
     const result = await window.docuflow.generateLocalImageEnhanced({
       prompt: req.prompt,
@@ -108,9 +109,10 @@ export async function generateLocalImage(
       height: req.height || 512,
       outputPath,
       modelPath: req.modelPath,
-      steps: req.steps || 20,
+      steps: req.steps || 10,
       seed: req.seed,
       device: req.device || 'auto',
+      generationId,
     })
 
     return result
@@ -128,29 +130,28 @@ export async function cancelLocalGeneration(): Promise<void> {
   } catch {}
 }
 
-/** Get recommended settings based on hardware */
+/** Get recommended settings based on hardware - GPU ONLY */
 export function getRecommendedSettings(hardware: LocalHardware): {
   width: number
   height: number
   steps: number
-  device: 'auto' | 'gpu' | 'cpu'
+  device: 'auto' | 'gpu'
 } {
   if (hardware.cuda && hardware.vram_mb >= 4000) {
-    return { width: 512, height: 512, steps: 20, device: 'auto' }
+    return { width: 512, height: 512, steps: 10, device: 'gpu' }
   } else if (hardware.cuda && hardware.vram_mb >= 2000) {
-    return { width: 384, height: 384, steps: 15, device: 'auto' }
-  } else if (hardware.directml) {
-    return { width: 512, height: 512, steps: 20, device: 'directml' }
+    return { width: 384, height: 384, steps: 10, device: 'gpu' }
   } else {
-    return { width: 384, height: 384, steps: 10, device: 'cpu' }
+    // No CUDA GPU available - return GPU settings but generation will fail fast
+    return { width: 512, height: 512, steps: 10, device: 'gpu' }
   }
 }
 
 /** Quality presets */
 export const QUALITY_PRESETS = {
-  performance: { label: 'Performance', width: 384, height: 384, steps: 10 },
-  balanced: { label: 'Balanced', width: 512, height: 512, steps: 15 },
-  quality: { label: 'Quality', width: 512, height: 512, steps: 25 },
+  performance: { label: 'Performance', width: 384, height: 384, steps: 8 },
+  balanced: { label: 'Balanced', width: 512, height: 512, steps: 10 },
+  quality: { label: 'Quality', width: 512, height: 512, steps: 20 },
 } as const
 
 export type QualityPreset = keyof typeof QUALITY_PRESETS

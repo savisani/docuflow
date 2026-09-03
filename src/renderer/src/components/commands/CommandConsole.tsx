@@ -183,15 +183,15 @@ export const CommandConsole: React.FC = () => {
 
   return (
     <Panel title="Command Console" icon={<Terminal size={10} />} className="h-full flex flex-col">
-      <div className="flex items-center justify-between gap-2 p-3 border-b border-white/5 mb-3 shrink-0">
+      <div className="flex items-center justify-between gap-2 p-3 border-b border-df-border mb-3 shrink-0">
         <div className="flex items-center gap-1.5">
-          <div className="flex items-center bg-slate-800/60 rounded-md p-0.5 border border-slate-700/40">
+          <div className="flex items-center bg-df-surface-2/60 rounded-df-md p-0.5 border border-slate-700/40">
             <button
               onClick={() => setMode('natural')}
-              className={`flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded transition-all duration-150 ${
+              className={`flex items-center gap-1 px-2 py-1 text-df-xs font-medium rounded transition-all duration-150 ${
                 mode === 'natural'
                   ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
+                  : 'text-df-text-muted hover:text-df-text-primary'
               }`}
             >
               <Sparkles size={9} />
@@ -199,10 +199,10 @@ export const CommandConsole: React.FC = () => {
             </button>
             <button
               onClick={() => setMode('dsl')}
-              className={`flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded transition-all duration-150 ${
+              className={`flex items-center gap-1 px-2 py-1 text-df-xs font-medium rounded transition-all duration-150 ${
                 mode === 'dsl'
                   ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
+                  : 'text-df-text-muted hover:text-df-text-primary'
               }`}
             >
               <Code size={9} />
@@ -249,26 +249,26 @@ export const CommandConsole: React.FC = () => {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className="w-full bg-[var(--color-bg)] text-[var(--color-text-primary)] font-mono text-[11px] p-3 resize-none outline-none placeholder:text-[var(--color-text-muted)] border-0"
+          className="w-full bg-[var(--color-bg)] text-[var(--color-text-primary)] font-mono text-df-sm p-3 resize-none outline-none placeholder:text-[var(--color-text-muted)] border-0"
           spellCheck={false}
           rows={6}
         />
       </div>
 
       {executionResult === 'success' && commandSummary && (
-        <div className="px-3 py-1.5 text-[11px] text-[var(--color-success)] bg-[var(--color-success-muted)] border-t border-[var(--color-success-muted)] shrink-0 flex items-center gap-1">
+        <div className="px-3 py-1.5 text-df-sm text-[var(--color-success)] bg-[var(--color-success-muted)] border-t border-[var(--color-success-muted)] shrink-0 flex items-center gap-1">
           <CheckCircle size={10} />
           {commandSummary}
         </div>
       )}
 
       {nlErrors.length > 0 && (
-        <div className="px-3 py-1.5 text-[11px] text-red-400 bg-red-900/20 border-t border-red-900/30 shrink-0">
+        <div className="px-3 py-1.5 text-df-sm text-df-error bg-red-900/20 border-t border-red-900/30 shrink-0">
           <div className="flex items-center gap-1 font-semibold mb-0.5">
             <span>{nlErrors.length} error{nlErrors.length !== 1 ? 's' : ''}</span>
           </div>
           {nlErrors.map((err, i) => (
-            <div key={i} className="ml-4 text-[10px] text-red-300/80">{err}</div>
+            <div key={i} className="ml-4 text-df-xs text-red-300/80">{err}</div>
           ))}
         </div>
       )}

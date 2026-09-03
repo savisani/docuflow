@@ -178,6 +178,9 @@ export const SceneGenerator: React.FC = () => {
   const [localDevice, setLocalDevice] = useState<'auto' | 'gpu' | 'cpu' | 'directml'>('auto');
   const [showLocalSettings, setShowLocalSettings] = useState(false);
 
+  // -- Negative prompt for image generation --
+  const [negativePrompt, setNegativePrompt] = useState('');
+
   // -- UI state --
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
@@ -339,6 +342,7 @@ export const SceneGenerator: React.FC = () => {
     try {
       const result = await generateImage({
         prompt: scene.imagePrompt,
+        negativePrompt: negativePrompt || undefined,
         source: 'scene-generator',
         sceneId: String(sceneId),
         provider: imageProvider,
@@ -359,7 +363,7 @@ export const SceneGenerator: React.FC = () => {
     }
 
     setScenes([...updated]);
-  }, [scenes, imageProvider, cloudflareConfig, advancedSettings, selectedLocalModel, localDevice]);
+  }, [scenes, negativePrompt, imageProvider, cloudflareConfig, advancedSettings, selectedLocalModel, localDevice]);
 
   // -----------------------------------------------------------------------
   // Step 3: Batch generate all
@@ -382,6 +386,7 @@ export const SceneGenerator: React.FC = () => {
       try {
         const result = await generateImage({
           prompt: updated[i].imagePrompt,
+          negativePrompt: negativePrompt || undefined,
           source: 'scene-generator',
           sceneId: String(updated[i].sceneId),
           provider: imageProvider,
@@ -498,7 +503,7 @@ export const SceneGenerator: React.FC = () => {
     } finally {
       setGeneratingAll(false);
     }
-  }, [scenes, imageProvider, cloudflareConfig, advancedSettings, selectedLocalModel, localDevice, setActiveTab]);
+  }, [scenes, negativePrompt, imageProvider, cloudflareConfig, advancedSettings, selectedLocalModel, localDevice, setActiveTab]);
 
   // -----------------------------------------------------------------------
   // Edit helpers
@@ -745,37 +750,37 @@ export const SceneGenerator: React.FC = () => {
   // -----------------------------------------------------------------------
 
   return (
-    <div className="w-full h-full flex flex-col bg-slate-950 text-white overflow-hidden relative">
+    <div className="w-full h-full flex flex-col bg-df-bg text-df-text-primary overflow-hidden relative">
       {/* Toast */}
       {toast && (
-        <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-lg shadow-lg backdrop-blur-sm transition-all ${
-          toast.type === 'success' ? 'bg-emerald-500/90 text-white' : 'bg-red-500/90 text-white'
+        <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-df-lg shadow-heavy transition-all ${
+          toast.type === 'success' ? 'bg-df-success text-white' : 'bg-df-error text-white'
         }`}>
           {toast.type === 'success' ? <CheckCircle size={14} /> : <X size={14} />}
-          <span className="text-[11px] font-medium max-w-[300px] truncate">{toast.message}</span>
+          <span className="text-df-sm font-medium max-w-[300px] truncate">{toast.message}</span>
         </div>
       )}
 
       {/* Header */}
-      <div className="shrink-0 border-b border-white/5 bg-slate-900/40 px-4 py-3">
+      <div className="shrink-0 border-b border-df-divider bg-df-surface-1 px-4 py-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
+            <div className="w-7 h-7 rounded-df-md bg-df-warning flex items-center justify-center">
               <Clapperboard size={14} className="text-white" />
             </div>
             <div>
-              <h1 className="text-[13px] font-bold text-white">AI Scene Generator</h1>
-              <p className="text-[10px] text-slate-400">Transcribe, breakdown with AI, generate & build timeline</p>
+              <h1 className="text-df-md font-bold text-df-text-primary">AI Scene Generator</h1>
+              <p className="text-df-xs text-df-text-muted">Transcribe, breakdown with AI, generate & build timeline</p>
             </div>
           </div>
           <div className="flex items-center gap-1.5">
             {/* Inspector toggle */}
             <button
               onClick={() => setInspectorOpen(!inspectorOpen)}
-              className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all ${
+              className={`flex items-center gap-1 px-2 py-1 rounded-df-md text-df-xs font-medium transition-all ${
                 inspectorOpen
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                  : 'bg-slate-800/60 text-slate-400 border border-white/5 hover:text-white hover:border-white/10'
+                  ? 'bg-df-warning-muted text-df-warning border border-df-warning/30'
+                  : 'bg-df-surface-2 text-df-text-muted border border-df-border hover:text-df-text-primary hover:border-df-border-strong'
               }`}
             >
               <MonitorDot size={10} />
@@ -783,10 +788,10 @@ export const SceneGenerator: React.FC = () => {
             </button>
             <button
               onClick={() => setShowAISettings(!showAISettings)}
-              className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all ${
+              className={`flex items-center gap-1 px-2 py-1 rounded-df-md text-df-xs font-medium transition-all ${
                 showAISettings
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                  : 'bg-slate-800/60 text-slate-400 border border-white/5 hover:text-white hover:border-white/10'
+                  ? 'bg-df-warning-muted text-df-warning border border-df-warning/30'
+                  : 'bg-df-surface-2 text-df-text-muted border border-df-border hover:text-df-text-primary hover:border-df-border-strong'
               }`}
             >
               <Settings size={10} />
@@ -795,7 +800,7 @@ export const SceneGenerator: React.FC = () => {
             <div className="flex flex-col gap-1">
               <button
                 onClick={handleClearAll}
-                className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-slate-800/60 text-slate-400 border border-white/5 hover:text-white hover:border-white/10 transition-all"
+                className="flex items-center gap-1 px-2 py-1 rounded-df-md text-df-xs font-medium bg-df-surface-2 text-df-text-muted border border-df-border hover:text-df-text-primary hover:border-df-border-strong transition-all"
               >
                 <Trash2 size={10} />
                 Reset
@@ -803,7 +808,7 @@ export const SceneGenerator: React.FC = () => {
               <button
                 onClick={handleUnloadGpu}
                 disabled={unloadingGpu || aiSettings.provider !== 'ollama'}
-                className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium text-red-400 border border-red-500/30 hover:bg-red-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex items-center gap-1 px-2 py-1 rounded-df-md text-df-xs font-medium text-df-error border border-df-error/30 hover:bg-df-error-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 title="Unload model from GPU — frees all VRAM for transcription or rendering"
               >
                 {unloadingGpu ? (
@@ -825,13 +830,13 @@ export const SceneGenerator: React.FC = () => {
             { num: 3, label: 'Generate & Build', done: false },
           ].map((step, i) => (
             <React.Fragment key={step.num}>
-              {i > 0 && <div className="w-6 h-px bg-white/10" />}
-              <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium ${
+              {i > 0 && <div className="w-6 h-px bg-df-border" />}
+              <div className={`flex items-center gap-1.5 px-2 py-1 rounded-df-md text-df-xs font-medium ${
                 step.done
-                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                  : 'bg-slate-800/40 text-slate-500 border border-white/5'
+                  ? 'bg-df-success-muted text-df-success border border-df-success/20'
+                  : 'bg-df-surface-2 text-df-text-muted border border-df-border'
               }`}>
-                {step.done ? <CheckCircle size={10} /> : <span className="w-4 h-4 rounded-full bg-slate-700/50 flex items-center justify-center text-[9px]">{step.num}</span>}
+                {step.done ? <CheckCircle size={10} /> : <span className="w-4 h-4 rounded-full bg-df-surface-3 flex items-center justify-center text-df-xs">{step.num}</span>}
                 {step.label}
               </div>
             </React.Fragment>
@@ -841,13 +846,13 @@ export const SceneGenerator: React.FC = () => {
 
       {/* AI Settings Panel */}
       {showAISettings && (
-        <div className="shrink-0 border-b border-white/5 bg-slate-900/60 px-4 py-3 space-y-3">
+        <div className="shrink-0 border-b border-df-divider bg-df-surface-1 px-4 py-3 space-y-3">
           <div className="flex items-center justify-between mb-1">
-            <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+            <h3 className="text-df-sm font-semibold text-df-text-secondary uppercase tracking-wider flex items-center gap-1.5">
               <Sparkles size={11} />
               AI Provider Settings
             </h3>
-            <button onClick={() => setShowAISettings(false)} className="text-slate-500 hover:text-white">
+            <button onClick={() => setShowAISettings(false)} className="text-df-text-muted hover:text-df-text-primary">
               <X size={12} />
             </button>
           </div>
@@ -856,38 +861,38 @@ export const SceneGenerator: React.FC = () => {
           <div className="flex gap-2">
             <button
               onClick={() => handleAISettingChange({ provider: 'ollama' })}
-              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-medium transition-all ${
+              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-df-lg text-df-sm font-medium transition-all ${
                 aiSettings.provider === 'ollama'
-                  ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-                  : 'bg-slate-800/40 text-slate-400 border border-white/5 hover:text-white hover:border-white/10'
+                  ? 'bg-df-warning-muted text-df-warning border border-df-warning/30'
+                  : 'bg-df-surface-2 text-df-text-muted border border-df-border hover:text-df-text-primary hover:border-df-border-strong'
               }`}
             >
               <Cpu size={13} />
               <div className="text-left">
                 <div>Ollama (Local)</div>
-                <div className="text-[8px] text-slate-500">Offline, free, private</div>
+                <div className="text-df-xs text-df-text-dim">Offline, free, private</div>
               </div>
             </button>
             <button
               onClick={() => handleAISettingChange({ provider: 'openrouter' })}
-              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-medium transition-all ${
+              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-df-lg text-df-sm font-medium transition-all ${
                 aiSettings.provider === 'openrouter'
-                  ? 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30'
-                  : 'bg-slate-800/40 text-slate-400 border border-white/5 hover:text-white hover:border-white/10'
+                  ? 'bg-df-accent-muted text-df-accent border border-df-accent/30'
+                  : 'bg-df-surface-2 text-df-text-muted border border-df-border hover:text-df-text-primary hover:border-df-border-strong'
               }`}
             >
               <Globe size={13} />
               <div className="text-left">
                 <div>OpenRouter (Cloud)</div>
-                <div className="text-[8px] text-slate-500">Free tier available</div>
+                <div className="text-df-xs text-df-text-dim">Free tier available</div>
               </div>
             </button>
             <button
               onClick={() => handleAISettingChange({ provider: 'gemini' })}
-              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-medium transition-all ${
+              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-df-lg text-df-sm font-medium transition-all ${
                 aiSettings.provider === 'gemini'
-                  ? 'bg-sky-500/15 text-sky-300 border border-sky-500/30'
-                  : 'bg-slate-800/40 text-slate-400 border border-white/5 hover:text-white hover:border-white/10'
+                  ? 'bg-df-info-muted text-df-info border border-df-info/30'
+                  : 'bg-df-surface-2 text-df-text-muted border border-df-border hover:text-df-text-primary hover:border-df-border-strong'
               }`}
             >
               <Brain size={13} />
@@ -902,9 +907,9 @@ export const SceneGenerator: React.FC = () => {
           {aiSettings.provider === 'ollama' && (
             <div className="space-y-2">
               <div className="flex items-center gap-2">
-                <label className="text-[9px] text-slate-400 uppercase tracking-wider shrink-0">Model:</label>
+                <label className="text-df-xs text-df-text-muted uppercase tracking-wider shrink-0">Model:</label>
                 {ollamaStatus === 'checking' ? (
-                  <div className="flex-1 flex items-center gap-2 bg-slate-700/50 border border-white/10 rounded px-2 py-1.5 text-[10px] text-slate-400">
+                  <div className="flex-1 flex items-center gap-2 bg-df-surface-3 border border-df-border rounded-df-md px-2 py-1.5 text-df-xs text-df-text-muted">
                     <Loader2 size={10} className="animate-spin" />
                     Checking Ollama...
                   </div>
@@ -912,7 +917,7 @@ export const SceneGenerator: React.FC = () => {
                   <select
                     value={aiSettings.ollamaModel}
                     onChange={(e) => handleAISettingChange({ ollamaModel: e.target.value })}
-                    className="flex-1 bg-slate-700/50 border border-white/10 rounded px-2 py-1.5 text-[11px] text-white"
+                    className="flex-1 bg-df-surface-3 border border-df-border rounded-df-md px-2 py-1.5 text-df-sm text-df-text-primary"
                   >
                     {ollamaModels.map((m) => (
                       <option key={m.name} value={m.name}>
@@ -926,7 +931,7 @@ export const SceneGenerator: React.FC = () => {
                     value={aiSettings.ollamaModel}
                     onChange={(e) => handleAISettingChange({ ollamaModel: e.target.value })}
                     placeholder="llama3.2"
-                    className="flex-1 bg-slate-700/50 border border-white/10 rounded px-2 py-1.5 text-[11px] text-white placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    className="flex-1 bg-df-surface-3 border border-df-border rounded-df-md px-2 py-1.5 text-df-sm text-df-text-primary placeholder:text-df-text-dim focus:outline-none focus:ring-1 focus:ring-df-accent"
                   />
                 )}
               </div>
@@ -1351,6 +1356,20 @@ export const SceneGenerator: React.FC = () => {
                 )}
               </div>
             )}
+
+            {/* Negative prompt */}
+            <div>
+              <label className="text-[9px] font-medium text-slate-400 uppercase tracking-wider mb-1 block">
+                Negative Prompt <span className="text-slate-600 font-normal">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={negativePrompt}
+                onChange={(e) => setNegativePrompt(e.target.value)}
+                placeholder="blurry, low quality, watermark, deformed"
+                className="w-full bg-slate-700/50 border border-white/10 rounded-md px-2 py-1.5 text-[10px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+            </div>
 
             {/* Batch generate */}
             {step2Done && (

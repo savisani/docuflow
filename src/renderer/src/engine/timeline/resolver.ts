@@ -1,4 +1,4 @@
-import { LayerState, AudioTrack, AssetSegment, AnimatedProperty, CameraState, DEFAULT_CAMERA } from '../../types/timeline';
+import { LayerState, AudioTrack, AssetSegment, AnimatedProperty, CameraState, DEFAULT_CAMERA, KeyframeTrack } from '../../types/timeline';
 import { interpolate } from '../animation/interpolation';
 
 function resolveAssetForFrame(layer: LayerState, frame: number): AssetSegment {
@@ -21,7 +21,38 @@ function evaluateAnimation(anim: AnimatedProperty, frame: number, baseValue: num
   return interpolate(frame, anim.startFrame, anim.endFrame, anim.from, anim.to, anim.easing);
 }
 
+function resolveKeyframeTrack(track: KeyframeTrack, frame: number): number | null {
+  const kfs = track.keyframes;
+  if (kfs.length === 0) return null;
+  if (kfs.length === 1) return kfs[0].value;
+
+  // Before first keyframe
+  if (frame <= kfs[0].time) return kfs[0].value;
+
+  // After last keyframe
+  if (frame >= kfs[kfs.length - 1].time) return kfs[kfs.length - 1].value;
+
+  // Between keyframes - find the pair
+  for (let i = 0; i < kfs.length - 1; i++) {
+    const kf1 = kfs[i];
+    const kf2 = kfs[i + 1];
+    if (frame >= kf1.time && frame <= kf2.time) {
+      return interpolate(frame, kf1.time, kf2.time, kf1.value, kf2.value, kf2.easing);
+    }
+  }
+
+  return kfs[kfs.length - 1].value;
+}
+
 function resolveProperty(layer: LayerState, property: string, frame: number, baseValue: number): number {
+  // Check keyframe tracks first (higher priority)
+  const kfTrack = layer.keyframeTracks.find(t => t.property === property);
+  if (kfTrack) {
+    const kfValue = resolveKeyframeTrack(kfTrack, frame);
+    if (kfValue !== null) return kfValue;
+  }
+
+  // Fall back to command-driven animations
   let value = baseValue;
   for (const anim of layer.animations) {
     if (anim.property !== property) continue;

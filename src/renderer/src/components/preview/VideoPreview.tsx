@@ -277,7 +277,7 @@ export const VideoPreview: React.FC = () => {
     return (
       <div className="flex flex-col h-full bg-[var(--color-panel)] border border-[var(--color-border)]">
         <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--color-divider)] shrink-0">
-          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">
+          <div className="flex items-center gap-1.5 text-df-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             Preview
           </div>
@@ -286,7 +286,7 @@ export const VideoPreview: React.FC = () => {
           <div className="text-center text-[var(--color-text-muted)]">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mx-auto mb-3 text-[var(--color-border-strong)]"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             <p className="text-sm">No Timeline</p>
-            <p className="text-[10px] mt-1">Import assets, load commands, then click Build Timeline</p>
+            <p className="text-df-xs mt-1">Import assets, load commands, then click Build Timeline</p>
           </div>
         </div>
       </div>
@@ -356,47 +356,47 @@ export const VideoPreview: React.FC = () => {
 
           {controlsVisible && (
             <div
-              className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/80 backdrop-blur-sm px-4 py-2 rounded-lg z-30 transition-opacity duration-300"
+              className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/80 backdrop-blur-sm px-4 py-2 rounded-df-lg z-30 transition-opacity duration-300"
               style={{ pointerEvents: 'auto' }}
             >
-              <IconButton size="sm" variant="ghost" aria-label="Restart" onClick={handleRestart} className="text-white hover:text-white hover:bg-white/10">
+              <IconButton size="sm" variant="ghost" aria-label="Restart" onClick={handleRestart} className="text-white hover:text-df-text-primary hover:bg-white/10">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/></svg>
               </IconButton>
-              <IconButton size="sm" variant="ghost" aria-label="Previous Frame" onClick={() => handleFrameAdvance(-settings.fps)} className="text-white hover:text-white hover:bg-white/10">
+              <IconButton size="sm" variant="ghost" aria-label="Previous Frame" onClick={() => handleFrameAdvance(-settings.fps)} className="text-white hover:text-df-text-primary hover:bg-white/10">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
               </IconButton>
-              <IconButton size="md" variant="ghost" aria-label={playing ? 'Pause' : 'Play'} onClick={handlePlayPause} className="text-white hover:text-white hover:bg-white/10">
+              <IconButton size="md" variant="ghost" aria-label={playing ? 'Pause' : 'Play'} onClick={handlePlayPause} className="text-white hover:text-df-text-primary hover:bg-white/10">
                 {playing
                   ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
                   : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>}
               </IconButton>
-              <IconButton size="sm" variant="ghost" aria-label="Next Frame" onClick={() => handleFrameAdvance(settings.fps)} className="text-white hover:text-white hover:bg-white/10">
+              <IconButton size="sm" variant="ghost" aria-label="Next Frame" onClick={() => handleFrameAdvance(settings.fps)} className="text-white hover:text-df-text-primary hover:bg-white/10">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
               </IconButton>
               <div className="w-px h-5 bg-white/20 mx-1" />
-              <div className="text-[11px] text-white/80 font-mono w-24 text-center">
+              <div className="text-df-sm text-white/80 font-mono w-24 text-center">
                 {formatTime(currentTime)}
               </div>
               <div className="w-px h-5 bg-white/20 mx-1" />
               <Tooltip content="Zoom Out">
-                <IconButton size="sm" variant="ghost" aria-label="Zoom Out" onClick={() => handleZoomChange(previewZoom === 'fit' ? 100 : Math.max(25, (previewZoom as number) - 25))} className="text-white hover:text-white hover:bg-white/10">
+                <IconButton size="sm" variant="ghost" aria-label="Zoom Out" onClick={() => handleZoomChange(previewZoom === 'fit' ? 100 : Math.max(25, (previewZoom as number) - 25))} className="text-white hover:text-df-text-primary hover:bg-white/10">
                   <ZoomOut size={14} />
                 </IconButton>
               </Tooltip>
               <button
-                className="text-[11px] text-white/80 font-mono w-14 text-center hover:text-white cursor-pointer"
+                className="text-df-sm text-white/80 font-mono w-14 text-center hover:text-df-text-primary cursor-pointer"
                 onClick={() => handleZoomChange('fit')}
               >
                 {zoomLabel}
               </button>
               <Tooltip content="Zoom In">
-                <IconButton size="sm" variant="ghost" aria-label="Zoom In" onClick={() => handleZoomChange(previewZoom === 'fit' ? 100 : Math.min(200, (previewZoom as number) + 25))} className="text-white hover:text-white hover:bg-white/10">
+                <IconButton size="sm" variant="ghost" aria-label="Zoom In" onClick={() => handleZoomChange(previewZoom === 'fit' ? 100 : Math.min(200, (previewZoom as number) + 25))} className="text-white hover:text-df-text-primary hover:bg-white/10">
                   <ZoomIn size={14} />
                 </IconButton>
               </Tooltip>
               <div className="w-px h-5 bg-white/20 mx-1" />
               <Tooltip content="Exit Fullscreen (Esc)">
-                <IconButton size="sm" variant="ghost" aria-label="Exit Fullscreen" onClick={toggleFullscreen} className="text-white hover:text-white hover:bg-white/10">
+                <IconButton size="sm" variant="ghost" aria-label="Exit Fullscreen" onClick={toggleFullscreen} className="text-white hover:text-df-text-primary hover:bg-white/10">
                   <Minimize2 size={14} />
                 </IconButton>
               </Tooltip>
@@ -411,7 +411,7 @@ export const VideoPreview: React.FC = () => {
   return (
     <div className="flex flex-col h-full bg-[var(--color-panel)] border border-[var(--color-border)]">
       <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--color-divider)] shrink-0">
-        <div className="flex items-center gap-1.5 text-[10px] font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">
+        <div className="flex items-center gap-1.5 text-df-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
           Preview
         </div>
@@ -419,7 +419,7 @@ export const VideoPreview: React.FC = () => {
       <div className="flex-1 flex flex-col items-center justify-center bg-[var(--color-bg)] relative overflow-hidden">
         <div
           ref={containerRef}
-          className="relative bg-black rounded-lg overflow-hidden border border-[var(--color-border)] flex-1 flex items-center justify-center"
+          className="relative bg-black rounded-df-lg overflow-hidden border border-[var(--color-border)] flex-1 flex items-center justify-center"
           style={{ width: '100%', maxWidth: '95%', maxHeight: 'calc(100% - 52px)' }}
         >
           <div
@@ -445,7 +445,7 @@ export const VideoPreview: React.FC = () => {
         </div>
 
         {/* Bottom controls bar */}
-        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-[var(--color-bg-elevated)]/80 backdrop-blur-sm px-3 py-1.5 rounded-lg z-10">
+        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-[var(--color-bg-elevated)]/80 backdrop-blur-sm px-3 py-1.5 rounded-df-lg z-10">
           <Tooltip content="Restart (Home)">
             <IconButton size="sm" variant="ghost" aria-label="Restart" onClick={handleRestart}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/></svg>
@@ -467,20 +467,20 @@ export const VideoPreview: React.FC = () => {
             </IconButton>
           </Tooltip>
           <div className="w-px h-5 bg-[var(--color-divider)] mx-1" />
-          <div className="text-[10px] text-[var(--color-text-secondary)] font-mono w-20 text-center">
+          <div className="text-df-xs text-[var(--color-text-secondary)] font-mono w-20 text-center">
             {formatTime(currentTime)}
           </div>
         </div>
 
         {/* Zoom controls - bottom right */}
-        <div className="absolute bottom-2 right-2 flex items-center gap-1 bg-[var(--color-bg-elevated)]/80 backdrop-blur-sm px-2 py-1 rounded-lg z-10">
+        <div className="absolute bottom-2 right-2 flex items-center gap-1 bg-[var(--color-bg-elevated)]/80 backdrop-blur-sm px-2 py-1 rounded-df-lg z-10">
           <Tooltip content="Zoom Out">
             <IconButton size="sm" variant="ghost" aria-label="Zoom Out" onClick={() => handleZoomChange(previewZoom === 'fit' ? 100 : Math.max(25, (previewZoom as number) - 25))}>
               <ZoomOut size={12} />
             </IconButton>
           </Tooltip>
           <button
-            className="text-[10px] text-[var(--color-text-secondary)] font-mono w-12 text-center hover:text-[var(--color-text-primary)] cursor-pointer"
+            className="text-df-xs text-[var(--color-text-secondary)] font-mono w-12 text-center hover:text-[var(--color-text-primary)] cursor-pointer"
             onClick={() => handleZoomChange('fit')}
           >
             {zoomLabel}

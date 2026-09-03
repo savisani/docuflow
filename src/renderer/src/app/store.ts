@@ -8,7 +8,7 @@ import { buildTimeline } from '../engine/timeline/builder';
 
 export type PreviewMode = 'timeline' | 'asset';
 export type ActiveTab = 'studio' | 'generator' | 'scenes';
-export type RightPanel = 'inspector' | 'commands' | 'console' | 'voiceover';
+export type RightPanel = 'inspector' | 'commands' | 'console' | 'voiceover' | 'animation';
 
 export interface GeneratedImage {
   id: string;
@@ -130,6 +130,24 @@ interface DocuFlowState {
   ollamaModelStatus: 'unknown' | 'loading' | 'loaded' | 'error';
   ollamaModelName: string;
 
+  // GPU/VRAM status
+  gpuStatus: {
+    cuda: boolean;
+    device_name: string;
+    total_vram_gb: number;
+    allocated_vram_gb: number;
+    reserved_vram_gb: number;
+    free_vram_gb: number;
+    supports_fp16?: boolean;
+  } | null;
+  gpuStatusLoading: boolean;
+  localModelCount: number;
+  localModelNames: string[];
+
+  // Runtime model status (tracks actual loaded model, not just selection)
+  loadedModelName: string | null;
+  modelLoadState: 'unloaded' | 'loading' | 'loaded' | 'generating' | 'unloading';
+
   voiceover: ProjectVoiceover | null;
   transcript: ProjectTranscript | null;
   sceneMarkers: ProjectSceneMarker[];
@@ -185,6 +203,12 @@ interface DocuFlowState {
   clearChatMessages: () => void;
   setOllamaModelStatus: (status: 'unknown' | 'loading' | 'loaded' | 'error', modelName?: string) => void;
 
+  // GPU/VRAM status actions
+  setGpuStatus: (status: DocuFlowState['gpuStatus']) => void;
+  setGpuStatusLoading: (loading: boolean) => void;
+  setLocalModelInfo: (count: number, names: string[]) => void;
+  setLoadedModel: (name: string | null, loadState: DocuFlowState['modelLoadState']) => void;
+
   setVoiceover: (voiceover: ProjectVoiceover | null) => void;
   setTranscript: (transcript: ProjectTranscript | null) => void;
   setSceneMarkers: (markers: ProjectSceneMarker[]) => void;
@@ -204,6 +228,8 @@ interface DocuFlowState {
   resetHistory: () => void;
   duplicateCommand: (id: string) => void;
   replaceCommands: (commands: Command[]) => void;
+  saveProject: (projectName: string) => Promise<{ success: boolean; error?: string }>;
+  loadProject: (projectName: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 const MAX_HISTORY = 100;
@@ -308,6 +334,14 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
   chatModel: 'llama3.2',
   ollamaModelStatus: 'unknown',
   ollamaModelName: '',
+
+  gpuStatus: null,
+  gpuStatusLoading: false,
+  localModelCount: 0,
+  localModelNames: [],
+
+  loadedModelName: null,
+  modelLoadState: 'unloaded',
 
   voiceover: null,
   transcript: null,
@@ -545,6 +579,14 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
     ...(modelName !== undefined ? { ollamaModelName: modelName } : {}),
   }),
 
+  setGpuStatus: (status) => set({ gpuStatus: status }),
+  setGpuStatusLoading: (loading) => set({ gpuStatusLoading: loading }),
+  setLocalModelInfo: (count, names) => set({ localModelCount: count, localModelNames: names }),
+  setLoadedModel: (name, loadState) => set({
+    loadedModelName: name,
+    modelLoadState: loadState,
+  }),
+
   setVoiceover: (voiceover) => {
     const state = get();
     // Rebuild timeline with new audio duration constraint
@@ -689,6 +731,88 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       set({ commands, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1 });
     } else {
       set({ commands, timeline: tl });
+    }
+  },
+
+  saveProject: async (projectName) => {
+    const state = get();
+    const projectData = {
+      version: 1,
+      settings: state.settings,
+      assets: state.assets.map(a => ({
+        id: a.id,
+        logicalId: a.logicalId,
+        filename: a.filename,
+        type: a.type,
+        mimeType: a.mimeType,
+        width: a.width,
+        height: a.height,
+        duration: a.duration,
+        filePath: a.filePath,
+        audioRole: a.audioRole,
+      })),
+      commands: state.commands,
+      voiceover: state.voiceover,
+      transcript: state.transcript,
+      sceneMarkers: state.sceneMarkers,
+    };
+    try {
+      if (window.docuflow) {
+        const result = await window.docuflow.saveProject(projectName, projectData);
+        return { success: result.success, error: result.error };
+      }
+      // Fallback: save to localStorage
+      localStorage.setItem(`docuflow-project-${projectName}`, JSON.stringify(projectData));
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  loadProject: async (projectName) => {
+    try {
+      let projectData: any = null;
+      if (window.docuflow) {
+        const result = await window.docuflow.loadProject(projectName);
+        if (result.success && result.data) {
+          projectData = result.data;
+        }
+      }
+      if (!projectData) {
+        // Fallback: load from localStorage
+        const stored = localStorage.getItem(`docuflow-project-${projectName}`);
+        if (stored) projectData = JSON.parse(stored);
+      }
+      if (!projectData) {
+        return { success: false, error: 'Project not found' };
+      }
+      const state = get();
+      const newAssets = (projectData.assets || []).map((a: any) => ({
+        ...a,
+        url: a.filePath ? (window.docuflow ? window.docuflow.filePathToAssetUrl(a.filePath) : undefined) : a.url,
+      })) as Asset[];
+      set({
+        settings: projectData.settings || state.settings,
+        assets: newAssets,
+        commands: projectData.commands || [],
+        voiceover: projectData.voiceover || null,
+        transcript: projectData.transcript || null,
+        sceneMarkers: projectData.sceneMarkers || [],
+      });
+      // Rebuild timeline
+      const tl = buildTimelineFromState(
+        projectData.commands || [],
+        newAssets,
+        projectData.settings || state.settings,
+        projectData.voiceover || null
+      );
+      set({ timeline: tl });
+      // Reset history
+      const snap = captureState({ ...get() });
+      set({ history: [snap], historyIndex: 0 });
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
     }
   },
 }));

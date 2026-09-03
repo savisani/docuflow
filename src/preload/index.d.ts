@@ -59,6 +59,7 @@ export interface DocuFlowAPI {
   getLocalModelsDir(): Promise<string>
   generateLocalImageEnhanced(params: {
     prompt: string
+    negativePrompt?: string
     width: number
     height: number
     outputPath: string
@@ -66,6 +67,7 @@ export interface DocuFlowAPI {
     steps?: number
     seed?: number
     device?: string
+    generationId?: string
   }): Promise<{ success: boolean; path?: string; error?: string }>
   cancelLocalGeneration(): Promise<{ success: boolean }>
   upscaleImage(params: {
@@ -140,6 +142,9 @@ export interface DocuFlowAPI {
     summary?: { total: number; success: number; failed: number };
     error?: string;
   }>
+  saveProject(projectName: string, projectData: any): Promise<{ success: boolean; path?: string; error?: string }>
+  loadProject(projectName: string): Promise<{ success: boolean; data?: any; error?: string }>
+  listProjects(): Promise<{ success: boolean; projects?: Array<{ name: string; hasFile: boolean }>; error?: string }>
   onLocalGenerationProgress(callback: (data: { type: string; step?: number; total?: number; percent?: number; message?: string }) => void): (() => void)
 }
 

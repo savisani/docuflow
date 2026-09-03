@@ -8,6 +8,7 @@ import {
   AssetSegment,
   CameraState,
   DEFAULT_CAMERA,
+  KeyframeTrack,
 } from '../../types/timeline';
 import { ProjectSettings } from '../../types/project';
 import { findAsset, getAssetUrl } from '../media/findAsset';
@@ -50,6 +51,7 @@ function makeLayer(
     cropHeight: 0,
     zIndex,
     animations: [],
+    keyframeTracks: [],
     assetSegments: [
       { assetId, assetUrl, assetType, startFrame },
     ],
@@ -669,6 +671,31 @@ export function buildTimeline(
       case 'cameraRotate': {
         if (durationFrames > 0) {
           if (startFrame + durationFrames > maxFrame) maxFrame = startFrame + durationFrames;
+        }
+        break;
+      }
+
+      case 'setKeyframes': {
+        const layer = layers[cmd.target];
+        if (layer) {
+          const property = (cmd as Extract<Command, { type: 'setKeyframes' }>).property;
+          const rawKeyframes = (cmd as Extract<Command, { type: 'setKeyframes' }>).keyframes;
+          const fps = settings.fps;
+          const keyframes = rawKeyframes.map(kf => ({
+            time: Math.round(kf.time * fps),
+            value: kf.value,
+            easing: kf.easing || 'linear' as const,
+          }));
+          const existing = layer.keyframeTracks.find(t => t.property === property);
+          if (existing) {
+            existing.keyframes = keyframes;
+          } else {
+            layer.keyframeTracks.push({ property, keyframes });
+          }
+          if (keyframes.length > 0) {
+            const lastKf = keyframes[keyframes.length - 1];
+            if (lastKf.time > maxFrame) maxFrame = lastKf.time;
+          }
         }
         break;
       }

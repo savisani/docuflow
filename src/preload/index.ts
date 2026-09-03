@@ -147,6 +147,18 @@ const docuflowAPI = {
     return ipcRenderer.invoke('local-models:get-dir')
   },
 
+  getGpuStatus: (): Promise<{
+    cuda: boolean
+    device_name: string
+    total_vram_gb: number
+    allocated_vram_gb: number
+    reserved_vram_gb: number
+    free_vram_gb: number
+    supports_fp16?: boolean
+  }> => {
+    return ipcRenderer.invoke('local-models:gpu-status')
+  },
+
   generateLocalImageEnhanced: (params: {
     prompt: string
     negativePrompt?: string
@@ -157,6 +169,7 @@ const docuflowAPI = {
     steps?: number
     seed?: number
     device?: string
+    generationId?: string
   }): Promise<{ success: boolean; path?: string; error?: string }> => {
     return ipcRenderer.invoke('image:generate-local-enhanced', params)
   },
@@ -250,6 +263,18 @@ const docuflowAPI = {
     error?: string;
   }> => {
     return ipcRenderer.invoke('pipeline:batch-upscale', params)
+  },
+
+  saveProject: (projectName: string, projectData: any): Promise<{ success: boolean; path?: string; error?: string }> => {
+    return ipcRenderer.invoke('project:save', projectName, projectData)
+  },
+
+  loadProject: (projectName: string): Promise<{ success: boolean; data?: any; error?: string }> => {
+    return ipcRenderer.invoke('project:load', projectName)
+  },
+
+  listProjects: (): Promise<{ success: boolean; projects?: Array<{ name: string; hasFile: boolean }>; error?: string }> => {
+    return ipcRenderer.invoke('project:list')
   },
 
   onLocalGenerationProgress: (callback: (data: { type: string; step?: number; total?: number; percent?: number; message?: string }) => void): (() => void) => {

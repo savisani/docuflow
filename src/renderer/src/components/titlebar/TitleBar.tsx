@@ -1,15 +1,34 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Minus, Square, X, Maximize2, Play, RotateCcw, Undo2, Redo2, PanelLeft, Image, SlidersHorizontal, Sparkles, Film, Clapperboard } from 'lucide-react';
+import { Minus, Square, X, Maximize2, Play, RotateCcw, Undo2, Redo2, PanelLeft, Image, SlidersHorizontal, Sparkles, Film, Clapperboard, Cpu, Zap } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { buildTimeline } from '../../engine/timeline/builder';
 import { validateCommands } from '../../engine/commands/validator';
 import { loadAssetMetadata } from '../../engine/media/loader';
 import { generateId } from '../../utils/format';
 import { fetchOllamaPs } from '../../services/aiService';
+import { Tooltip } from '../ui';
+import { listLocalModels } from '../../services/localImageProvider';
+
+const TABS = [
+  { id: 'studio' as const, label: 'Studio', icon: Film },
+  { id: 'generator' as const, label: 'Image Gen', icon: Sparkles },
+  { id: 'scenes' as const, label: 'Scene Gen', icon: Clapperboard },
+] as const;
 
 export const TitleBar: React.FC = () => {
   const [isMaximized, setIsMaximized] = useState(false);
-  const { settings, assets, commands, historyIndex, history, panelVisibility, setPanelVisibility, setTimeline, setSettings, setCommands, setAssets, undo, redo, activeTab, setActiveTab, ollamaModelStatus, ollamaModelName, setOllamaModelStatus } = useDocuFlowStore();
+  const {
+    settings, assets, commands, historyIndex, history,
+    panelVisibility, setPanelVisibility,
+    setTimeline, setSettings, setCommands, setAssets, undo, redo,
+    activeTab, setActiveTab,
+    ollamaModelStatus, ollamaModelName, setOllamaModelStatus,
+    gpuStatus, setGpuStatus, setGpuStatusLoading,
+    localModelCount, localModelNames, setLocalModelInfo,
+    loadedModelName, modelLoadState, setLoadedModel,
+  } = useDocuFlowStore();
+
+  const [gpuPolling, setGpuPolling] = useState(false);
 
   useEffect(() => {
     window.docuflow?.isMaximized()?.then(setIsMaximized);
@@ -17,7 +36,42 @@ export const TitleBar: React.FC = () => {
     return () => { unsubscribe?.(); };
   }, []);
 
-  // Poll Ollama model status every 5 seconds
+  // Poll GPU status
+  useEffect(() => {
+    let cancelled = false;
+    const pollGpu = async () => {
+      if (gpuPolling) return;
+      setGpuPolling(true);
+      try {
+        const status = await window.docuflow.getGpuStatus();
+        if (!cancelled) setGpuStatus(status);
+      } catch {
+        if (!cancelled) setGpuStatus(null);
+      } finally {
+        if (!cancelled) setGpuPolling(false);
+      }
+    };
+    pollGpu();
+    const interval = setInterval(pollGpu, 10000); // Poll every 10s
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [setGpuStatus]);
+
+  // Load local model info
+  useEffect(() => {
+    let cancelled = false;
+    const loadModels = async () => {
+      try {
+        const models = await listLocalModels();
+        if (!cancelled) {
+          setLocalModelInfo(models.length, models.map(m => m.name));
+        }
+      } catch {}
+    };
+    loadModels();
+    const interval = setInterval(loadModels, 30000); // Refresh every 30s
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [setLocalModelInfo]);
+
   useEffect(() => {
     let cancelled = false;
     const poll = async () => {
@@ -41,6 +95,22 @@ export const TitleBar: React.FC = () => {
   const handleMinimize = useCallback(() => { window.docuflow?.minimize(); }, []);
   const handleMaximize = useCallback(() => { window.docuflow?.maximize(); }, []);
   const handleClose = useCallback(() => { window.docuflow?.close(); }, []);
+
+  const handleOffload = useCallback(async () => {
+    try {
+      setLoadedModel(null, 'unloading');
+      // Cancel any running generation
+      await window.docuflow.cancelLocalGeneration();
+      // Force GPU status refresh after a delay
+      setTimeout(async () => {
+        try {
+          const status = await window.docuflow.getGpuStatus();
+          setGpuStatus(status);
+          setLoadedModel(null, 'unloaded');
+        } catch {}
+      }, 2000);
+    } catch {}
+  }, [setGpuStatus, setLoadedModel]);
 
   const handleBuild = useCallback(() => {
     const state = useDocuFlowStore.getState();
@@ -104,158 +174,198 @@ export const TitleBar: React.FC = () => {
 
   return (
     <div
-      className="h-[36px] flex items-center bg-slate-900/80 backdrop-blur-md border-b border-white/5 select-none shrink-0"
+      className="h-[36px] flex items-center bg-df-surface-1 border-b border-df-border select-none shrink-0"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
       {/* Left: Logo + Title */}
       <div className="flex items-center gap-2 px-3 shrink-0">
-        <div className="w-5 h-5 rounded bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-          <span className="text-[9px] font-bold text-white">D</span>
+        <div className="w-5 h-5 rounded-df-sm bg-df-accent flex items-center justify-center">
+          <span className="text-df-xs font-bold text-white">D</span>
         </div>
-        <span className="text-[12px] font-bold tracking-wide">
-          <span className="bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">Docu</span>
-          <span className="text-slate-300">Flow</span>
-        </span>
+        <span className="text-df-sm font-semibold text-df-text-primary tracking-wide">DocuFlow</span>
       </div>
 
-      <div className="w-px h-4 bg-white/10 mx-1" />
+      <div className="w-px h-4 bg-df-divider mx-1" />
 
-      {/* Workspace Tab Switcher */}
+      {/* Workspace Tabs — Segmented Control */}
       <div
-        className="flex items-center bg-slate-800/60 rounded-lg border border-white/10 p-0.5"
+        className="flex items-center bg-df-surface-2 rounded-df-md border border-df-border p-px"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
-        <button
-          onClick={() => setActiveTab('studio')}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-medium transition-all duration-150 ${
-            activeTab === 'studio'
-              ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 shadow-sm'
-              : 'text-slate-400 hover:text-white border border-transparent hover:border-white/10'
-          }`}
-        >
-          <Film size={11} />
-          <span>Timeline Studio</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('generator')}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-medium transition-all duration-150 ${
-            activeTab === 'generator'
-              ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30 shadow-sm'
-              : 'text-slate-400 hover:text-white border border-transparent hover:border-white/10'
-          }`}
-        >
-          <Sparkles size={11} />
-          <span>AI Image Generator</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('scenes')}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-medium transition-all duration-150 ${
-            activeTab === 'scenes'
-              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-sm'
-              : 'text-slate-400 hover:text-white border border-transparent hover:border-white/10'
-          }`}
-        >
-          <Clapperboard size={11} />
-          <span>AI Scene Generator</span>
-        </button>
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`
+              flex items-center gap-1.5 px-2.5 py-1 rounded-df-sm text-df-xs font-medium
+              transition-all duration-df-fast
+              ${activeTab === tab.id
+                ? 'bg-df-accent text-white shadow-sm'
+                : 'text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-3'}
+            `}
+          >
+            <tab.icon size={11} />
+            <span>{tab.label}</span>
+          </button>
+        ))}
       </div>
 
-      <div className="w-px h-4 bg-white/10 mx-1" />
+      <div className="w-px h-4 bg-df-divider mx-1" />
+
+      {/* Actions */}
       <div
-        className="flex items-center gap-1"
+        className="flex items-center gap-0.5"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
-        <button
-          onClick={handleBuild}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-slate-800/60 hover:bg-slate-700/80 border border-white/10 text-slate-200 hover:text-white transition-all duration-150 active:scale-[0.97]"
-          title="Build Timeline (Ctrl+B)"
-        >
-          <Play size={11} />
-          <span>Build</span>
-        </button>
-        <button
-          onClick={handleLoadDemo}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-slate-800/60 hover:bg-slate-700/80 border border-white/10 text-slate-200 hover:text-white transition-all duration-150 active:scale-[0.97]"
-          title="Load Demo Project"
-        >
-          <RotateCcw size={11} />
-          <span>Demo</span>
-        </button>
+        <Tooltip content="Build Timeline (Ctrl+B)" position="bottom">
+          <button
+            onClick={handleBuild}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-df-sm text-df-xs font-medium bg-df-surface-2 hover:bg-df-surface-3 border border-df-border text-df-text-primary transition-all duration-df-fast active:scale-[0.97]"
+          >
+            <Play size={11} />
+            <span>Build</span>
+          </button>
+        </Tooltip>
+        <Tooltip content="Load Demo Project" position="bottom">
+          <button
+            onClick={handleLoadDemo}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-df-sm text-df-xs font-medium bg-df-surface-2 hover:bg-df-surface-3 border border-df-border text-df-text-secondary hover:text-df-text-primary transition-all duration-df-fast active:scale-[0.97]"
+          >
+            <RotateCcw size={11} />
+            <span>Demo</span>
+          </button>
+        </Tooltip>
 
-        <div className="w-px h-4 bg-white/10 mx-1" />
+        <div className="w-px h-4 bg-df-divider mx-1" />
 
-        <button
-          onClick={undo}
-          disabled={!canUndo}
-          className="flex items-center justify-center w-[28px] h-[28px] rounded-md bg-slate-800/60 hover:bg-slate-700/80 border border-white/10 text-slate-400 hover:text-white transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed active:scale-[0.97]"
-          title="Undo (Ctrl+Z)"
-        >
-          <Undo2 size={12} />
-        </button>
-        <button
-          onClick={redo}
-          disabled={!canRedo}
-          className="flex items-center justify-center w-[28px] h-[28px] rounded-md bg-slate-800/60 hover:bg-slate-700/80 border border-white/10 text-slate-400 hover:text-white transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed active:scale-[0.97]"
-          title="Redo (Ctrl+Shift+Z)"
-        >
-          <Redo2 size={12} />
-        </button>
+        <Tooltip content="Undo (Ctrl+Z)" position="bottom">
+          <button
+            onClick={undo}
+            disabled={!canUndo}
+            className="w-[26px] h-[26px] flex items-center justify-center rounded-df-sm text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-3 transition-all duration-df-fast disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            <Undo2 size={12} />
+          </button>
+        </Tooltip>
+        <Tooltip content="Redo (Ctrl+Shift+Z)" position="bottom">
+          <button
+            onClick={redo}
+            disabled={!canRedo}
+            className="w-[26px] h-[26px] flex items-center justify-center rounded-df-sm text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-3 transition-all duration-df-fast disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            <Redo2 size={12} />
+          </button>
+        </Tooltip>
 
-        <div className="w-px h-4 bg-white/10 mx-1" />
+        <div className="w-px h-4 bg-df-divider mx-1" />
 
         {/* Panel toggles */}
-        <button
-          onClick={() => setPanelVisibility('assets', !panelVisibility.assets)}
-          className={`flex items-center justify-center w-[28px] h-[28px] rounded-md border transition-all duration-150 active:scale-[0.97] ${
-            panelVisibility.assets
-              ? 'bg-indigo-500/20 border-indigo-500/30 text-indigo-300'
-              : 'bg-slate-800/60 border-white/10 text-slate-500 hover:text-white hover:bg-slate-700/80'
-          }`}
-          title={panelVisibility.assets ? 'Hide Assets Panel' : 'Show Assets Panel'}
-        >
-          <PanelLeft size={12} />
-        </button>
-        <button
-          onClick={() => setPanelVisibility('assetPreview', !panelVisibility.assetPreview)}
-          className={`flex items-center justify-center w-[28px] h-[28px] rounded-md border transition-all duration-150 active:scale-[0.97] ${
-            panelVisibility.assetPreview
-              ? 'bg-indigo-500/20 border-indigo-500/30 text-indigo-300'
-              : 'bg-slate-800/60 border-white/10 text-slate-500 hover:text-white hover:bg-slate-700/80'
-          }`}
-          title={panelVisibility.assetPreview ? 'Hide Asset Preview' : 'Show Asset Preview'}
-        >
-          <Image size={12} />
-        </button>
-        <button
-          onClick={() => setPanelVisibility('inspector', !panelVisibility.inspector)}
-          className={`flex items-center justify-center w-[28px] h-[28px] rounded-md border transition-all duration-150 active:scale-[0.97] ${
-            panelVisibility.inspector
-              ? 'bg-indigo-500/20 border-indigo-500/30 text-indigo-300'
-              : 'bg-slate-800/60 border-white/10 text-slate-500 hover:text-white hover:bg-slate-700/80'
-          }`}
-          title={panelVisibility.inspector ? 'Hide Inspector' : 'Show Inspector'}
-        >
-          <SlidersHorizontal size={12} />
-        </button>
+        <Tooltip content="Assets Panel" position="bottom">
+          <button
+            onClick={() => setPanelVisibility('assets', !panelVisibility.assets)}
+            className={`w-[26px] h-[26px] flex items-center justify-center rounded-df-sm transition-all duration-df-fast ${
+              panelVisibility.assets
+                ? 'bg-df-accent-muted text-df-accent'
+                : 'text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-3'
+            }`}
+          >
+            <PanelLeft size={12} />
+          </button>
+        </Tooltip>
+        <Tooltip content="Asset Preview" position="bottom">
+          <button
+            onClick={() => setPanelVisibility('assetPreview', !panelVisibility.assetPreview)}
+            className={`w-[26px] h-[26px] flex items-center justify-center rounded-df-sm transition-all duration-df-fast ${
+              panelVisibility.assetPreview
+                ? 'bg-df-accent-muted text-df-accent'
+                : 'text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-3'
+            }`}
+          >
+            <Image size={12} />
+          </button>
+        </Tooltip>
+        <Tooltip content="Inspector" position="bottom">
+          <button
+            onClick={() => setPanelVisibility('inspector', !panelVisibility.inspector)}
+            className={`w-[26px] h-[26px] flex items-center justify-center rounded-df-sm transition-all duration-df-fast ${
+              panelVisibility.inspector
+                ? 'bg-df-accent-muted text-df-accent'
+                : 'text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-3'
+            }`}
+          >
+            <SlidersHorizontal size={12} />
+          </button>
+        </Tooltip>
       </div>
 
       {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Right: Resolution + Model Status + Window Controls */}
+      {/* Right: Status + Window Controls */}
       <div className="flex items-center gap-2 shrink-0">
         <div
-          className="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono mr-1"
+          className="flex items-center gap-1.5 text-df-xs text-df-text-muted font-mono mr-1"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           <span>{settings.width}x{settings.height}</span>
-          <span className="text-slate-600">@</span>
+          <span className="text-df-text-dim">@</span>
           <span>{settings.fps}fps</span>
         </div>
 
-        {/* Model status indicator */}
+        {/* GPU Status */}
         <div
-          className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[9px] font-mono"
+          className="flex items-center gap-1.5 px-2 py-0.5 rounded-df-sm text-df-xs font-mono"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          title={
+            gpuStatus
+              ? `GPU: ${gpuStatus.device_name}\nVRAM: ${gpuStatus.allocated_vram_gb?.toFixed(1) || 0} / ${gpuStatus.total_vram_gb?.toFixed(1) || 0} GB\nFree: ${gpuStatus.free_vram_gb?.toFixed(1) || 0} GB\nLocal models: ${localModelCount}${loadedModelName ? `\nLoaded: ${loadedModelName} (${modelLoadState})` : ''}`
+              : 'GPU status unavailable'
+          }
+        >
+          <Cpu size={10} className={gpuStatus?.cuda ? 'text-df-success' : 'text-df-text-dim'} />
+          <span className="text-df-text-muted">
+            {gpuStatus?.cuda
+              ? `${gpuStatus.allocated_vram_gb?.toFixed(1) || '?'} / ${gpuStatus.total_vram_gb?.toFixed(1) || '?'} GB`
+              : 'No GPU'}
+          </span>
+          {localModelCount > 0 && (
+            <>
+              <span className="text-df-text-dim">|</span>
+              <span className="text-df-text-muted">{localModelCount} model{localModelCount !== 1 ? 's' : ''}</span>
+            </>
+          )}
+          {loadedModelName && (
+            <>
+              <span className="text-df-text-dim">|</span>
+              <span className={`text-df-xs ${
+                modelLoadState === 'generating' ? 'text-df-accent animate-pulse' :
+                modelLoadState === 'loading' ? 'text-df-warning animate-pulse' :
+                modelLoadState === 'loaded' ? 'text-df-success' :
+                'text-df-text-muted'
+              }`}>
+                {modelLoadState === 'generating' ? '⚡' : modelLoadState === 'loading' ? '⏳' : modelLoadState === 'loaded' ? '●' : '○'}
+                {' '}{loadedModelName}
+              </span>
+            </>
+          )}
+        </div>
+
+        {/* Offload Button */}
+        <Tooltip content={loadedModelName ? `Offload ${loadedModelName} from GPU` : "Offload AI models from GPU"} position="bottom">
+          <button
+            onClick={handleOffload}
+            disabled={!gpuStatus?.cuda || (!loadedModelName && (gpuStatus?.allocated_vram_gb || 0) < 0.1)}
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded-df-sm text-df-xs font-medium bg-df-surface-2 hover:bg-df-surface-3 border border-df-border text-df-text-secondary hover:text-df-text-primary transition-all duration-df-fast disabled:opacity-30 disabled:cursor-not-allowed"
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          >
+            <Zap size={9} />
+            <span>Offload</span>
+          </button>
+        </Tooltip>
+
+        {/* Model status */}
+        <div
+          className="flex items-center gap-1.5 px-2 py-0.5 rounded-df-sm text-df-xs font-mono"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           title={
             ollamaModelStatus === 'loaded'
@@ -264,21 +374,21 @@ export const TitleBar: React.FC = () => {
                 ? 'Model loading...'
                 : ollamaModelStatus === 'error'
                   ? 'Ollama connection error'
-                  : 'No model loaded (use Ollama tab to load)'
+                  : 'No model loaded'
           }
         >
           <span
-            className={`w-2 h-2 rounded-full ${
+            className={`w-1.5 h-1.5 rounded-full ${
               ollamaModelStatus === 'loaded'
-                ? 'bg-green-500'
+                ? 'bg-df-success'
                 : ollamaModelStatus === 'loading'
-                  ? 'bg-amber-500 animate-pulse'
+                  ? 'bg-df-warning animate-pulse'
                   : ollamaModelStatus === 'error'
-                    ? 'bg-red-500'
-                    : 'bg-slate-600'
+                    ? 'bg-df-error'
+                    : 'bg-df-text-dim'
             }`}
           />
-          <span className="text-slate-400">
+          <span className="text-df-text-muted">
             {ollamaModelStatus === 'loaded'
               ? ollamaModelName || 'Loaded'
               : ollamaModelStatus === 'loading'
@@ -295,24 +405,24 @@ export const TitleBar: React.FC = () => {
         >
           <button
             onClick={handleMinimize}
-            className="h-full w-[40px] flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+            className="h-full w-[36px] flex items-center justify-center text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-2 transition-colors"
             aria-label="Minimize"
           >
-            <Minus size={14} strokeWidth={1.5} />
+            <Minus size={13} strokeWidth={1.5} />
           </button>
           <button
             onClick={handleMaximize}
-            className="h-full w-[40px] flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+            className="h-full w-[36px] flex items-center justify-center text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-2 transition-colors"
             aria-label={isMaximized ? 'Restore' : 'Maximize'}
           >
-            {isMaximized ? <Square size={11} strokeWidth={1.5} /> : <Maximize2 size={12} strokeWidth={1.5} />}
+            {isMaximized ? <Square size={10} strokeWidth={1.5} /> : <Maximize2 size={11} strokeWidth={1.5} />}
           </button>
           <button
             onClick={handleClose}
-            className="h-full w-[40px] flex items-center justify-center text-slate-400 hover:text-white hover:bg-red-500/80 transition-colors"
+            className="h-full w-[36px] flex items-center justify-center text-df-text-muted hover:text-white hover:bg-df-error transition-colors"
             aria-label="Close"
           >
-            <X size={14} strokeWidth={1.5} />
+            <X size={13} strokeWidth={1.5} />
           </button>
         </div>
       </div>

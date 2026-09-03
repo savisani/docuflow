@@ -10,8 +10,8 @@ Usage:
 Input JSON format:
 {
   "model_path": "path/to/model",
-  "device": "auto",
-  "default_steps": 20,
+  "device": "gpu",
+  "default_steps": 10,
   "default_width": 512,
   "default_height": 512,
   "default_negative_prompt": "ugly, blurry",
@@ -22,7 +22,7 @@ Input JSON format:
       "negative_prompt": "ugly, blurry",
       "width": 512,
       "height": 512,
-      "steps": 20,
+      "steps": 12,
       "seed": 42
     }
   ]
@@ -113,7 +113,7 @@ def generate_batch(args):
             sys.exit(1)
 
         device_pref = config.get('device', args.device)
-        default_steps = config.get('default_steps', 20)
+        default_steps = config.get('default_steps', 10)
         default_width = config.get('default_width', 512)
         default_height = config.get('default_height', 512)
         default_negative = config.get('default_negative_prompt', '')
@@ -122,29 +122,20 @@ def generate_batch(args):
         import torch
         from diffusers import StableDiffusionPipeline, UniPCMultistepScheduler
 
-        device = "cpu"
-        dtype = torch.float32
-        use_gpu = False
+        # === GPU-ONLY POLICY ===
+        if not torch.cuda.is_available():
+            print(json.dumps({
+                "success": False,
+                "error": "CUDA GPU not available",
+                "detail": "Local image generation requires an NVIDIA CUDA GPU. CPU fallback is disabled.",
+            }))
+            sys.exit(1)
 
-        if device_pref in ("auto", "gpu"):
-            if torch.cuda.is_available():
-                device = "cuda"
-                use_gpu = True
-                dtype = torch.float32
-                vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-                report_status(f"Using GPU: {torch.cuda.get_device_name(0)} ({vram:.1f} GB) - float32 + CPU offload")
-            elif device_pref == "gpu":
-                report_status("GPU not available, falling back to CPU")
-        elif device_pref == "directml":
-            try:
-                import torch_directml
-                device = str(torch_directml.device())
-                dtype = torch.float32
-                report_status("Using DirectML GPU")
-            except ImportError:
-                report_status("DirectML not available, using CPU")
-        else:
-            report_status("Using CPU mode")
+        device = "cuda"
+        dtype = torch.float16  # fp16 for UNet/text_encoder, fp32 for VAE
+        gpu_name = torch.cuda.get_device_name(0)
+        total_vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        report_status(f"GPU: {gpu_name} ({total_vram:.1f} GB VRAM)")
 
         # Load model ONCE
         report_status(f"Loading model from {model_path}...")
@@ -186,7 +177,7 @@ def generate_batch(args):
                 print(json.dumps({"success": False, "error": f"Cannot determine model format for: {model_path}"}))
                 sys.exit(1)
 
-        report_status("Configuring pipeline for low memory...")
+        report_status("Configuring pipeline...")
         pipe.enable_attention_slicing(slice_size="auto")
         try:
             pipe.vae.enable_tiling()
@@ -195,11 +186,24 @@ def generate_batch(args):
 
         pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
 
-        if use_gpu:
-            pipe.enable_model_cpu_offload()
-            report_status("GPU: Using model CPU offload (float32)")
-        else:
-            pipe = pipe.to(device)
+        # === SAFE VAE: Keep VAE in fp32 to prevent NaN/black images ===
+        pipe.vae = pipe.vae.to(dtype=torch.float32)
+
+        # Move entire pipeline to CUDA
+        report_status("Moving pipeline to GPU...")
+        pipe = pipe.to("cuda")
+
+        # Verify device placement
+        unet_device = str(pipe.unet.device)
+        if "cpu" in unet_device.lower():
+            print(json.dumps({
+                "success": False,
+                "error": "UNet failed to move to GPU",
+                "detail": f"UNet is on {unet_device} instead of CUDA.",
+            }))
+            sys.exit(1)
+
+        report_status(f"Pipeline ready on GPU. UNet={unet_device}, VAE={pipe.vae.device}")
 
         os.makedirs(args.output_dir, exist_ok=True)
 
@@ -304,7 +308,7 @@ def main():
     parser = argparse.ArgumentParser(description="Batch Stable Diffusion image generation")
     parser.add_argument("--input", type=str, required=True, help="Input JSON file with jobs")
     parser.add_argument("--output_dir", type=str, required=True, help="Output directory for images")
-    parser.add_argument("--device", type=str, default="auto", choices=["auto", "gpu", "cpu", "directml"])
+    parser.add_argument("--device", type=str, default="gpu", choices=["gpu"])
 
     args = parser.parse_args()
     generate_batch(args)

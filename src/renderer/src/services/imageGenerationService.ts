@@ -13,6 +13,7 @@ import { generateLogicalId } from '../engine/media/findAsset';
 import { generateWithCloudflare, CloudflareConfig } from '../utils/cloudflareApi';
 import { generateLocalImage, LocalGenerationProgress } from './localImageProvider';
 import { buildScenePrompts } from '../utils/promptBuilder';
+import { parsePromptAndNegativePrompt } from '../utils/promptParser';
 
 export type ImageProvider = 'cloudflare' | 'local';
 
@@ -189,6 +190,7 @@ export async function generateImage(
 async function generateLocal(req: ImageGenerationRequest): Promise<ImageGenerationResult> {
   const {
     prompt,
+    negativePrompt,
     aspectRatio = '1:1',
     source,
     sceneId,
@@ -217,7 +219,7 @@ async function generateLocal(req: ImageGenerationRequest): Promise<ImageGenerati
       width: w,
       height: h,
       modelPath: localModelPath,
-      steps: steps || 20,
+      steps: steps || 10,
       seed,
       device,
     }, onProgress);
@@ -395,6 +397,10 @@ function cropImageToAspectRatio(imageUrl: string, ratioW: number, ratioH: number
 export interface SceneGenerationRequest {
   backgroundDescription: string;
   personDescription: string;
+  /** User-provided negative prompt for background (may contain inline "Negative prompt:" — will be parsed) */
+  backgroundNegativePrompt?: string;
+  /** User-provided negative prompt for person (may contain inline "Negative prompt:" — will be parsed) */
+  personNegativePrompt?: string;
   aspectRatio?: string;
   source?: 'image-generator' | 'scene-generator';
   provider?: ImageProvider;
@@ -427,6 +433,8 @@ export async function generateScenePair(
   const {
     backgroundDescription,
     personDescription,
+    backgroundNegativePrompt: rawBackgroundNegative,
+    personNegativePrompt: rawPersonNegative,
     aspectRatio = '1:1',
     source = 'image-generator',
     provider = 'cloudflare',
@@ -445,7 +453,23 @@ export async function generateScenePair(
     return { success: false, error: 'Both background and person descriptions are required' };
   }
 
-  const prompts = buildScenePrompts(backgroundDescription, personDescription);
+  // Parse any inline "Negative prompt:" from user input
+  const parsedBg = parsePromptAndNegativePrompt(rawBackgroundNegative || '');
+  const parsedPerson = parsePromptAndNegativePrompt(rawPersonNegative || '');
+
+  // Merge user negative prompts with system defaults (deduplicated)
+  const prompts = buildScenePrompts(
+    backgroundDescription,
+    personDescription,
+    parsedBg.negativePrompt || undefined,
+    parsedPerson.negativePrompt || undefined,
+  );
+
+  // Debug logging — proves negative prompts reach the pipeline
+  console.log('[SceneGen] BACKGROUND PROMPT:', prompts.backgroundPrompt.slice(0, 120));
+  console.log('[SceneGen] BACKGROUND NEGATIVE:', prompts.backgroundNegative);
+  console.log('[SceneGen] PERSON PROMPT:', prompts.personPrompt.slice(0, 120));
+  console.log('[SceneGen] PERSON NEGATIVE:', prompts.personNegative);
 
   // Phase 1 — Background
   onProgress?.('background', { type: 'status', message: 'Generating background...' });

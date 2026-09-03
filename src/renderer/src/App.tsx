@@ -109,6 +109,19 @@ function App() {
           removeCommand(selectedCommandId);
         }
       }
+
+      if (e.code === 'KeyS' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        const state = useDocuFlowStore.getState();
+        const projectName = state.project?.name || 'Untitled';
+        state.saveProject(projectName).then(result => {
+          if (result.success) {
+            console.log('Project saved successfully');
+          } else {
+            console.error('Failed to save project:', result.error);
+          }
+        });
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -243,7 +256,7 @@ function App() {
   }, [handleDragEnter, handleDragLeave, handleDragOver, handleDrop]);
 
   return (
-    <div className="w-full h-screen flex flex-col overflow-hidden bg-slate-950 text-white">
+    <div className="w-full h-screen flex flex-col overflow-hidden bg-df-bg text-df-text-primary">
       <TitleBar />
       <div className="flex-1 w-full h-full overflow-hidden flex flex-row">
         {/* All tabs rendered simultaneously; hidden via CSS to preserve state */}

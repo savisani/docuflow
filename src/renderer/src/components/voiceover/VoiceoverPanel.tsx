@@ -264,7 +264,7 @@ export const VoiceoverPanel: React.FC = () => {
         <Section title="Audio Source" className="space-y-2">
           {voiceoverAsset ? (
             <div className="bg-[var(--color-bg-elevated)] rounded p-2 space-y-2">
-              <div className="flex items-center gap-2 text-[11px]">
+              <div className="flex items-center gap-2 text-df-sm">
                 <Mic size={12} className="text-[var(--color-track-voiceover)]" />
                 <span className="text-[var(--color-track-voiceover)] font-mono truncate">{voiceoverAsset.logicalId}</span>
                 <span className="text-[var(--color-text-muted)] truncate">{voiceoverAsset.filename}</span>
@@ -288,7 +288,7 @@ export const VoiceoverPanel: React.FC = () => {
                 aria-label="Import Voiceover Audio"
                 onClick={handleImportVoiceover}
                 disabled={importing}
-                className="w-full justify-center gap-2 px-3 py-4 rounded border-2 border-dashed border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent-primary)] hover:text-[var(--color-accent-primary)] transition-colors text-[11px]"
+                className="w-full justify-center gap-2 px-3 py-4 rounded border-2 border-dashed border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent-primary)] hover:text-[var(--color-accent-primary)] transition-colors text-df-sm"
               >
                 {importing ? (
                   <Loader2 size={18} className="animate-spin" />
@@ -311,7 +311,7 @@ export const VoiceoverPanel: React.FC = () => {
               }
             }}
             options={LANGUAGES.map((lang) => ({ value: lang.code, label: lang.label }))}
-            className="w-full bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded px-2 py-1.5 text-[11px] text-white"
+            className="w-full bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded px-2 py-1.5 text-df-sm text-white"
           />
         </Section>
 
@@ -327,10 +327,10 @@ export const VoiceoverPanel: React.FC = () => {
                   { value: 'base', label: 'base - Balanced speed/quality, ~1GB VRAM' },
                   { value: 'small', label: 'small - Better accuracy, ~2GB VRAM' },
                 ]}
-            className="w-full bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded px-2 py-1.5 text-[11px] text-white disabled:opacity-50"
+            className="w-full bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded px-2 py-1.5 text-df-sm text-white disabled:opacity-50"
           />
           {availableModels.length > 0 && (
-            <div className="text-[9px] text-[var(--color-text-muted)] space-y-0.5">
+            <div className="text-df-xs text-[var(--color-text-muted)] space-y-0.5">
               {(() => {
                 const m = availableModels.find((x) => x.name === selectedModel);
                 return m ? (
@@ -349,7 +349,7 @@ export const VoiceoverPanel: React.FC = () => {
             {serverStatus === 'checking' && (
               <div className="flex items-center gap-2">
                 <Loader2 size={12} className="animate-spin text-[var(--color-accent-primary)]" />
-                <span className="text-[11px] text-[var(--color-text-muted)]">Checking server status...</span>
+                <span className="text-df-sm text-[var(--color-text-muted)]">Checking server status...</span>
               </div>
             )}
 
@@ -358,7 +358,7 @@ export const VoiceoverPanel: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-[var(--color-success)] shrink-0" />
-                    <span className="text-[11px] text-[var(--color-success)]">Server Running</span>
+                    <span className="text-df-sm text-[var(--color-success)]">Server Running</span>
                   </div>
                   <Tooltip content="Restart server">
                     <IconButton size="sm" variant="ghost" aria-label="Restart" onClick={restartServer}>
@@ -367,7 +367,7 @@ export const VoiceoverPanel: React.FC = () => {
                   </Tooltip>
                 </div>
                 {health && (
-                  <div className="text-[10px] text-[var(--color-text-muted)] space-y-0.5">
+                  <div className="text-df-xs text-[var(--color-text-muted)] space-y-0.5">
                     {health.gpu_name && <div>GPU: {health.gpu_name}</div>}
                     <div>CUDA: {health.cuda_available ? 'Available' : 'Unavailable'}</div>
                     <div>Model: {health.model}</div>
@@ -380,7 +380,7 @@ export const VoiceoverPanel: React.FC = () => {
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-[var(--color-error)] shrink-0" />
-                  <span className="text-[11px] text-[var(--color-text-muted)]">Server Offline</span>
+                  <span className="text-df-sm text-[var(--color-text-muted)]">Server Offline</span>
                 </div>
                 <Tooltip content="Start local transcription server">
                   <IconButton size="md" variant="primary" aria-label="Start Server" onClick={startServer} className="w-full justify-center gap-2">
@@ -395,11 +395,11 @@ export const VoiceoverPanel: React.FC = () => {
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <Loader2 size={12} className="animate-spin text-[var(--color-warning)]" />
-                  <span className="text-[11px] text-[var(--color-warning)]">Starting server...</span>
+                  <span className="text-df-sm text-[var(--color-warning)]">Starting server...</span>
                 </div>
-                <div className="text-[10px] text-[var(--color-text-muted)] space-y-1">
+                <div className="text-df-xs text-[var(--color-text-muted)] space-y-1">
                   <div className="font-semibold text-[var(--color-text-secondary)]">To start the server, run in a terminal:</div>
-                  <code className="block bg-[var(--color-bg)] rounded px-2 py-1.5 text-[10px] text-[var(--color-success)] font-mono select-all">
+                  <code className="block bg-[var(--color-bg)] rounded px-2 py-1.5 text-df-xs text-[var(--color-success)] font-mono select-all">
                     cd server && start.bat
                   </code>
                   <div className="text-[var(--color-border)]">Auto-detecting when server comes online...</div>
@@ -411,12 +411,12 @@ export const VoiceoverPanel: React.FC = () => {
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <AlertCircle size={12} className="text-[var(--color-error)]" />
-                  <span className="text-[11px] text-[var(--color-error)]">Failed to Start</span>
+                  <span className="text-df-sm text-[var(--color-error)]">Failed to Start</span>
                 </div>
-                <div className="text-[10px] text-[var(--color-text-muted)] space-y-1">
+                <div className="text-df-xs text-[var(--color-text-muted)] space-y-1">
                   <div>Server did not respond within 30 seconds.</div>
                   <div className="font-semibold text-[var(--color-text-secondary)]">Start manually in a terminal:</div>
-                  <code className="block bg-[var(--color-bg)] rounded px-2 py-1.5 text-[10px] text-[var(--color-success)] font-mono select-all">
+                  <code className="block bg-[var(--color-bg)] rounded px-2 py-1.5 text-df-xs text-[var(--color-success)] font-mono select-all">
                     cd server && start.bat
                   </code>
                 </div>
@@ -456,12 +456,12 @@ export const VoiceoverPanel: React.FC = () => {
           </Tooltip>
 
           {!serverOnline && voiceoverAsset && (
-            <div className="text-[10px] text-[var(--color-text-muted)]">Server must be running to transcribe</div>
+            <div className="text-df-xs text-[var(--color-text-muted)]">Server must be running to transcribe</div>
           )}
 
           {transcriptionStatus === 'processing' && (
             <div className="space-y-1">
-              <div className="text-[10px] text-[var(--color-accent-primary)]">
+              <div className="text-df-xs text-[var(--color-accent-primary)]">
                 {transcriptionStepLabel || 'Starting...'}
               </div>
               <div className="w-full bg-[var(--color-border)] rounded-full h-1.5 overflow-hidden">
@@ -470,20 +470,20 @@ export const VoiceoverPanel: React.FC = () => {
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
-              <div className="text-[10px] text-[var(--color-text-muted)]">
+              <div className="text-df-xs text-[var(--color-text-muted)]">
                 {transcriptionStepLabel || 'Processing...'} {elapsedSec > 0 && `(${elapsedSec}s elapsed)`}
               </div>
             </div>
           )}
 
           {transcriptionStatus === 'error' && transcriptionError && (
-            <div className="bg-[var(--color-error-muted)] border border-[var(--color-error)]/50 rounded p-2 text-[11px] text-[var(--color-error)] whitespace-pre-wrap font-mono text-[10px]">
+            <div className="bg-[var(--color-error-muted)] border border-[var(--color-error)]/50 rounded p-2 text-df-sm text-[var(--color-error)] whitespace-pre-wrap font-mono text-df-xs">
               {transcriptionError}
             </div>
           )}
 
           {transcriptionStatus === 'complete' && transcript && (
-            <div className="flex items-center gap-1 text-[11px] text-[var(--color-success)]">
+            <div className="flex items-center gap-1 text-df-sm text-[var(--color-success)]">
               <CheckCircle size={12} />
               Transcription complete ({transcript.segments.length} segments)
             </div>
@@ -498,18 +498,18 @@ export const VoiceoverPanel: React.FC = () => {
                   key={segment.id}
                   onClick={() => handleSegmentClick(segment.start)}
                   className={`
-                    w-full p-2 rounded text-[11px] text-left cursor-pointer transition-colors
+                    w-full p-2 rounded text-df-sm text-left cursor-pointer transition-colors
                     ${currentTime >= segment.start && currentTime < segment.end
                       ? 'bg-[var(--color-accent-primary-muted)] border border-[var(--color-accent-primary)]/50 text-[var(--color-accent-primary)]'
                       : 'bg-[var(--color-bg-elevated)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-elevated)]/50 border border-transparent'}
                   `}
                 >
-                  <div className="font-mono text-[10px] text-[var(--color-text-muted)] mb-0.5">
+                  <div className="font-mono text-df-xs text-[var(--color-text-muted)] mb-0.5">
                     {formatTimestamp(segment.start)}
                   </div>
                   <div>{segment.text}</div>
                   {segment.words && segment.words.length > 0 && (
-                    <div className="mt-1 text-[9px] text-[var(--color-border)]">
+                    <div className="mt-1 text-df-xs text-[var(--color-border)]">
                       {segment.words.map((w, i) => (
                         <span key={i}>
                           <span className="text-[var(--color-text-muted)]">{w.text}</span>
@@ -546,7 +546,7 @@ export const VoiceoverPanel: React.FC = () => {
                 <button
                   key={marker.id}
                   onClick={() => handleSegmentClick(marker.start)}
-                  className="flex items-center justify-between p-1.5 rounded bg-[var(--color-bg-elevated)] text-[11px] cursor-pointer hover:bg-[var(--color-bg-elevated)]/50 transition-colors"
+                  className="flex items-center justify-between p-1.5 rounded bg-[var(--color-bg-elevated)] text-df-sm cursor-pointer hover:bg-[var(--color-bg-elevated)]/50 transition-colors"
                 >
                   <div>
                     <span className="text-[var(--color-text-muted)] font-mono mr-2">Scene {idx + 1}</span>
