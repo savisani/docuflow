@@ -50,6 +50,8 @@ export interface ImageGenerationRequest {
   seed?: number;
   /** Progress callback for local generation */
   onProgress?: (progress: LocalGenerationProgress) => void;
+  /** If true, unload model from CUDA after generation (for scene generation) */
+  unloadAfter?: boolean;
 }
 
 export interface ImageGenerationResult {
@@ -83,6 +85,7 @@ export async function generateImage(
     height,
     seed,
     onProgress,
+    unloadAfter,
   } = req;
 
   if (!prompt.trim()) {
@@ -201,6 +204,7 @@ async function generateLocal(req: ImageGenerationRequest): Promise<ImageGenerati
     steps,
     seed,
     onProgress,
+    unloadAfter,
   } = req;
 
   if (!localModelPath) {
@@ -222,6 +226,7 @@ async function generateLocal(req: ImageGenerationRequest): Promise<ImageGenerati
       steps: steps || 10,
       seed,
       device,
+      unloadAfter,
     }, onProgress);
 
     if (!result.success || !result.path) {
@@ -488,6 +493,7 @@ export async function generateScenePair(
     width,
     height,
     seed,
+    unloadAfter: provider === 'local', // Unload model after background to free CUDA for person model
   });
 
   if (!bgResult.success || bgResult.images.length === 0) {

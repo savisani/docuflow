@@ -311,6 +311,10 @@ export const ImageGenerator: React.FC = () => {
         device: imageProvider === 'local' ? localDevice : undefined,
         width: imageProvider === 'local' ? preset.width : undefined,
         height: imageProvider === 'local' ? preset.height : undefined,
+        // Manual Image Generator: REUSE loaded model across consecutive
+        // generations. The user explicitly switches model in the dropdown
+        // (which triggers unload+load) or clicks the GPU unload button.
+        unloadAfter: false,
         onProgress: imageProvider === 'local' ? (p) => {
           if (p.type === 'progress' && p.percent !== undefined) {
             setLocalProgress({ percent: p.percent, message: `Generating... ${p.percent}%` });

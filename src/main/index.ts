@@ -14,6 +14,7 @@ import {
 } from './services/projectFolder'
 import { registerAssetIpc } from './ipc/assets'
 import { registerPipelineIpc } from './ipc/pipeline'
+import { getModelManager, ModelManagerRunner } from './modelManager'
 
 const ASSET_PROTOCOL = 'docuflow-asset'
 
@@ -263,6 +264,17 @@ function getModelsDir(): string {
   return join(process.resourcesPath, 'scripts/models')
 }
 
+function getScriptsBasePath(): string {
+  if (is.dev) {
+    return join(__dirname, '../../scripts')
+  }
+  return join(process.resourcesPath, 'scripts')
+}
+
+function getModelManagerInstance(): ModelManagerRunner {
+  return getModelManager(getScriptsBasePath())
+}
+
 function registerLocalModelManagerIpc(): void {
   // List installed local models
   ipcMain.handle('local-models:list', async () => {
@@ -345,7 +357,7 @@ function registerLocalModelManagerIpc(): void {
     return { success: true, path: selectedPath }
   })
 
-  // Generate image with progress (enhanced version)
+  // Generate image with progress (enhanced version — uses ModelManager for GPU exclusivity)
   ipcMain.handle('image:generate-local-enhanced', async (event, params: {
     prompt: string
     negativePrompt?: string
@@ -357,113 +369,109 @@ function registerLocalModelManagerIpc(): void {
     seed?: number
     device?: string
     generationId?: string
+    unloadAfter?: boolean
   }): Promise<{ success: boolean; path?: string; error?: string }> => {
-    return new Promise((resolve) => {
-      const scriptPath = getScriptPath()
-      const pythonPath = getPythonPath()
-      const genId = params.generationId || `gen-${Date.now()}`
+    const genId = params.generationId || `gen-${Date.now()}`
+    console.log(`[image-gen] ENHANCED genId=${genId} model=${params.modelPath} unloadAfter=${params.unloadAfter}`)
 
-      let resolvedOutputPath = params.outputPath
-      if (resolvedOutputPath.includes('%TEMP%')) {
-        resolvedOutputPath = resolvedOutputPath.replace(/%TEMP%/g, tmpdir())
+    let resolvedOutputPath = params.outputPath
+    if (resolvedOutputPath.includes('%TEMP%')) {
+      resolvedOutputPath = resolvedOutputPath.replace(/%TEMP%/g, tmpdir())
+    }
+
+    try {
+      const mgr = getModelManagerInstance()
+      mgr.setWindow(BrowserWindow.getAllWindows()[0])
+
+      // Load model (reuses if same model already loaded)
+      const loadResult = await mgr.loadModel(params.modelPath)
+      if (!loadResult.success) {
+        return { success: false, error: loadResult.error || 'Failed to load model' }
       }
 
-      const args = [
-        scriptPath, 'generate',
-        '--prompt', params.prompt,
-        '--output_path', resolvedOutputPath,
-        '--width', String(params.width),
-        '--height', String(params.height),
-        '--steps', String(params.steps || 10),
-        '--model_path', params.modelPath,
-        '--device', params.device || 'auto',
-        '--generation_id', genId,
-      ]
+      // Generate
+      const genResult = await mgr.generate({
+        prompt: params.prompt,
+        negativePrompt: params.negativePrompt,
+        width: params.width,
+        height: params.height,
+        steps: params.steps || 10,
+        seed: params.seed,
+        outputPath: resolvedOutputPath,
+        generationId: genId,
+      })
 
-      if (params.negativePrompt) {
-        args.push('--negative_prompt', params.negativePrompt)
+      // Unload after generation if requested (for scene generation: bg → unload → person)
+      if (params.unloadAfter && genResult.success) {
+        console.log(`[image-gen] Unloading model after generation (unloadAfter=true)`)
+        await mgr.unloadModel()
       }
 
-      if (params.seed !== undefined && params.seed >= 0) {
-        args.push('--seed', String(params.seed))
-      }
-
-      console.log(`[image-gen] SPAWN genId=${genId} python=${pythonPath} model=${params.modelPath}`)
-
-      const proc = spawn(pythonPath, args, {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 600000,
-      })
-
-      console.log(`[image-gen] PID=${proc.pid} genId=${genId}`)
-
-      let stdout = ''
-      let stderr = ''
-
-      proc.stdout.on('data', (data: Buffer) => {
-        const msg = data.toString()
-        stdout += msg
-        const lines = msg.trim().split('\n')
-        for (const line of lines) {
-          try {
-            const parsed = JSON.parse(line)
-            if (parsed.type === 'progress' || parsed.type === 'status' || parsed.type === 'log') {
-              event.sender.send('local-generation:progress', parsed)
-            }
-          } catch {}
-        }
-      })
-
-      proc.stderr.on('data', (data: Buffer) => {
-        stderr += data.toString()
-      })
-
-      proc.on('close', (code) => {
-        console.log(`[image-gen] CLOSE PID=${proc.pid} genId=${genId} code=${code}`)
-        if (code === 0) {
-          try {
-            const lastLine = stdout.trim().split('\n').pop() || '{}'
-            resolve(JSON.parse(lastLine))
-          } catch {
-            resolve({ success: false, error: 'Failed to parse output' })
-          }
-        } else {
-          let errorMsg = `Process exited with code ${code}`
-          try {
-            const errResult = JSON.parse(stderr.trim())
-            errorMsg = errResult.error || errorMsg
-          } catch {
-            if (stderr.trim()) errorMsg = stderr.trim().slice(0, 500)
-          }
-          resolve({ success: false, error: errorMsg })
-        }
-      })
-
-      proc.on('error', (err) => {
-        console.log(`[image-gen] ERROR PID=${proc.pid} genId=${genId} err=${err.message}`)
-        resolve({ success: false, error: `Failed to start Python: ${err.message}` })
-      })
-
-      // Store process reference for cancellation
-      const procGenId = genId
-      ;(global as any).__localGenProcesses = (global as any).__localGenProcesses || {}
-      ;(global as any).__localGenProcesses[procGenId] = proc
-
-      proc.on('close', () => {
-        delete (global as any).__localGenProcesses?.[procGenId]
-      })
-    })
+      return genResult
+    } catch (err) {
+      console.error(`[image-gen] ERROR genId=${genId}`, err)
+      return { success: false, error: err instanceof Error ? err.message : 'Generation failed' }
+    }
   })
 
   // Cancel ongoing generation
   ipcMain.handle('local-models:cancel-generation', async () => {
-    const processes = (global as any).__localGenProcesses || {}
-    for (const id of Object.keys(processes)) {
-      try {
-        processes[id].kill('SIGTERM')
-      } catch {}
-    }
+    // Unload the model and shutdown the worker — cancelled by the user.
+    try {
+      const mgr = getModelManagerInstance()
+      await mgr.shutdown('generation_cancelled', 'renderer:cancel-local-generation')
+    } catch {}
     return { success: true }
+  })
+
+  // Unload model from CUDA
+  ipcMain.handle('model:unload', async () => {
+    try {
+      const mgr = getModelManagerInstance()
+      return await mgr.unloadModel()
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Unload failed' }
+    }
+  })
+
+  // Switch model (unload previous, load new)
+  ipcMain.handle('model:switch', async (_event, params: { modelPath: string }) => {
+    try {
+      const mgr = getModelManagerInstance()
+      return await mgr.switchModel(params.modelPath)
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Switch failed' }
+    }
+  })
+
+  // Get model manager status
+  ipcMain.handle('model:status', async () => {
+    try {
+      const mgr = getModelManagerInstance()
+      return await mgr.getStatus()
+    } catch (err) {
+      return { loaded: false, error: err instanceof Error ? err.message : 'Status failed' }
+    }
+  })
+
+  // Begin batch session
+  ipcMain.handle('model:begin-batch', async (_event, params: { modelPath: string }) => {
+    try {
+      const mgr = getModelManagerInstance()
+      return await mgr.beginBatch(params.modelPath)
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Batch start failed' }
+    }
+  })
+
+  // End batch session
+  ipcMain.handle('model:end-batch', async () => {
+    try {
+      const mgr = getModelManagerInstance()
+      return await mgr.endBatch()
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Batch end failed' }
+    }
   })
 
   // Get detailed GPU/VRAM status
@@ -1256,8 +1264,16 @@ app.on('window-all-closed', () => {
 })
 
 // === APP SHUTDOWN CLEANUP ===
-// Kill all running Python generation processes on app quit
-function killAllPythonProcesses(): void {
+// Kill all running Python processes and shutdown model manager on app quit
+function killAllPythonProcesses(reason: 'user' | 'app_exit' | 'before_quit' = 'app_exit'): void {
+  // Shutdown model manager (unloads model, kills worker)
+  try {
+    const mgr = getModelManager(getScriptsBasePath())
+    // Fire-and-forget: app is quitting, no time to await
+    mgr.shutdown(reason, 'app-quit-cleanup').catch(() => {})
+  } catch {}
+
+  // Kill any remaining ad-hoc Python processes
   const processes = (global as any).__localGenProcesses || {}
   const ids = Object.keys(processes)
   if (ids.length > 0) {
@@ -1281,9 +1297,9 @@ function killAllPythonProcesses(): void {
 }
 
 app.on('before-quit', () => {
-  killAllPythonProcesses()
+  killAllPythonProcesses('before_quit')
 })
 
 app.on('will-quit', () => {
-  killAllPythonProcesses()
+  killAllPythonProcesses('app_exit')
 })

@@ -170,12 +170,34 @@ const docuflowAPI = {
     seed?: number
     device?: string
     generationId?: string
+    unloadAfter?: boolean
   }): Promise<{ success: boolean; path?: string; error?: string }> => {
     return ipcRenderer.invoke('image:generate-local-enhanced', params)
   },
 
   cancelLocalGeneration: (): Promise<{ success: boolean }> => {
     return ipcRenderer.invoke('local-models:cancel-generation')
+  },
+
+  // Model lifecycle management (GPU exclusivity)
+  unloadModel: (): Promise<{ success: boolean; action?: string; model?: string; vram?: any }> => {
+    return ipcRenderer.invoke('model:unload')
+  },
+
+  switchModel: (params: { modelPath: string }): Promise<{ success: boolean; action?: string; model?: string; vram?: any; error?: string }> => {
+    return ipcRenderer.invoke('model:switch', params)
+  },
+
+  getModelStatus: (): Promise<{ loaded: boolean; model?: string; dtype?: string; vram?: any; pid?: number }> => {
+    return ipcRenderer.invoke('model:status')
+  },
+
+  beginBatch: (params: { modelPath: string }): Promise<{ success: boolean; model?: string; vram?: any; error?: string }> => {
+    return ipcRenderer.invoke('model:begin-batch', params)
+  },
+
+  endBatch: (): Promise<{ success: boolean; action?: string; vram?: any; error?: string }> => {
+    return ipcRenderer.invoke('model:end-batch')
   },
 
   upscaleImage: (params: {

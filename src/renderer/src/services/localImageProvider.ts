@@ -40,6 +40,8 @@ export interface LocalGenerationRequest {
   seed?: number
   device?: 'auto' | 'gpu' | 'cpu' | 'directml'
   negativePrompt?: string
+  /** If true, unload model from CUDA after generation completes */
+  unloadAfter?: boolean
 }
 
 export interface LocalGenerationResult {
@@ -94,6 +96,15 @@ export async function generateLocalImage(
   let unsubscribe: (() => void) | undefined
   if (onProgress) {
     unsubscribe = window.docuflow.onLocalGenerationProgress((data) => {
+      // Handle model manager state changes
+      if (data.type === 'state-change') {
+        onProgress({ type: 'status', message: `Model: ${data.state}` })
+        return
+      }
+      if (data.type === 'vram') {
+        // VRAM update — don't forward as progress
+        return
+      }
       onProgress(data)
     })
   }
@@ -113,6 +124,7 @@ export async function generateLocalImage(
       seed: req.seed,
       device: req.device || 'auto',
       generationId,
+      unloadAfter: req.unloadAfter,
     })
 
     return result

@@ -121,6 +121,7 @@ docuflow-desktop/
 | **Top VRAM Status Bar** | ✅ Active | Persistent compact bar: active model badge, real-time VRAM usage pill |
 | **Interactive AI Chat** | ✅ Active | In-inspector chat input for direct Ollama model interaction, streaming responses, prompt tweaking |
 | **AI Image Generator** | ✅ Active | Cloudflare Workers + Local Stable Diffusion, provider selector, batch generation, regeneration workflow |
+| **Local GPU Diffusion Model Manager** | ✅ Active | Persistent Python worker (`scripts/model_manager.py`) enforcing GPU exclusivity, sequential CPU offload for 4GB hardware, full VRAM telemetry, idempotent shutdown with reason tags |
 | **Local GPU Whisper Transcriber** | ✅ Active | Python-based, supports tiny/base/small/medium/large-v3 |
 | **Asset Management** | ✅ Active | Drag-drop import, asset library, protocol-based local file serving |
 | **Video Preview (Remotion)** | ✅ Active | Real-time preview with playhead, track visibility toggles |
@@ -174,12 +175,31 @@ npm run build:linux  # Linux
 - Endpoint: `https://generativelanguage.googleapis.com/v1beta`
 - Structured JSON output via `responseMimeType`
 
+### Local Stable Diffusion (Persistent Model Manager)
+- Worker: `scripts/model_manager.py` — long-lived stdin/stdout JSON process, one pipeline on CUDA at any time.
+- IPC: `image:generate-local-enhanced`, `model:load|unload|switch|status|begin-batch|end-batch`, `local-models:cancel-generation`.
+- **VRAM strategy (GTX 1650 4GB):** every load calls `pipe.enable_sequential_cpu_offload()` after `.to("cuda")`. Components live on CPU and stream to GPU layer-by-layer during forward, so peak VRAM is one component at a time instead of the full pipeline.
+- **Dtype strategy:**
+  - SD1.5 (Diffusers, has only `.fp16.safetensors` variant files): loaded with `variant="fp16"` + `torch_dtype=torch.float32`. Weights are loaded into fp32 modules. Full fp16 produced NaN/black images on this checkpoint; full fp32 with offload produces valid images at the memory budget.
+  - RV6 (single-file `Realistic_Vision_V6.0_NV_B1_fp16.safetensors`): `torch_dtype=torch.float32`. RV6 fp16 weights produce NaN on the GTX 1650, so fp32 is required.
+- **VRAM telemetry:** `_vram_snapshot()` is called at `before-load`, `after-load`, `before-unload`, `after-unload`, `before-generate`, `after-generate`, `status`. Every snapshot logs `alloc / reserved / free / total` in GB and is forwarded to the renderer's `[model-manager][VRAM]` stream.
+- **Model exclusivity:** the worker holds at most one `StableDiffusionPipeline`. `load()` unloads the previous model first (logged as `action="unload-first"`). A GPU mutex serialises load/generate/unload in `ModelManagerRunner._withGPUMutex`.
+- **No startup preload:** `app.whenReady()` only registers IPC handlers; no diffusion model is loaded until the user clicks Generate. The renderer also never auto-loads.
+- **Shutdown reasons:** every shutdown call logs `reason=` and `caller=`. Possible reasons: `user`, `app_exit`, `before_quit`, `generation_cancelled`, `oom`, `error`, `worker_exit`. The Python worker logs `SHUTDOWN reason=... signal=...` on SIGTERM/SIGINT and `WORKER EXIT reason=...` on clean exit. Unexpected worker exits are detected (`UNEXPECTED WORKER EXIT`) and pending requests are rejected.
+- **Pre-generation headroom check:** `generate()` refuses to start if free VRAM is below 0.6 GB and returns a clear error message instead of letting the GPU OOM and Windows start heavy shared-memory swapping.
+- **`unloadAfter` semantics:**
+  - Manual Image Generator (`ImageGenerator.handleGenerate`) → `unloadAfter: false`. The loaded model is **reused** for subsequent generations until the user changes model or clicks the GPU unload button.
+  - Manual Scene Generator background phase (`imageGenerationService.generateScenePair`) → `unloadAfter: true` when the local provider is selected. Background is generated, saved, unloaded, then RV6 (if user picked a different model) loads for the person phase.
+  - Batch mode (`ModelManagerRunner.beginBatch`/`endBatch`) keeps the same model across the batch; `endBatch` unloads.
+- **Legacy one-shot loader:** `scripts/generate_local.py` is retained only for the legacy `image:generate-local` IPC path (one-shot process, exits when done). New code uses `model_manager.py`.
+
 ---
 
 ## Change Ledger
 
 | Date | Change | Files |
 |------|--------|-------|
+| 2026-09-03 | **Local Diffusion VRAM Lifecycle Fix** — Root cause: `from_pretrained(variant="fp16")` on the local SD1.5 directory was loading fp16 weight files into fp32 module parameters, producing a ~4 GB steady-state VRAM footprint on a 4 GB GPU. Fix: (1) load with `variant="fp16"` + `torch_dtype=torch.float32` so weights land in fp32 modules; (2) **always** call `pipe.enable_sequential_cpu_offload()` so components live on CPU and stream to GPU layer-by-layer. Peak VRAM after load dropped from **4.00 GB → 0.00 GB** on a 4 GB GTX 1650. (3) Added explicit shutdown reasons (`user`/`app_exit`/`generation_cancelled`/`oom`/`worker_exit`/`error`) propagated to both the Python worker and the TS runner; `ModelManagerRunner.shutdown()` is idempotent and rejects in-flight requests on unexpected worker exit. (4) `unloadAfter=undefined` was an ambiguity: the manual `ImageGenerator.handleGenerate` now explicitly passes `unloadAfter: false` (reuse loaded model) and the comment documents the intended lifecycle. Scene-generator background phase still passes `unloadAfter: true` to swap models between background and person. (5) Added a pre-generation VRAM headroom check that fails gracefully below 0.6 GB free instead of OOMing the GPU. Verified runtime: SD1.5 512x512 6-step generation now completes in ~27s producing valid images (mean=141), and switching SD1.5 → RV6 logs `action="unload-first"` and releases VRAM before the next load. | `scripts/model_manager.py`, `src/main/modelManager.ts`, `src/main/index.ts`, `src/renderer/src/components/generator/ImageGenerator.tsx` |
 | 2026-09-01 | **Tab Switching Fix** — Changed from conditional rendering (ternary) to CSS `display:contents`/`none` so all three tab components render simultaneously, hidden via CSS. State now persists across tab switches. | `App.tsx`, `store.ts`, `EditorLayout.tsx` |
 | 2026-09-01 | **Transcription Progress** — Added `transcriptionStep`, `transcriptionStepLabel`, `transcriptionStartedAt` to Zustand store. Centralized transcription progress state. VoiceoverPanel shows real elapsed time instead of fake percentage. | `store.ts`, `VoiceoverPanel.tsx` |
 | 2026-09-01 | **AI Chat Provider Abstraction** — Added `chatWithProvider()` function that works with Ollama, OpenRouter, and Gemini. Chat UI now supports all providers with provider/model selector. | `aiService.ts`, `ThinkingInspector.tsx`, `SceneGenerator.tsx` |

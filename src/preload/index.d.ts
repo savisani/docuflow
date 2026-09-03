@@ -68,8 +68,14 @@ export interface DocuFlowAPI {
     seed?: number
     device?: string
     generationId?: string
+    unloadAfter?: boolean
   }): Promise<{ success: boolean; path?: string; error?: string }>
   cancelLocalGeneration(): Promise<{ success: boolean }>
+  unloadModel(): Promise<{ success: boolean; action?: string; model?: string; vram?: any }>
+  switchModel(params: { modelPath: string }): Promise<{ success: boolean; action?: string; model?: string; vram?: any; error?: string }>
+  getModelStatus(): Promise<{ loaded: boolean; model?: string; dtype?: string; vram?: any; pid?: number }>
+  beginBatch(params: { modelPath: string }): Promise<{ success: boolean; model?: string; vram?: any; error?: string }>
+  endBatch(): Promise<{ success: boolean; action?: string; vram?: any; error?: string }>
   upscaleImage(params: {
     inputPath: string;
     outputPath: string;
