@@ -565,12 +565,17 @@ export const SceneGenerator: React.FC = () => {
   // -----------------------------------------------------------------------
 
   const handleBuildTimeline = useCallback(async () => {
-    if (scenes.length === 0) return;
+    console.log('[DEBUG handleBuildTimeline] START', { scenesLength: scenes.length, scenes: JSON.stringify(scenes.map(s => ({ sceneId: s.sceneId, status: s.status, imageUrl: s.imageUrl, imageId: s.imageId }))) });
+    if (scenes.length === 0) {
+      console.log('[DEBUG handleBuildTimeline] early return: scenes.length === 0');
+      return;
+    }
     setBuildingTimeline(true);
 
     try {
       const store = useDocuFlowStore.getState();
       const currentAssets = store.assets;
+      console.log('[DEBUG handleBuildTimeline] currentAssets count:', currentAssets.length);
       const sceneImages = new Map<number, string>();
       const completedScenes: StoryboardScene[] = [];
 
@@ -580,6 +585,7 @@ export const SceneGenerator: React.FC = () => {
           completedScenes.push(sc);
         }
       }
+      console.log('[DEBUG handleBuildTimeline] completedScenes:', completedScenes.length, JSON.stringify(completedScenes.map(s => ({ sceneId: s.sceneId, imageId: s.imageId }))));
 
       if (completedScenes.length === 0) {
         setToast({ message: 'No completed scenes available to build.', type: 'error' });
@@ -639,11 +645,15 @@ export const SceneGenerator: React.FC = () => {
           });
         }
       }
+      console.log('[DEBUG handleBuildTimeline] assetMapByLogicalId:', Array.from(assetMapByLogicalId.entries()));
+      console.log('[DEBUG handleBuildTimeline] compiled.assetMap:', Array.from(compiled.assetMap.entries()));
+      console.log('[DEBUG handleBuildTimeline] compiled.allCommands count:', compiled.allCommands.length);
 
       // Build commands using existing assets
       const newCommands: Command[] = [];
       for (const cmd of compiled.allCommands) {
         const logicalId = (cmd as any).asset;
+        console.log('[DEBUG handleBuildTimeline] processing cmd.asset:', logicalId, 'assetMapByLogicalId.has(logicalId):', assetMapByLogicalId.has(logicalId));
         if (logicalId && assetMapByLogicalId.has(logicalId)) {
           const { assetId } = assetMapByLogicalId.get(logicalId)!;
           newCommands.push({
@@ -653,6 +663,7 @@ export const SceneGenerator: React.FC = () => {
           } as Command);
         }
       }
+      console.log('[DEBUG handleBuildTimeline] newCommands:', newCommands.length);
 
       // Commit to store (only commands, since assets already exist)
       store.beginBatch();
