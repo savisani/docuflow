@@ -764,33 +764,54 @@ export const SceneGenerator: React.FC = () => {
 
       const compiled = compileSceneDSL(dslScenes, context, sceneImages);
 
-      const newAssets: Asset[] = [];
+      // Get fresh assets from store (includes assets created by generateImage)
+      const freshAssets = useDocuFlowStore.getState().assets;
+
+      // Map scene.imageId to existing asset for correct logicalId lookup
+      const assetByImageId = new Map<string, Asset>();
+      for (const asset of freshAssets) {
+        if (asset.id) {
+          assetByImageId.set(asset.id, asset);
+        }
+      }
+
+      // Build assetMap using existing assets (created by generateImage)
+      // This ensures logicalId matches what findAsset expects
+      const assetMapByFilename = new Map<string, { logicalId: string; assetId: string }>();
       for (const [filename, assetInfo] of compiled.assetMap) {
         const sceneIdx = parseInt(filename.replace('scene-', '').replace('.png', ''), 10) - 1;
         const sc = completedScenes[sceneIdx];
         if (!sc?.imageUrl) continue;
 
-        newAssets.push({
-          id: uuidv4(),
-          logicalId: assetInfo.logicalId,
-          filename,
-          type: 'image',
-          mimeType: 'image/png',
-          url: sc.imageUrl,
-        });
+        // Find the existing asset created by generateImage
+        const existingAsset = assetByImageId.get(sc.imageId);
+        if (existingAsset) {
+          assetMapByFilename.set(filename, {
+            logicalId: existingAsset.logicalId,
+            assetId: existingAsset.id,
+          });
+        }
       }
 
-      const newCommands: Command[] = compiled.allCommands.map((cmd) => ({
-        ...cmd,
-        id: uuidv4(),
-      })) as Command[];
+      // Build commands using existing assets
+      const newCommands: Command[] = [];
+      for (const cmd of compiled.allCommands) {
+        const filename = (cmd as any).asset || (cmd as any).image;
+        if (filename && assetMapByFilename.has(filename)) {
+          const { logicalId } = assetMapByFilename.get(filename)!;
+          newCommands.push({
+            ...cmd,
+            id: uuidv4(),
+            asset: logicalId,
+          } as Command);
+        }
+      }
 
       store.beginBatch();
-      newAssets.forEach((a) => store.addAsset(a));
       newCommands.forEach((c) => store.addCommand(c));
       store.endBatch();
 
-      setToast({ message: `Generate + Build complete: ${newAssets.length} scenes, ${newCommands.length} commands`, type: 'success' });
+      setToast({ message: `Generate + Build complete: ${assetMapByFilename.size} scenes, ${newCommands.length} commands`, type: 'success' });
       setActiveTab('studio');
     } catch (err) {
       setToast({ message: `Generate + Build failed: ${err instanceof Error ? err.message : String(err)}`, type: 'error' });
