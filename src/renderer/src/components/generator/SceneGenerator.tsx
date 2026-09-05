@@ -684,6 +684,7 @@ export const SceneGenerator: React.FC = () => {
   // -----------------------------------------------------------------------
 
   const handleGenerateAndBuild = useCallback(async () => {
+    console.log('[DEBUG handleGenerateAndBuild] START', { scenesLength: scenes.length });
     if (scenes.length === 0) return;
     setGenerateAndBuildRunning(true);
 
@@ -691,6 +692,7 @@ export const SceneGenerator: React.FC = () => {
       // Phase 1: Generate images
       setGeneratingAll(true);
       const updated = [...scenes];
+      console.log('[DEBUG handleGenerateAndBuild] Starting image generation for', updated.length, 'scenes');
 
       for (let i = 0; i < updated.length; i++) {
         if (updated[i].status === 'done') {
@@ -733,6 +735,7 @@ export const SceneGenerator: React.FC = () => {
 
       // Phase 2: Verify completed scenes
       const completedScenes: StoryboardScene[] = updated.filter((s) => s.status === 'done' && s.imageUrl);
+      console.log('[DEBUG handleGenerateAndBuild] Phase 2: completedScenes count:', completedScenes.length, JSON.stringify(completedScenes.map(s => ({ sceneId: s.sceneId, imageId: s.imageId, imageUrl: s.imageUrl }))));
       if (completedScenes.length === 0) {
         setToast({ message: 'No completed scenes to build timeline.', type: 'error' });
         return;
@@ -746,6 +749,7 @@ export const SceneGenerator: React.FC = () => {
       for (const sc of completedScenes) {
         sceneImages.set(sc.sceneId - 1, `scene-${sc.sceneId}.png`);
       }
+      console.log('[DEBUG handleGenerateAndBuild] sceneImages map:', Array.from(sceneImages.entries()));
 
       const dslScenes: SceneDSL[] = completedScenes.map((sc) => ({
         text: sc.transcriptChunk,
@@ -778,9 +782,12 @@ export const SceneGenerator: React.FC = () => {
       };
 
       const compiled = compileSceneDSL(dslScenes, context, sceneImages);
+      console.log('[DEBUG handleGenerateAndBuild] compiled.assetMap:', Array.from(compiled.assetMap.entries()));
+      console.log('[DEBUG handleGenerateAndBuild] compiled.allCommands count:', compiled.allCommands.length);
 
       // Get fresh assets from store (includes assets created by generateImage)
       const freshAssets = useDocuFlowStore.getState().assets;
+      console.log('[DEBUG handleGenerateAndBuild] freshAssets count:', freshAssets.length, 'image assets:', freshAssets.filter(a => a.type === 'image').length);
 
       // Map scene.imageId to existing asset for correct logicalId lookup
       const assetByImageId = new Map<string, Asset>();
@@ -789,17 +796,21 @@ export const SceneGenerator: React.FC = () => {
           assetByImageId.set(asset.id, asset);
         }
       }
+      console.log('[DEBUG handleGenerateAndBuild] assetByImageId keys:', Array.from(assetByImageId.keys()));
 
       // Build assetMap using existing assets (created by generateImage)
       // Key by logicalId since command's asset field is the logicalId
       const assetMapByLogicalId = new Map<string, { logicalId: string; assetId: string }>();
       for (const [filename, assetInfo] of compiled.assetMap) {
         const sceneIdx = parseInt(filename.replace('scene-', '').replace('.png', ''), 10) - 1;
+        console.log('[DEBUG handleGenerateAndBuild] parsing filename:', filename, '-> sceneIdx:', sceneIdx);
         const sc = completedScenes[sceneIdx];
+        console.log('[DEBUG handleGenerateAndBuild] completedScenes[', sceneIdx, ']:', sc ? { sceneId: sc.sceneId, imageId: sc.imageId } : 'UNDEFINED');
         if (!sc?.imageUrl) continue;
 
         // Find the existing asset created by generateImage
         const existingAsset = assetByImageId.get(sc.imageId);
+        console.log('[DEBUG handleGenerateAndBuild] looking for asset with id:', sc.imageId, '-> found:', !!existingAsset, existingAsset ? { id: existingAsset.id, logicalId: existingAsset.logicalId } : null);
         if (existingAsset) {
           // Key by logicalId so command's asset lookup works
           assetMapByLogicalId.set(assetInfo.logicalId, {
@@ -808,6 +819,7 @@ export const SceneGenerator: React.FC = () => {
           });
         }
       }
+      console.log('[DEBUG handleGenerateAndBuild] assetMapByLogicalId:', Array.from(assetMapByLogicalId.entries()));
 
       // Build commands using existing assets
       const newCommands: Command[] = [];
@@ -822,6 +834,7 @@ export const SceneGenerator: React.FC = () => {
           } as Command);
         }
       }
+      console.log('[DEBUG handleGenerateAndBuild] newCommands:', newCommands.length);
 
       store.beginBatch();
       newCommands.forEach((c) => store.addCommand(c));
