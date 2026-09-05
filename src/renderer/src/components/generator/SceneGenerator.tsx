@@ -620,9 +620,9 @@ export const SceneGenerator: React.FC = () => {
 
       const compiled = compileSceneDSL(dslScenes, context, sceneImages);
 
-      // Map compiled assets to DocuFlow Asset objects
-      // Use existing generated assets instead of creating new ones to preserve filePath
-      const assetMapByFilename = new Map<string, { logicalId: string; assetId: string }>();
+      // Map compiler logicalId to existing asset
+      // The command's asset field is the logicalId (e.g., 'image1'), not filename
+      const assetMapByLogicalId = new Map<string, { logicalId: string; assetId: string }>();
 
       for (const [filename, assetInfo] of compiled.assetMap) {
         const sceneIdx = parseInt(filename.replace('scene-', '').replace('.png', ''), 10) - 1;
@@ -632,20 +632,24 @@ export const SceneGenerator: React.FC = () => {
         // Find the existing generated asset by imageId
         const existingAsset = currentAssets.find(a => a.id === sc.imageId);
         if (existingAsset) {
-          assetMapByFilename.set(filename, { logicalId: assetInfo.logicalId, assetId: existingAsset.id });
+          // Key by logicalId so command's asset lookup works
+          assetMapByLogicalId.set(assetInfo.logicalId, {
+            logicalId: assetInfo.logicalId,
+            assetId: existingAsset.id,
+          });
         }
       }
 
       // Build commands using existing assets
       const newCommands: Command[] = [];
       for (const cmd of compiled.allCommands) {
-        const filename = (cmd as any).asset || (cmd as any).image;
-        if (filename && assetMapByFilename.has(filename)) {
-          const { assetId, logicalId } = assetMapByFilename.get(filename)!;
+        const logicalId = (cmd as any).asset;
+        if (logicalId && assetMapByLogicalId.has(logicalId)) {
+          const { assetId } = assetMapByLogicalId.get(logicalId)!;
           newCommands.push({
             ...cmd,
             id: uuidv4(),
-            asset: logicalId,
+            asset: assetId,  // Use the actual asset ID for proper resolution
           } as Command);
         }
       }
@@ -776,8 +780,8 @@ export const SceneGenerator: React.FC = () => {
       }
 
       // Build assetMap using existing assets (created by generateImage)
-      // This ensures logicalId matches what findAsset expects
-      const assetMapByFilename = new Map<string, { logicalId: string; assetId: string }>();
+      // Key by logicalId since command's asset field is the logicalId
+      const assetMapByLogicalId = new Map<string, { logicalId: string; assetId: string }>();
       for (const [filename, assetInfo] of compiled.assetMap) {
         const sceneIdx = parseInt(filename.replace('scene-', '').replace('.png', ''), 10) - 1;
         const sc = completedScenes[sceneIdx];
@@ -786,7 +790,8 @@ export const SceneGenerator: React.FC = () => {
         // Find the existing asset created by generateImage
         const existingAsset = assetByImageId.get(sc.imageId);
         if (existingAsset) {
-          assetMapByFilename.set(filename, {
+          // Key by logicalId so command's asset lookup works
+          assetMapByLogicalId.set(assetInfo.logicalId, {
             logicalId: existingAsset.logicalId,
             assetId: existingAsset.id,
           });
@@ -796,13 +801,13 @@ export const SceneGenerator: React.FC = () => {
       // Build commands using existing assets
       const newCommands: Command[] = [];
       for (const cmd of compiled.allCommands) {
-        const filename = (cmd as any).asset || (cmd as any).image;
-        if (filename && assetMapByFilename.has(filename)) {
-          const { logicalId } = assetMapByFilename.get(filename)!;
+        const logicalId = (cmd as any).asset;
+        if (logicalId && assetMapByLogicalId.has(logicalId)) {
+          const { assetId } = assetMapByLogicalId.get(logicalId)!;
           newCommands.push({
             ...cmd,
             id: uuidv4(),
-            asset: logicalId,
+            asset: assetId,  // Use the actual asset ID for proper resolution
           } as Command);
         }
       }
@@ -811,7 +816,7 @@ export const SceneGenerator: React.FC = () => {
       newCommands.forEach((c) => store.addCommand(c));
       store.endBatch();
 
-      setToast({ message: `Generate + Build complete: ${assetMapByFilename.size} scenes, ${newCommands.length} commands`, type: 'success' });
+      setToast({ message: `Generate + Build complete: ${assetMapByLogicalId.size} scenes, ${newCommands.length} commands`, type: 'success' });
       setActiveTab('studio');
     } catch (err) {
       setToast({ message: `Generate + Build failed: ${err instanceof Error ? err.message : String(err)}`, type: 'error' });
