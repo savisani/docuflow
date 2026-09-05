@@ -1,9 +1,9 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Wand2, Upload, FileText, Mic, Loader2, X, CheckCircle, AlertCircle,
-  Film, Clock, Image as ImageIcon, Clapperboard, Sparkles,
+  Film, Clock, Image as ImageIcon, Clapperboard, Sparkles, Play,
   Trash2, Settings, Globe, Key, ChevronDown, ChevronRight,
-  Brain, ArrowDownToLine, MonitorDot, Cpu, Zap,
+  Brain, ArrowDownToLine, MonitorDot, Cpu, Zap, Flower,
 } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { Button } from '../ui';
@@ -12,7 +12,7 @@ import { Asset } from '../../types/assets';
 import { Command } from '../../engine/commands/types';
 import { compileSceneDSL, type SceneDSL, type CompileContext } from '../../engine/sceneDSL';
 import { CLOUDFLARE_MODELS, CloudflareConfig } from '../../utils/cloudflareApi';
-import { NIM_MODELS, NIM_DEFAULT_MODEL, NimConfig, loadNimConfig, saveNimConfig, NimModelId } from '../../utils/nvidiaNimApi';
+import { POLLINATIONS_MODELS, PollinationsConfig } from '../../utils/pollinationsApi';
 import { generateImage, type ImageProvider } from '../../services/imageGenerationService';
 import { listLocalModels, detectHardware, type LocalModel, type LocalHardware } from '../../services/localImageProvider';
 import { extractErrorMessage } from '../../../../core/errors';
@@ -57,6 +57,7 @@ interface TranscriptionResult {
 interface StoryboardScene extends SceneItem {
   status: 'pending' | 'generating' | 'done' | 'error';
   imageUrl?: string;
+  imageId?: string;
   error?: string;
 }
 
@@ -70,6 +71,18 @@ function loadCloudflareConfig(): CloudflareConfig {
     if (stored) return JSON.parse(stored);
   } catch {}
   return { workerUrl: '' };
+}
+
+function loadPollinationsConfig(): PollinationsConfig {
+  try {
+    const stored = localStorage.getItem('docuflow-pollinations-config');
+    if (stored) return JSON.parse(stored);
+  } catch {}
+  return { apiKey: '' };
+}
+
+function savePollinationsConfig(config: PollinationsConfig) {
+  localStorage.setItem('docuflow-pollinations-config', JSON.stringify(config));
 }
 
 function loadAdvancedSettings(): { model: string; steps: number } {
@@ -118,7 +131,7 @@ const CAMERA_MOTIONS = [
 // ---------------------------------------------------------------------------
 
 export const SceneGenerator: React.FC = () => {
-  const { addAsset, addCommand, setActiveTab } = useDocuFlowStore();
+  const { addAsset, addCommand, setActiveTab, projectPath, scenes: storeScenes, setScenes: setStoreScenes, assets, setVoiceover, setTranscript, voiceover: storeVoiceover, transcript: storeTranscript } = useDocuFlowStore();
 
   // -- Audio file --
   const [audioFilePath, setAudioFilePath] = useState('');
@@ -135,6 +148,89 @@ export const SceneGenerator: React.FC = () => {
   const [scenes, setScenes] = useState<StoryboardScene[]>([]);
   const [breakingScenes, setBreakingScenes] = useState(false);
   const [sceneError, setSceneError] = useState<string | null>(null);
+
+  // Ref to prevent infinite loop between store sync and local sync
+  // When Effect 1 syncs store → local, Effect 2 should NOT sync local → store
+  const isRestoringRef = useRef(false);
+
+  // Sync scenes from store when project is loaded (storeScenes changes)
+  // Also handles New Project clearing by checking projectPath
+  useEffect(() => {
+    const shouldSync = storeScenes.length > 0 || scenes.length === 0 ||
+      (projectPath === null && scenes.length > 0);
+    if (shouldSync) {
+      const scenesWithUrls = storeScenes.map(scene => {
+        if (scene.imageId && !scene.imageUrl) {
+          const asset = assets.find(a => a.id === scene.imageId);
+          return {
+            ...scene,
+            imageUrl: asset?.url || scene.imageUrl,
+          };
+        }
+        return scene;
+      });
+      isRestoringRef.current = true;
+      setScenes(scenesWithUrls);
+    }
+  }, [storeScenes, assets, projectPath]);
+
+  // Sync scenes to store when local scenes change
+  // Skip if the change was caused by Effect 1 (store → local sync)
+  useEffect(() => {
+    if (scenes.length > 0) {
+      if (isRestoringRef.current) {
+        isRestoringRef.current = false;
+        return;
+      }
+      setStoreScenes(scenes);
+    }
+  }, [scenes, setStoreScenes]);
+
+  // Reset derived AI Scene Generator state when New Project is called
+  // Audio file path is PRESERVED so user can re-transcribe without re-importing
+  useEffect(() => {
+    if (projectPath === null) {
+      setTranscription(null);
+      setTranscriptionError(null);
+      setSceneError(null);
+    }
+  }, [projectPath]);
+
+  // Sync audioFilePath from store voiceover asset when project is loaded
+  // This ensures the SceneGenerator has the correct audio file path after loading
+  useEffect(() => {
+    if (storeVoiceover && assets.length > 0) {
+      const voiceoverAsset = assets.find(a => a.id === storeVoiceover.assetId);
+      if (voiceoverAsset?.filePath && voiceoverAsset.filePath !== audioFilePath) {
+        setAudioFilePath(voiceoverAsset.filePath);
+        setAudioFileName(voiceoverAsset.filename);
+      }
+    }
+  }, [storeVoiceover, assets, audioFilePath]);
+
+  // Sync transcription from store transcript when project is loaded
+  // This ensures the SceneGenerator has the transcript after loading a saved project
+  useEffect(() => {
+    if (storeTranscript?.segments?.length > 0 && !transcription) {
+      setTranscription({
+        success: true,
+        text: storeTranscript.text,
+        segments: storeTranscript.segments.map(s => ({
+          id: Number(s.id) || 0,
+          start: s.start,
+          end: s.end,
+          text: s.text,
+          words: s.words?.map(w => ({
+            word: w.text,
+            start: w.start,
+            end: w.end,
+            probability: 1,
+          })),
+        })),
+        language: storeTranscript.language,
+      });
+    }
+  }, [storeTranscript, transcription]);
 
   // -- AI Inspector state --
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -161,16 +257,17 @@ export const SceneGenerator: React.FC = () => {
 
   // -- Step 3: Batch generation --
   const [generatingAll, setGeneratingAll] = useState(false);
+  const [buildingTimeline, setBuildingTimeline] = useState(false);
+  const [generateAndBuildRunning, setGenerateAndBuildRunning] = useState(false);
 
   // -- Cloudflare config (for image generation) --
   const [cloudflareConfig] = useState<CloudflareConfig>(loadCloudflareConfig);
+  const [pollinationsConfig] = useState<PollinationsConfig>(loadPollinationsConfig);
   const [advancedSettings] = useState(loadAdvancedSettings);
 
-  // -- NVIDIA NIM config (for image generation) --
-  const [nimConfig] = useState<NimConfig>(loadNimConfig);
-  const [nimModel] = useState<NimModelId>(() => {
-    const stored = localStorage.getItem('docuflow-scene-nim-model');
-    return (stored as NimModelId) || NIM_DEFAULT_MODEL;
+  // -- Pollinations model state --
+  const [pollinationsModel, setPollinationsModel] = useState<string>(() => {
+    return localStorage.getItem('docuflow-scene-pollinations-model') || 'flux';
   });
 
   // -- Image provider selection --
@@ -204,7 +301,9 @@ export const SceneGenerator: React.FC = () => {
   const step2Done = scenes.length > 0;
   const canTranscribe = audioFilePath && !transcribing;
   const canBreakScenes = step1Done && !breakingScenes;
-  const canGenerateAll = step2Done && scenes.some((s) => s.status !== 'done') && !generatingAll;
+  const canGenerateAll = step2Done && scenes.some((s) => s.status !== 'done') && !generatingAll && !buildingTimeline && !generateAndBuildRunning;
+  const canBuildTimeline = step2Done && scenes.some((s) => s.status === 'done') && !generatingAll && !buildingTimeline && !generateAndBuildRunning;
+  const canGenerateAndBuild = step2Done && scenes.some((s) => s.status !== 'done') && !generatingAll && !buildingTimeline && !generateAndBuildRunning;
 
   // -----------------------------------------------------------------------
   // Step 1: Transcribe Audio
@@ -219,11 +318,26 @@ export const SceneGenerator: React.FC = () => {
         setTranscription(null);
         setTranscriptionError(null);
         setScenes([]);
+
+        const url = (window as any).docuflow.filePathToAssetUrl(result.filePath);
+        const logicalId = `audio${assets.filter(a => a.type === 'audio').length + 1}`;
+        const newAsset: Asset = {
+          id: uuidv4(),
+          logicalId,
+          filename: result.filePath.split(/[/\\]/).pop() || 'audio.mp3',
+          type: 'audio',
+          mimeType: 'audio/mpeg',
+          url,
+          filePath: result.filePath,
+          audioRole: 'voiceover',
+        };
+        addAsset(newAsset);
+        setVoiceover({ assetId: newAsset.id, language: 'auto' });
       }
     } catch (err) {
       console.error('Failed to select file:', err);
     }
-  }, []);
+  }, [assets, addAsset, setVoiceover]);
 
   const handleTranscribe = useCallback(async () => {
     if (!audioFilePath) return;
@@ -240,6 +354,23 @@ export const SceneGenerator: React.FC = () => {
       if (result.success) {
         setTranscription(result);
         setToast({ message: `Transcription complete: ${result.segments?.length ?? 0} segments`, type: 'success' });
+
+        const storeTranscript = {
+          language: result.language || 'auto',
+          text: result.text || '',
+          segments: (result.segments || []).map((s) => ({
+            id: String(s.id),
+            text: s.text,
+            start: s.start,
+            end: s.end,
+            words: s.words?.map((w) => ({
+              text: w.word,
+              start: w.start,
+              end: w.end,
+            })),
+          })),
+        };
+        setTranscript(storeTranscript);
       } else {
         setTranscriptionError(extractErrorMessage(result.error, 'Transcription failed'));
       }
@@ -248,7 +379,7 @@ export const SceneGenerator: React.FC = () => {
     } finally {
       setTranscribing(false);
     }
-  }, [audioFilePath, whisperModel]);
+  }, [audioFilePath, whisperModel, setTranscript]);
 
   // -----------------------------------------------------------------------
   // Step 2: AI Scene Breakdown
@@ -350,22 +481,23 @@ export const SceneGenerator: React.FC = () => {
 
     try {
       const result = await generateImage({
-prompt: scene.imagePrompt,
-          negativePrompt: negativePrompt || undefined,
-          source: 'scene-generator',
-          sceneId: String(sceneId),
-          provider: imageProvider,
-          cloudflareConfig: imageProvider === 'cloudflare' ? cloudflareConfig : undefined,
-          nimConfig: imageProvider === 'nvidia-nim' ? nimConfig : undefined,
-          model: imageProvider === 'nvidia-nim' ? nimModel : advancedSettings.model,
-          steps: advancedSettings.steps,
-          localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
-          device: imageProvider === 'local' ? localDevice : undefined,
-          unloadAfter: false,
+        prompt: scene.imagePrompt,
+        negativePrompt: negativePrompt || undefined,
+        source: 'scene-generator',
+        sceneId: String(sceneId),
+        provider: imageProvider,
+        cloudflareConfig: imageProvider === 'cloudflare' ? cloudflareConfig : undefined,
+        pollinationsConfig: imageProvider === 'pollinations' ? pollinationsConfig : undefined,
+        model: imageProvider === 'pollinations' ? pollinationsModel : advancedSettings.model,
+        steps: advancedSettings.steps,
+        localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
+        device: imageProvider === 'local' ? localDevice : undefined,
+        unloadAfter: false,
+        projectPath,
       });
 
       if (result.success && result.images.length > 0) {
-        updated[idx] = { ...scene, status: 'done', imageUrl: result.images[0].url };
+        updated[idx] = { ...scene, status: 'done', imageUrl: result.images[0].url, imageId: result.images[0].id };
       } else {
         updated[idx] = { ...scene, status: 'error', error: result.error || 'Failed' };
       }
@@ -374,13 +506,13 @@ prompt: scene.imagePrompt,
     }
 
     setScenes([...updated]);
-  }, [scenes, negativePrompt, imageProvider, cloudflareConfig, nimConfig, nimModel, advancedSettings, selectedLocalModel, localDevice]);
+  }, [scenes, negativePrompt, imageProvider, cloudflareConfig, pollinationsConfig, pollinationsModel, advancedSettings, selectedLocalModel, localDevice, projectPath]);
 
   // -----------------------------------------------------------------------
-  // Step 3: Batch generate all
+  // Step 3a: Generate images only
   // -----------------------------------------------------------------------
 
-  const handleGenerateAll = useCallback(async () => {
+  const handleGenerateImages = useCallback(async () => {
     if (scenes.length === 0) return;
     setGeneratingAll(true);
 
@@ -402,16 +534,17 @@ prompt: scene.imagePrompt,
           sceneId: String(updated[i].sceneId),
           provider: imageProvider,
           cloudflareConfig: imageProvider === 'cloudflare' ? cloudflareConfig : undefined,
-          nimConfig: imageProvider === 'nvidia-nim' ? nimConfig : undefined,
-          model: imageProvider === 'nvidia-nim' ? nimModel : advancedSettings.model,
+          pollinationsConfig: imageProvider === 'pollinations' ? pollinationsConfig : undefined,
+          model: imageProvider === 'pollinations' ? pollinationsModel : advancedSettings.model,
           steps: advancedSettings.steps,
           localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
           device: imageProvider === 'local' ? localDevice : undefined,
           unloadAfter: false,
+          projectPath,
         });
 
         if (result.success && result.images.length > 0) {
-          updated[i] = { ...updated[i], status: 'done', imageUrl: result.images[0].url };
+          updated[i] = { ...updated[i], status: 'done', imageUrl: result.images[0].url, imageId: result.images[0].id };
         } else {
           updated[i] = { ...updated[i], status: 'error', error: result.error || 'Failed' };
         }
@@ -422,14 +555,26 @@ prompt: scene.imagePrompt,
       setScenes([...updated]);
     }
 
-    // Assemble timeline using Scene DSL compiler
+    const doneCount = updated.filter((s) => s.status === 'done').length;
+    setToast({ message: `Image generation complete: ${doneCount}/${updated.length} scenes`, type: doneCount > 0 ? 'success' : 'error' });
+    setGeneratingAll(false);
+  }, [scenes, negativePrompt, imageProvider, cloudflareConfig, pollinationsConfig, pollinationsModel, advancedSettings, selectedLocalModel, localDevice, projectPath]);
+
+  // -----------------------------------------------------------------------
+  // Step 3b: Build timeline from completed scenes
+  // -----------------------------------------------------------------------
+
+  const handleBuildTimeline = useCallback(async () => {
+    if (scenes.length === 0) return;
+    setBuildingTimeline(true);
+
     try {
       const store = useDocuFlowStore.getState();
       const currentAssets = store.assets;
       const sceneImages = new Map<number, string>();
       const completedScenes: StoryboardScene[] = [];
 
-      for (const sc of updated) {
+      for (const sc of scenes) {
         if (sc.status === 'done' && sc.imageUrl) {
           sceneImages.set(sc.sceneId - 1, `scene-${sc.sceneId}.png`);
           completedScenes.push(sc);
@@ -437,7 +582,7 @@ prompt: scene.imagePrompt,
       }
 
       if (completedScenes.length === 0) {
-        setToast({ message: 'No completed scenes to build timeline', type: 'error' });
+        setToast({ message: 'No completed scenes available to build.', type: 'error' });
         return;
       }
 
@@ -456,7 +601,6 @@ prompt: scene.imagePrompt,
 
       // Use compiler to generate commands with proper motion animations
       const fps = store.settings.fps || 30;
-      // Prefer explicit audio duration from transcription result, then transcript segment end, then undefined
       const totalAudioDuration = transcription?.duration && transcription.duration > 0
         ? transcription.duration
         : transcription?.segments && transcription.segments.length > 0
@@ -477,46 +621,184 @@ prompt: scene.imagePrompt,
       const compiled = compileSceneDSL(dslScenes, context, sceneImages);
 
       // Map compiled assets to DocuFlow Asset objects
-      const newAssets: Asset[] = [];
-      const assetMapByFilename = new Map<string, { logicalId: string }>();
+      // Use existing generated assets instead of creating new ones to preserve filePath
+      const assetMapByFilename = new Map<string, { logicalId: string; assetId: string }>();
 
+      for (const [filename, assetInfo] of compiled.assetMap) {
+        const sceneIdx = parseInt(filename.replace('scene-', '').replace('.png', ''), 10) - 1;
+        const sc = completedScenes[sceneIdx];
+        if (!sc?.imageUrl || !sc?.imageId) continue;
+
+        // Find the existing generated asset by imageId
+        const existingAsset = currentAssets.find(a => a.id === sc.imageId);
+        if (existingAsset) {
+          assetMapByFilename.set(filename, { logicalId: assetInfo.logicalId, assetId: existingAsset.id });
+        }
+      }
+
+      // Build commands using existing assets
+      const newCommands: Command[] = [];
+      for (const cmd of compiled.allCommands) {
+        const filename = (cmd as any).asset || (cmd as any).image;
+        if (filename && assetMapByFilename.has(filename)) {
+          const { assetId, logicalId } = assetMapByFilename.get(filename)!;
+          newCommands.push({
+            ...cmd,
+            id: uuidv4(),
+            asset: logicalId,
+          } as Command);
+        }
+      }
+
+      // Commit to store (only commands, since assets already exist)
+      store.beginBatch();
+      newCommands.forEach((c) => store.addCommand(c));
+      store.endBatch();
+
+      setToast({ message: `Timeline built: ${newCommands.length} commands`, type: 'success' });
+      setActiveTab('studio');
+    } catch (err) {
+      setToast({ message: `Build failed: ${err instanceof Error ? err.message : String(err)}`, type: 'error' });
+    } finally {
+      setBuildingTimeline(false);
+    }
+  }, [scenes, transcription, setActiveTab]);
+
+  // -----------------------------------------------------------------------
+  // Step 3c: Generate + Build combined
+  // -----------------------------------------------------------------------
+
+  const handleGenerateAndBuild = useCallback(async () => {
+    if (scenes.length === 0) return;
+    setGenerateAndBuildRunning(true);
+
+    try {
+      // Phase 1: Generate images
+      setGeneratingAll(true);
+      const updated = [...scenes];
+
+      for (let i = 0; i < updated.length; i++) {
+        if (updated[i].status === 'done') {
+          continue;
+        }
+
+        updated[i] = { ...updated[i], status: 'generating' };
+        setScenes([...updated]);
+
+        try {
+          const result = await generateImage({
+            prompt: updated[i].imagePrompt,
+            negativePrompt: negativePrompt || undefined,
+            source: 'scene-generator',
+            sceneId: String(updated[i].sceneId),
+            provider: imageProvider,
+            cloudflareConfig: imageProvider === 'cloudflare' ? cloudflareConfig : undefined,
+            pollinationsConfig: imageProvider === 'pollinations' ? pollinationsConfig : undefined,
+            model: imageProvider === 'pollinations' ? pollinationsModel : advancedSettings.model,
+            steps: advancedSettings.steps,
+            localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
+            device: imageProvider === 'local' ? localDevice : undefined,
+            unloadAfter: false,
+            projectPath,
+          });
+
+          if (result.success && result.images.length > 0) {
+            updated[i] = { ...updated[i], status: 'done', imageUrl: result.images[0].url, imageId: result.images[0].id };
+          } else {
+            updated[i] = { ...updated[i], status: 'error', error: result.error || 'Failed' };
+          }
+        } catch (err) {
+          updated[i] = { ...updated[i], status: 'error', error: err instanceof Error ? err.message : String(err) };
+        }
+
+        setScenes([...updated]);
+      }
+
+      setGeneratingAll(false);
+
+      // Phase 2: Verify completed scenes
+      const completedScenes: StoryboardScene[] = updated.filter((s) => s.status === 'done' && s.imageUrl);
+      if (completedScenes.length === 0) {
+        setToast({ message: 'No completed scenes to build timeline.', type: 'error' });
+        return;
+      }
+
+      // Phase 3: Build timeline
+      setBuildingTimeline(true);
+      const store = useDocuFlowStore.getState();
+      const sceneImages = new Map<number, string>();
+
+      for (const sc of completedScenes) {
+        sceneImages.set(sc.sceneId - 1, `scene-${sc.sceneId}.png`);
+      }
+
+      const dslScenes: SceneDSL[] = completedScenes.map((sc) => ({
+        text: sc.transcriptChunk,
+        visual: sc.visualDescription,
+        motion: sc.cameraMotion === 'static' ? 'none'
+          : sc.cameraMotion === 'zoom_in' ? 'slow_zoom'
+          : sc.cameraMotion === 'zoom_out' ? 'slow_zoom_out'
+          : sc.cameraMotion === 'pan_left' ? 'slow_pan_left'
+          : sc.cameraMotion === 'pan_right' ? 'slow_pan_right'
+          : 'none',
+        transition: 'cut',
+      }));
+
+      const fps = store.settings.fps || 30;
+      const totalAudioDuration = transcription?.duration && transcription.duration > 0
+        ? transcription.duration
+        : transcription?.segments && transcription.segments.length > 0
+          ? transcription.segments[transcription.segments.length - 1].end
+          : undefined;
+      const context: CompileContext = {
+        fps,
+        width: store.settings.width || 1920,
+        height: store.settings.height || 1080,
+        transcriptSegments: transcription?.segments?.map(s => ({
+          start: s.start,
+          end: s.end,
+          text: s.text,
+        })),
+        audioDuration: totalAudioDuration,
+      };
+
+      const compiled = compileSceneDSL(dslScenes, context, sceneImages);
+
+      const newAssets: Asset[] = [];
       for (const [filename, assetInfo] of compiled.assetMap) {
         const sceneIdx = parseInt(filename.replace('scene-', '').replace('.png', ''), 10) - 1;
         const sc = completedScenes[sceneIdx];
         if (!sc?.imageUrl) continue;
 
-        const assetId = uuidv4();
         newAssets.push({
-          id: assetId,
+          id: uuidv4(),
           logicalId: assetInfo.logicalId,
           filename,
           type: 'image',
           mimeType: 'image/png',
           url: sc.imageUrl,
         });
-        assetMapByFilename.set(filename, { logicalId: assetInfo.logicalId });
       }
 
-      // Convert compiler commands to DocuFlow commands
       const newCommands: Command[] = compiled.allCommands.map((cmd) => ({
         ...cmd,
         id: uuidv4(),
       })) as Command[];
 
-      // Commit to store
       store.beginBatch();
       newAssets.forEach((a) => store.addAsset(a));
       newCommands.forEach((c) => store.addCommand(c));
       store.endBatch();
 
-      setToast({ message: `Timeline built: ${newAssets.length} scenes, ${newCommands.length} commands`, type: 'success' });
+      setToast({ message: `Generate + Build complete: ${newAssets.length} scenes, ${newCommands.length} commands`, type: 'success' });
       setActiveTab('studio');
     } catch (err) {
-      setToast({ message: `Timeline error: ${err instanceof Error ? err.message : String(err)}`, type: 'error' });
+      setToast({ message: `Generate + Build failed: ${err instanceof Error ? err.message : String(err)}`, type: 'error' });
     } finally {
-      setGeneratingAll(false);
+      setBuildingTimeline(false);
+      setGenerateAndBuildRunning(false);
     }
-  }, [scenes, negativePrompt, imageProvider, cloudflareConfig, nimConfig, nimModel, advancedSettings, selectedLocalModel, localDevice, setActiveTab]);
+  }, [scenes, negativePrompt, imageProvider, cloudflareConfig, pollinationsConfig, pollinationsModel, advancedSettings, selectedLocalModel, localDevice, transcription, setActiveTab, projectPath]);
 
   // -----------------------------------------------------------------------
   // Edit helpers
@@ -1318,18 +1600,15 @@ prompt: scene.imagePrompt,
                       <span>Cloud</span>
                     </button>
                     <button
-                      onClick={() => {
-                        setImageProvider('nvidia-nim');
-                        localStorage.setItem('docuflow-scene-image-provider', 'nvidia-nim');
-                      }}
+                      onClick={() => { setImageProvider('pollinations'); localStorage.setItem('docuflow-scene-image-provider', 'pollinations'); }}
                       className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-medium transition-all ${
-                        imageProvider === 'nvidia-nim'
-                          ? 'bg-[#76b900]/20 text-[#76b900]'
+                        imageProvider === 'pollinations'
+                          ? 'bg-pink-500/20 text-pink-300'
                           : 'text-slate-400 hover:text-white'
                       }`}
                     >
-                      <Cpu size={10} />
-                      <span>NIM</span>
+                      <Flower size={10} />
+                      <span>Poll</span>
                     </button>
                     <button
                       onClick={() => {
@@ -1352,6 +1631,27 @@ prompt: scene.imagePrompt,
                     </button>
                   </div>
                 </div>
+
+                {/* Pollinations model settings */}
+                {imageProvider === 'pollinations' && (
+                  <div className="mt-2 space-y-2">
+                    <div className="text-[8px] text-slate-500">Pollinations Model</div>
+                    <select
+                      value={pollinationsModel}
+                      onChange={(e) => {
+                        setPollinationsModel(e.target.value);
+                        localStorage.setItem('docuflow-scene-pollinations-model', e.target.value);
+                      }}
+                      className="w-full bg-slate-700/50 border border-white/10 rounded-md px-2 py-1.5 text-[10px] text-slate-200 focus:outline-none focus:ring-1 focus:ring-pink-500"
+                    >
+                      {POLLINATIONS_MODELS.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.label} - {model.description}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {/* Local model settings */}
                 {imageProvider === 'local' && (
@@ -1400,18 +1700,41 @@ prompt: scene.imagePrompt,
 
             {/* Batch generate */}
             {step2Done && (
-              <div>
+              <div className="space-y-2">
+                {/* Generate Images */}
                 <Button
                   variant="primary"
-                  onClick={handleGenerateAll}
+                  onClick={handleGenerateImages}
                   disabled={!canGenerateAll}
                   loading={generatingAll}
                   icon={generatingAll ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
-                  className="w-full justify-center gap-2 px-3 py-2.5 text-[11px] bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 border-0"
+                  className="w-full justify-center gap-2 px-3 py-2 text-[10px] bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 border-0"
                 >
-                  {generatingAll
-                    ? 'Generating...'
-                    : 'Batch Generate All & Build Video'}
+                  {generatingAll ? 'Generating...' : 'Generate'}
+                </Button>
+
+                {/* Build Timeline */}
+                <Button
+                  variant="secondary"
+                  onClick={handleBuildTimeline}
+                  disabled={!canBuildTimeline}
+                  loading={buildingTimeline}
+                  icon={buildingTimeline ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+                  className="w-full justify-center gap-2 px-3 py-2 text-[10px] border border-white/10 hover:border-emerald-500/30 hover:text-emerald-300"
+                >
+                  {buildingTimeline ? 'Building...' : 'Build'}
+                </Button>
+
+                {/* Generate + Build */}
+                <Button
+                  variant="primary"
+                  onClick={handleGenerateAndBuild}
+                  disabled={!canGenerateAndBuild}
+                  loading={generateAndBuildRunning}
+                  icon={generateAndBuildRunning ? <Loader2 size={12} className="animate-spin" /> : <Clapperboard size={12} />}
+                  className="w-full justify-center gap-2 px-3 py-2 text-[10px] bg-gradient-to-r from-violet-600 to-pink-600 hover:from-violet-500 hover:to-pink-500 border-0"
+                >
+                  {generateAndBuildRunning ? 'Working...' : 'Generate + Build'}
                 </Button>
               </div>
             )}
@@ -1543,7 +1866,7 @@ prompt: scene.imagePrompt,
                           variant="secondary"
                           size="sm"
                           onClick={() => handleGenerateSingle(scene.sceneId)}
-                          disabled={scene.status === 'generating' || (imageProvider === 'cloudflare' && !cloudflareConfig.workerUrl) || (imageProvider === 'nvidia-nim' && !nimConfig.apiKey) || (imageProvider === 'local' && !selectedLocalModel)}
+                          disabled={scene.status === 'generating' || (imageProvider === 'cloudflare' && !cloudflareConfig.workerUrl) || (imageProvider === 'local' && !selectedLocalModel)}
                           loading={scene.status === 'generating'}
                           icon={<ImageIcon size={10} />}
                           className="px-2.5 py-1 text-[9px] border border-white/10 hover:border-amber-500/30 hover:text-amber-300"
