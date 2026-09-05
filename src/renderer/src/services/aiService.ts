@@ -116,6 +116,19 @@ Output STRICTLY valid JSON matching this exact schema — no markdown fences, no
 cameraMotion MUST be one of: zoom_in, zoom_out, pan_left, pan_right, static.
 Do NOT include startTime/endTime — the system computes timing from transcript timestamps.`;
 
+async function ensureOllamaResources(): Promise<void> {
+  try {
+    const activeModel = await window.docuflow.getActiveLocalModel();
+    if (activeModel.type === 'diffusion' && activeModel.model) {
+      console.log('[Ollama] Unloading diffusion model before Ollama request:', activeModel.model);
+      await window.docuflow.unloadLocalModel();
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  } catch (err) {
+    console.warn('[Ollama] Could not check/unload diffusion model:', err);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Scene DSL text parser — converts AI plain text output to SceneDSL[]
 // ---------------------------------------------------------------------------
@@ -716,6 +729,7 @@ async function callOllamaStreaming(
   callbacks?: StreamingCallbacks,
   options?: { think?: boolean },
 ): Promise<string> {
+  await ensureOllamaResources();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 300_000);
 
@@ -872,6 +886,7 @@ async function callOllamaDirect(
   model = 'gemma3:4b',
   options?: { think?: boolean; temperature?: number; numPredict?: number },
 ): Promise<string> {
+  await ensureOllamaResources();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 120_000);
 
@@ -1047,6 +1062,7 @@ export async function chatWithModel(
   callbacks?: StreamingCallbacks,
   options?: { think?: boolean },
 ): Promise<{ thinking: string; response: string }> {
+  await ensureOllamaResources();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 300_000);
 

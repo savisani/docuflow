@@ -1,10 +1,15 @@
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
+import { z } from 'zod';
 import { Asset } from '../types/assets';
 import { ProjectSettings, Project, ProjectVoiceover, ProjectTranscript, ProjectSceneMarker } from '../types/project';
 import { Command } from '../engine/commands/types';
 import { TimelineState } from '../types/timeline';
 import { buildTimeline } from '../engine/timeline/builder';
+import { ProjectSchema } from '../schemas';
+import { normalizeError } from '../../../core/errors';
+import { migrateProject, CURRENT_PROJECT_VERSION } from '../../../core/project';
+import type { SerializedDocuFlowError, ErrorCode } from '../../../core/errors';
 
 export type PreviewMode = 'timeline' | 'asset';
 export type ActiveTab = 'studio' | 'generator' | 'scenes';
@@ -157,6 +162,10 @@ interface DocuFlowState {
   transcriptionStepLabel: string;
   transcriptionStartedAt: number | null;
 
+  // Centralized error state (serializable for safe state persistence)
+  error: SerializedDocuFlowError | null;
+  errorHistory: SerializedDocuFlowError[];
+
   history: HistoryState[];
   historyIndex: number;
   batchActive: boolean;
@@ -220,6 +229,10 @@ interface DocuFlowState {
   resetTranscriptionProgress: () => void;
   setAudioRole: (assetId: string, role: 'voiceover' | 'music' | 'sfx' | 'ambient' | 'unassigned') => void;
   getVoiceoverAsset: () => Asset | undefined;
+
+  // Error actions
+  setError: (error: unknown, code?: ErrorCode) => void;
+  clearError: () => void;
 
   beginBatch: () => void;
   endBatch: () => void;
@@ -351,6 +364,9 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
   transcriptionStep: -1,
   transcriptionStepLabel: '',
   transcriptionStartedAt: null,
+
+  error: null,
+  errorHistory: [],
 
   history: [{
     commands: [],
@@ -611,6 +627,18 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
     transcriptionStepLabel: '',
     transcriptionStartedAt: null,
   }),
+
+  // Centralized error actions
+  setError: (error, code) => {
+    const normalized = normalizeError(error, code);
+    const serialized = normalized.toSerializable();
+    set((state) => ({
+      error: serialized,
+      errorHistory: [...state.errorHistory.slice(-49), serialized], // keep last 50
+    }));
+  },
+  clearError: () => set({ error: null }),
+
   setAudioRole: (assetId, role) => {
     const state = get();
     const newAssets = state.assets.map((a) => a.id === assetId ? { ...a, audioRole: role } : a);
@@ -737,7 +765,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
   saveProject: async (projectName) => {
     const state = get();
     const projectData = {
-      version: 1,
+      version: CURRENT_PROJECT_VERSION,
       settings: state.settings,
       assets: state.assets.map(a => ({
         id: a.id,
@@ -756,16 +784,27 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       transcript: state.transcript,
       sceneMarkers: state.sceneMarkers,
     };
+    // Validate before writing to disk
+    const validation = ProjectSchema.safeParse(projectData);
+    if (!validation.success) {
+      const err = normalizeError(validation.error, 'PROJECT_SAVE' as ErrorCode);
+      return { success: false, error: err.message };
+    }
     try {
       if (window.docuflow) {
         const result = await window.docuflow.saveProject(projectName, projectData);
+        if (!result.success && result.error) {
+          const err = normalizeError(result.error, 'PROJECT_SAVE' as ErrorCode);
+          return { success: false, error: err.message };
+        }
         return { success: result.success, error: result.error };
       }
       // Fallback: save to localStorage
       localStorage.setItem(`docuflow-project-${projectName}`, JSON.stringify(projectData));
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, 'PROJECT_SAVE' as ErrorCode);
+      return { success: false, error: normalized.message };
     }
   },
 
@@ -776,6 +815,9 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
         const result = await window.docuflow.loadProject(projectName);
         if (result.success && result.data) {
           projectData = result.data;
+        } else if (!result.success && result.error) {
+          const err = normalizeError(result.error, 'PROJECT_LOAD' as ErrorCode);
+          return { success: false, error: err.message };
         }
       }
       if (!projectData) {
@@ -784,7 +826,25 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
         if (stored) projectData = JSON.parse(stored);
       }
       if (!projectData) {
-        return { success: false, error: 'Project not found' };
+        const err = normalizeError('Project not found', 'PROJECT_LOAD' as ErrorCode, {
+          context: { projectName },
+        });
+        return { success: false, error: err.message };
+      }
+      // Migrate project data to current version before Zod validation
+      const migrationResult = migrateProject(projectData);
+      if ('error' in migrationResult) {
+        const err = normalizeError(migrationResult.error, migrationResult.code as ErrorCode, {
+          context: migrationResult.context,
+        });
+        return { success: false, error: err.message };
+      }
+      projectData = migrationResult.project;
+      // Validate loaded project data
+      const validation = ProjectSchema.safeParse(projectData);
+      if (!validation.success) {
+        const err = normalizeError(validation.error, 'PROJECT_LOAD' as ErrorCode);
+        return { success: false, error: err.message };
       }
       const state = get();
       const newAssets = (projectData.assets || []).map((a: any) => ({
@@ -811,8 +871,9 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       const snap = captureState({ ...get() });
       set({ history: [snap], historyIndex: 0 });
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, 'PROJECT_LOAD' as ErrorCode);
+      return { success: false, error: normalized.message };
     }
   },
 }));

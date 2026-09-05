@@ -12,8 +12,10 @@ import { Asset } from '../../types/assets';
 import { Command } from '../../engine/commands/types';
 import { compileSceneDSL, type SceneDSL, type CompileContext } from '../../engine/sceneDSL';
 import { CLOUDFLARE_MODELS, CloudflareConfig } from '../../utils/cloudflareApi';
+import { NIM_MODELS, NIM_DEFAULT_MODEL, NimConfig, loadNimConfig, saveNimConfig, NimModelId } from '../../utils/nvidiaNimApi';
 import { generateImage, type ImageProvider } from '../../services/imageGenerationService';
 import { listLocalModels, detectHardware, type LocalModel, type LocalHardware } from '../../services/localImageProvider';
+import { extractErrorMessage } from '../../../../core/errors';
 import {
   generateScenesStream, fetchOllamaModels, offloadModel, chatWithModel, chatWithProvider,
   clearGpuCache,
@@ -164,6 +166,13 @@ export const SceneGenerator: React.FC = () => {
   const [cloudflareConfig] = useState<CloudflareConfig>(loadCloudflareConfig);
   const [advancedSettings] = useState(loadAdvancedSettings);
 
+  // -- NVIDIA NIM config (for image generation) --
+  const [nimConfig] = useState<NimConfig>(loadNimConfig);
+  const [nimModel] = useState<NimModelId>(() => {
+    const stored = localStorage.getItem('docuflow-scene-nim-model');
+    return (stored as NimModelId) || NIM_DEFAULT_MODEL;
+  });
+
   // -- Image provider selection --
   const [imageProvider, setImageProvider] = useState<ImageProvider>(() => {
     return (localStorage.getItem('docuflow-scene-image-provider') as ImageProvider) || 'cloudflare';
@@ -232,7 +241,7 @@ export const SceneGenerator: React.FC = () => {
         setTranscription(result);
         setToast({ message: `Transcription complete: ${result.segments?.length ?? 0} segments`, type: 'success' });
       } else {
-        setTranscriptionError(result.error || 'Transcription failed');
+        setTranscriptionError(extractErrorMessage(result.error, 'Transcription failed'));
       }
     } catch (err) {
       setTranscriptionError(err instanceof Error ? err.message : String(err));
@@ -341,16 +350,18 @@ export const SceneGenerator: React.FC = () => {
 
     try {
       const result = await generateImage({
-        prompt: scene.imagePrompt,
-        negativePrompt: negativePrompt || undefined,
-        source: 'scene-generator',
-        sceneId: String(sceneId),
-        provider: imageProvider,
-        cloudflareConfig: imageProvider === 'cloudflare' ? cloudflareConfig : undefined,
-        model: advancedSettings.model,
-        steps: advancedSettings.steps,
-        localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
-        device: imageProvider === 'local' ? localDevice : undefined,
+prompt: scene.imagePrompt,
+          negativePrompt: negativePrompt || undefined,
+          source: 'scene-generator',
+          sceneId: String(sceneId),
+          provider: imageProvider,
+          cloudflareConfig: imageProvider === 'cloudflare' ? cloudflareConfig : undefined,
+          nimConfig: imageProvider === 'nvidia-nim' ? nimConfig : undefined,
+          model: imageProvider === 'nvidia-nim' ? nimModel : advancedSettings.model,
+          steps: advancedSettings.steps,
+          localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
+          device: imageProvider === 'local' ? localDevice : undefined,
+          unloadAfter: false,
       });
 
       if (result.success && result.images.length > 0) {
@@ -363,7 +374,7 @@ export const SceneGenerator: React.FC = () => {
     }
 
     setScenes([...updated]);
-  }, [scenes, negativePrompt, imageProvider, cloudflareConfig, advancedSettings, selectedLocalModel, localDevice]);
+  }, [scenes, negativePrompt, imageProvider, cloudflareConfig, nimConfig, nimModel, advancedSettings, selectedLocalModel, localDevice]);
 
   // -----------------------------------------------------------------------
   // Step 3: Batch generate all
@@ -391,10 +402,12 @@ export const SceneGenerator: React.FC = () => {
           sceneId: String(updated[i].sceneId),
           provider: imageProvider,
           cloudflareConfig: imageProvider === 'cloudflare' ? cloudflareConfig : undefined,
-          model: advancedSettings.model,
+          nimConfig: imageProvider === 'nvidia-nim' ? nimConfig : undefined,
+          model: imageProvider === 'nvidia-nim' ? nimModel : advancedSettings.model,
           steps: advancedSettings.steps,
           localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
           device: imageProvider === 'local' ? localDevice : undefined,
+          unloadAfter: false,
         });
 
         if (result.success && result.images.length > 0) {
@@ -503,7 +516,7 @@ export const SceneGenerator: React.FC = () => {
     } finally {
       setGeneratingAll(false);
     }
-  }, [scenes, negativePrompt, imageProvider, cloudflareConfig, advancedSettings, selectedLocalModel, localDevice, setActiveTab]);
+  }, [scenes, negativePrompt, imageProvider, cloudflareConfig, nimConfig, nimModel, advancedSettings, selectedLocalModel, localDevice, setActiveTab]);
 
   // -----------------------------------------------------------------------
   // Edit helpers
@@ -1306,6 +1319,20 @@ export const SceneGenerator: React.FC = () => {
                     </button>
                     <button
                       onClick={() => {
+                        setImageProvider('nvidia-nim');
+                        localStorage.setItem('docuflow-scene-image-provider', 'nvidia-nim');
+                      }}
+                      className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-medium transition-all ${
+                        imageProvider === 'nvidia-nim'
+                          ? 'bg-[#76b900]/20 text-[#76b900]'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Cpu size={10} />
+                      <span>NIM</span>
+                    </button>
+                    <button
+                      onClick={() => {
                         setImageProvider('local');
                         localStorage.setItem('docuflow-scene-image-provider', 'local');
                         // Load models if not loaded
@@ -1516,7 +1543,7 @@ export const SceneGenerator: React.FC = () => {
                           variant="secondary"
                           size="sm"
                           onClick={() => handleGenerateSingle(scene.sceneId)}
-                          disabled={scene.status === 'generating' || (imageProvider === 'cloudflare' && !cloudflareConfig.workerUrl) || (imageProvider === 'local' && !selectedLocalModel)}
+                          disabled={scene.status === 'generating' || (imageProvider === 'cloudflare' && !cloudflareConfig.workerUrl) || (imageProvider === 'nvidia-nim' && !nimConfig.apiKey) || (imageProvider === 'local' && !selectedLocalModel)}
                           loading={scene.status === 'generating'}
                           icon={<ImageIcon size={10} />}
                           className="px-2.5 py-1 text-[9px] border border-white/10 hover:border-amber-500/30 hover:text-amber-300"

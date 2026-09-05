@@ -18,6 +18,7 @@ import { BrowserWindow } from 'electron';
 
 export type ModelState = 'idle' | 'loading' | 'loaded' | 'generating' | 'unloading' | 'error';
 export type ExecutionMode = 'manual' | 'batch';
+export type LocalModelType = 'diffusion' | 'ollama' | 'none';
 
 export interface VRAMSnapshot {
   cuda: boolean;
@@ -55,12 +56,15 @@ export class ModelManagerRunner {
   // State
   private _state: ModelState = 'idle';
   private _activeModel: string | null = null;
+  private _activeModelType: LocalModelType = 'none';
   private _executionMode: ExecutionMode = 'manual';
   private _batchActive = false;
   private _gpuMutexLocked = false;
   private _gpuMutexQueue: Array<() => void> = [];
   private _shuttingDown = false;
   private _workerPid: number | null = null;
+  private _ollamaProcess: ChildProcess | null = null;
+  private _ollamaModel: string | null = null;
 
   // Window reference for sending events
   private _window: BrowserWindow | null = null;
@@ -95,17 +99,24 @@ export class ModelManagerRunner {
    * If a different model is loaded, unloads it first (atomic under mutex).
    */
   async loadModel(modelPath: string): Promise<ModelManagerResult> {
+    // Normalize path to match Python's os.path.normpath()
+    const normalizedPath = modelPath.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '');
     return this._withGPUMutex(async () => {
-      this._setState('loading', modelPath);
+      if (this._activeModelType === 'ollama') {
+        await this.stopOllamaServer();
+      }
+
+      this._setState('loading', normalizedPath);
 
       const result = await this._sendCommand({
         command: 'load',
-        model_path: modelPath,
+        model_path: normalizedPath,
       });
 
       if (result.success) {
-        this._activeModel = modelPath;
-        this._setState('loaded', modelPath);
+        this._activeModel = normalizedPath;
+        this._activeModelType = 'diffusion';
+        this._setState('loaded', normalizedPath);
       } else {
         this._setState('error', null);
       }
@@ -124,6 +135,7 @@ export class ModelManagerRunner {
       const result = await this._sendCommand({ command: 'unload' });
 
       this._activeModel = null;
+      this._activeModelType = 'none';
       this._setState('idle', null);
 
       return result;
@@ -135,20 +147,24 @@ export class ModelManagerRunner {
    * Unloads current model, then loads the target model.
    */
   async switchModel(targetModelPath: string): Promise<ModelManagerResult> {
+    // Normalize path to match Python's os.path.normpath()
+    const normalizedTarget = targetModelPath.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '');
     return this._withGPUMutex(async () => {
-      // Same model? Reuse
-      if (this._activeModel === targetModelPath && this._state === 'loaded') {
-        this._log('SWITCH', `Same model: ${targetModelPath}, reusing`);
+      if (this._activeModelType === 'ollama') {
+        await this.stopOllamaServer();
+      }
+
+      if (this._activeModel === normalizedTarget && this._state === 'loaded') {
+        this._log('SWITCH', `Same model: ${normalizedTarget}, reusing`);
         const status = await this._sendCommand({ command: 'status' });
         return {
           success: true,
           action: 'reused',
-          model: targetModelPath.split(/[/\\]/).pop(),
+          model: normalizedTarget.split(/[/\\]/).pop(),
           vram: status.vram,
         };
       }
 
-      // Unload previous
       if (this._state !== 'idle') {
         this._log('SWITCH', `Unloading previous: ${this._activeModel}`);
         this._setState('unloading', this._activeModel);
@@ -156,16 +172,16 @@ export class ModelManagerRunner {
         this._activeModel = null;
       }
 
-      // Load target
-      this._setState('loading', targetModelPath);
+      this._setState('loading', normalizedTarget);
       const result = await this._sendCommand({
         command: 'load',
-        model_path: targetModelPath,
+        model_path: normalizedTarget,
       });
 
       if (result.success) {
-        this._activeModel = targetModelPath;
-        this._setState('loaded', targetModelPath);
+        this._activeModel = normalizedTarget;
+        this._activeModelType = 'diffusion';
+        this._setState('loaded', normalizedTarget);
       } else {
         this._setState('error', null);
       }
@@ -246,6 +262,132 @@ export class ModelManagerRunner {
   }
 
   // -------------------------------------------------------------------------
+  // Ollama Management
+  // -------------------------------------------------------------------------
+
+  /**
+   * Check if Ollama server is running.
+   */
+  async isOllamaRunning(): Promise<boolean> {
+    try {
+      const response = await fetch('http://localhost:11434/api/tags', {
+        method: 'GET',
+        signal: AbortSignal.timeout(2000),
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Start Ollama server and load a model.
+   * If a diffusion model is active, unload it first.
+   */
+  async loadOllamaModel(modelName: string): Promise<{ success: boolean; error?: string }> {
+    return this._withGPUMutex(async () => {
+      if (this._activeModelType === 'diffusion') {
+        if (this._state !== 'idle' && this._state !== 'unloading') {
+          await this.unloadModel();
+        }
+      }
+
+      if (!this._ollamaProcess) {
+        this._log('OLLAMA', 'Starting Ollama server');
+        this._ollamaProcess = spawn('ollama', ['serve'], {
+          stdio: 'ignore',
+          detached: true,
+        });
+
+        this._ollamaProcess.on('error', (err) => {
+          this._log('OLLAMA ERROR', err.message);
+          this._ollamaProcess = null;
+        });
+
+        this._ollamaProcess.on('exit', (code) => {
+          this._log('OLLAMA', `Ollama server exited with code ${code}`);
+          this._ollamaProcess = null;
+          if (this._activeModelType === 'ollama') {
+            this._activeModelType = 'none';
+            this._ollamaModel = null;
+          }
+        });
+
+        for (let i = 0; i < 30; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          if (await this.isOllamaRunning()) break;
+        }
+
+        if (!this._ollamaProcess) {
+          return { success: false, error: 'Failed to start Ollama server' };
+        }
+      }
+
+      try {
+        const response = await fetch('http://localhost:11434/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: modelName,
+            messages: [{ role: 'user', content: 'ping' }],
+            stream: false,
+          }),
+          signal: AbortSignal.timeout(60000),
+        });
+
+        if (response.ok) {
+          this._activeModelType = 'ollama';
+          this._ollamaModel = modelName;
+          this._log('OLLAMA', `Loaded model: ${modelName}`);
+          return { success: true };
+        } else {
+          const errorText = await response.text();
+          return { success: false, error: `Ollama error: ${response.status} - ${errorText}` };
+        }
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        return { success: false, error: `Failed to load Ollama model: ${errorMessage}` };
+      }
+    });
+  }
+
+  /**
+   * Stop Ollama server (releases all Ollama models from VRAM).
+   * If a diffusion model is active, this has no effect on it.
+   */
+  async stopOllamaServer(): Promise<{ success: boolean; error?: string }> {
+    return this._withGPUMutex(async () => {
+      if (this._ollamaProcess) {
+        this._log('OLLAMA', 'Stopping Ollama server');
+        try {
+          process.kill(-this._ollamaProcess.pid!, 'SIGTERM');
+        } catch {
+          try {
+            this._ollamaProcess.kill('SIGTERM');
+          } catch {}
+        }
+        this._ollamaProcess = null;
+        this._ollamaModel = null;
+        if (this._activeModelType === 'ollama') {
+          this._activeModelType = 'none';
+        }
+        return { success: true };
+      }
+      return { success: true };
+    });
+  }
+
+  /**
+   * Get the currently active model type and name.
+   */
+  getActiveModelInfo(): { type: LocalModelType; model: string | null } {
+    if (this._activeModelType === 'ollama') {
+      return { type: 'ollama', model: this._ollamaModel };
+    }
+    return { type: this._activeModelType, model: this._activeModel };
+  }
+
+  // -------------------------------------------------------------------------
   // Shutdown
   // -------------------------------------------------------------------------
 
@@ -261,8 +403,13 @@ export class ModelManagerRunner {
     this._shuttingDown = true;
     this._log('SHUTDOWN', `reason=${reason} caller=${caller}`);
 
-    // Unload model if any (best-effort, ignore errors)
-    if (this._state !== 'idle' && this._state !== 'unloading') {
+    if (this._activeModelType === 'ollama') {
+      try {
+        await this.stopOllamaServer();
+      } catch (e) {
+        this._log('SHUTDOWN', `stopOllamaServer error: ${(e as Error).message}`);
+      }
+    } else if (this._state !== 'idle' && this._state !== 'unloading') {
       try {
         await this.unloadModel();
       } catch (e) {
@@ -270,12 +417,10 @@ export class ModelManagerRunner {
       }
     }
 
-    // Try to tell the worker to quit gracefully
     try {
       await this._sendCommand({ command: 'quit', reason, caller });
     } catch {}
 
-    // Always SIGTERM the worker as a fallback
     if (this.worker) {
       try {
         this.worker.kill('SIGTERM');
@@ -285,6 +430,7 @@ export class ModelManagerRunner {
     }
     this._state = 'idle';
     this._activeModel = null;
+    this._activeModelType = 'none';
   }
 
   // -------------------------------------------------------------------------
@@ -292,6 +438,7 @@ export class ModelManagerRunner {
   // -------------------------------------------------------------------------
 
   private async _withGPUMutex<T>(fn: () => Promise<T>): Promise<T> {
+    // If mutex is free, acquire immediately
     if (!this._gpuMutexLocked) {
       this._gpuMutexLocked = true;
       try {
@@ -302,18 +449,39 @@ export class ModelManagerRunner {
       }
     }
 
+    // Mutex is locked — wait with timeout to prevent deadlocks
     return new Promise<T>((resolve, reject) => {
-      this._gpuMutexQueue.push(async () => {
-        this._gpuMutexLocked = true;
-        try {
-          resolve(await fn());
-        } catch (err) {
-          reject(err);
-        } finally {
-          this._gpuMutexLocked = false;
-          this._drainMutexQueue();
+      const MUTEX_TIMEOUT_MS = 660000; // 11 minutes (slightly longer than command timeout)
+      const startTime = Date.now();
+
+      const tryAcquire = () => {
+        if (!this._gpuMutexLocked) {
+          this._gpuMutexLocked = true;
+          const elapsed = Date.now() - startTime;
+          if (elapsed > MUTEX_TIMEOUT_MS) {
+            this._gpuMutexLocked = false;
+            this._drainMutexQueue();
+            reject(new Error(`GPU mutex timeout after ${elapsed}ms`));
+            return;
+          }
+          fn()
+            .then(resolve)
+            .catch(reject)
+            .finally(() => {
+              this._gpuMutexLocked = false;
+              this._drainMutexQueue();
+            });
+        } else {
+          const elapsed = Date.now() - startTime;
+          if (elapsed > MUTEX_TIMEOUT_MS) {
+            reject(new Error(`GPU mutex timeout after ${elapsed}ms — possible deadlock`));
+            return;
+          }
+          setTimeout(tryAcquire, 50);
         }
-      });
+      };
+
+      tryAcquire();
     });
   }
 
@@ -395,7 +563,7 @@ export class ModelManagerRunner {
   }
 
   private _handleWorkerMessage(msg: any): void {
-    // Log messages from worker
+    // Log messages from worker (type='log')
     if (msg.type === 'log') {
       this._log(msg.tag || 'WORKER', msg.message);
 
@@ -413,13 +581,33 @@ export class ModelManagerRunner {
           },
         });
       }
-    } else if (msg.type === 'progress') {
+      return; // Don't treat log messages as command responses
+    }
+
+    // Progress messages from worker (type='progress')
+    if (msg.type === 'progress') {
       // Forward generation progress to renderer
       if (this._window) {
         this._window.webContents.send('local-generation:progress', msg);
       }
-    } else {
-      // This is a command response — match by checking pending requests
+      return; // Don't treat progress messages as command responses
+    }
+
+    // Command responses (type='response') — resolve the oldest pending request
+    if (msg.type === 'response') {
+      for (const [id, req] of this.pendingRequests) {
+        // Strip the type field before resolving (callers don't expect it)
+        const { type: _, ...responseMsg } = msg;
+        req.resolve(responseMsg);
+        this.pendingRequests.delete(id);
+        break;
+      }
+      return;
+    }
+
+    // Fallback: backward-compatible matching for responses without type field
+    // (e.g., if an older Python worker is running)
+    if (!msg.tag && msg.success !== undefined) {
       for (const [id, req] of this.pendingRequests) {
         req.resolve(msg);
         this.pendingRequests.delete(id);

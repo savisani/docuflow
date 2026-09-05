@@ -11,11 +11,13 @@ import { useDocuFlowStore, GeneratedImage } from '../app/store';
 import { Asset } from '../types/assets';
 import { generateLogicalId } from '../engine/media/findAsset';
 import { generateWithCloudflare, CloudflareConfig } from '../utils/cloudflareApi';
+import { generateWithNim, NimConfig, NimModelId, NIM_DEFAULT_MODEL } from '../utils/nvidiaNimApi';
 import { generateLocalImage, LocalGenerationProgress } from './localImageProvider';
 import { buildScenePrompts } from '../utils/promptBuilder';
+import { extractErrorMessage } from '../../../core/errors';
 import { parsePromptAndNegativePrompt } from '../utils/promptParser';
 
-export type ImageProvider = 'cloudflare' | 'local';
+export type ImageProvider = 'cloudflare' | 'local' | 'nvidia-nim';
 
 export interface ImageGenerationRequest {
   /** The prompt to generate from */
@@ -32,6 +34,8 @@ export interface ImageGenerationRequest {
   provider?: ImageProvider;
   /** Cloudflare config (for cloudflare provider) */
   cloudflareConfig?: CloudflareConfig;
+  /** NIM config (for nvidia-nim provider) */
+  nimConfig?: NimConfig;
   /** Model to use */
   model?: string;
   /** Inference steps */
@@ -76,6 +80,7 @@ export async function generateImage(
     sceneId,
     provider = 'cloudflare',
     cloudflareConfig,
+    nimConfig,
     model,
     steps,
     count = 1,
@@ -97,6 +102,11 @@ export async function generateImage(
     return generateLocal(req);
   }
 
+  // NVIDIA NIM provider
+  if (provider === 'nvidia-nim') {
+    return generateNim(req);
+  }
+
   // Cloudflare provider
   if (!cloudflareConfig?.workerUrl) {
     return { success: false, images: [], error: 'Cloudflare Worker URL not configured' };
@@ -112,7 +122,7 @@ export async function generateImage(
     });
 
     if (!result.success || !result.imageUrls || result.imageUrls.length === 0) {
-      return { success: false, images: [], error: result.error || 'Generation failed' };
+      return { success: false, images: [], error: extractErrorMessage(result.error, 'Generation failed') };
     }
 
     const store = useDocuFlowStore.getState();
@@ -135,7 +145,7 @@ export async function generateImage(
         const resp = await fetch(croppedUrl);
         const blob = await resp.blob();
         const arrayBuffer = await blob.arrayBuffer();
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+        const base64 = uint8ArrayToBase64(new Uint8Array(arrayBuffer));
         const ext = croppedUrl.includes('image/jpeg') ? 'jpg' : 'png';
         const saveResult = await window.docuflow.saveBytes({
           imageBase64: base64,
@@ -230,7 +240,7 @@ async function generateLocal(req: ImageGenerationRequest): Promise<ImageGenerati
     }, onProgress);
 
     if (!result.success || !result.path) {
-      return { success: false, images: [], error: result.error || 'Local generation failed' };
+      return { success: false, images: [], error: extractErrorMessage(result.error, 'Local generation failed') };
     }
 
     // Convert file path to asset URL
@@ -275,6 +285,132 @@ async function generateLocal(req: ImageGenerationRequest): Promise<ImageGenerati
 }
 
 /**
+ * Generate image using NVIDIA NIM provider.
+ */
+async function generateNim(req: ImageGenerationRequest): Promise<ImageGenerationResult> {
+  const {
+    prompt,
+    aspectRatio = '1:1',
+    negativePrompt,
+    source,
+    sceneId,
+    nimConfig,
+    model,
+    steps,
+    count,
+    width: reqWidth,
+    height: reqHeight,
+    seed,
+  } = req;
+
+  if (!nimConfig?.apiKey) {
+    return { success: false, images: [], error: 'NVIDIA API key not configured' };
+  }
+
+  // Parse aspect ratio to dimensions
+  const [ratioW, ratioH] = aspectRatio.split(':').map(Number);
+
+  // NVIDIA NIM supports specific sizes; default to 1024x1024 for 1:1
+  let w = reqWidth || 1024;
+  let h = reqHeight || 1024;
+  if (!reqWidth && !reqHeight) {
+    if (ratioW >= ratioH) {
+      w = 1024;
+      h = Math.round(1024 * ratioH / ratioW);
+    } else {
+      h = 1024;
+      w = Math.round(1024 * ratioW / ratioH);
+    }
+  }
+
+  try {
+    const nimModel = (model || NIM_DEFAULT_MODEL) as NimModelId;
+
+    const result = await generateWithNim(
+      {
+        prompt: prompt.trim(),
+        model: nimModel,
+        n: Math.min(count || 1, 4),
+        width: w,
+        height: h,
+        steps: steps || undefined,
+        seed,
+      },
+      nimConfig.apiKey,
+    );
+
+    if (!result.success || !result.imageUrls || result.imageUrls.length === 0) {
+      return { success: false, images: [], error: extractErrorMessage(result.error, 'NVIDIA generation failed') };
+    }
+
+    const store = useDocuFlowStore.getState();
+    const generatedImages: GeneratedImage[] = [];
+
+    for (const imageUrl of result.imageUrls) {
+      const imageId = uuidv4();
+
+      // Crop to requested aspect ratio if needed
+      const croppedUrl = ratioW && ratioH
+        ? await cropImageToAspectRatio(imageUrl, ratioW, ratioH)
+        : imageUrl;
+
+      // Persist to disk
+      let diskPath: string | undefined;
+      try {
+        const resp = await fetch(croppedUrl);
+        const blob = await resp.blob();
+        const arrayBuffer = await blob.arrayBuffer();
+        const base64 = uint8ArrayToBase64(new Uint8Array(arrayBuffer));
+        const ext = croppedUrl.includes('image/jpeg') ? 'jpg' : 'png';
+        const saveResult = await window.docuflow.saveBytes({
+          imageBase64: base64,
+          filename: `nvidia-${Date.now()}-${imageId.slice(0, 8)}.${ext}`,
+        });
+        if (saveResult.success && saveResult.path) {
+          diskPath = saveResult.path;
+        }
+      } catch (e) {
+        console.warn('Failed to persist NVIDIA image to disk:', e);
+      }
+
+      const generatedImage: GeneratedImage = {
+        id: imageId,
+        prompt: prompt.trim(),
+        style: '',
+        aspectRatio,
+        url: diskPath ? window.docuflow.filePathToAssetUrl(diskPath) : croppedUrl,
+        timestamp: Date.now(),
+        source,
+        sceneId,
+        provider: 'nvidia-nim',
+        model: nimModel,
+      };
+
+      store.addGeneratedImage(generatedImage);
+      generatedImages.push(generatedImage);
+
+      // Register as asset
+      const currentAssets = useDocuFlowStore.getState().assets;
+      const asset: Asset = {
+        id: imageId,
+        logicalId: generateLogicalId('image', currentAssets),
+        filename: `nvidia-${Date.now()}-${imageId.slice(0, 8)}.png`,
+        type: 'image',
+        mimeType: 'image/png',
+        url: diskPath ? window.docuflow.filePathToAssetUrl(diskPath) : croppedUrl,
+        filePath: diskPath,
+      };
+      store.addAsset(asset);
+    }
+
+    return { success: true, images: generatedImages };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'NVIDIA generation failed';
+    return { success: false, images: [], error: message };
+  }
+}
+
+/**
  * Regenerate an existing image.
  * Preserves the original until the new image succeeds.
  * Updates both generatedImages[] and the linked asset.
@@ -285,6 +421,7 @@ export async function regenerateImage(
   options?: {
     provider?: ImageProvider;
     cloudflareConfig?: CloudflareConfig;
+    nimConfig?: NimConfig;
     model?: string;
     steps?: number;
     negativePrompt?: string;
@@ -307,11 +444,13 @@ export async function regenerateImage(
     sceneId: existing.sceneId,
     provider: options?.provider || existing.provider || 'cloudflare',
     cloudflareConfig: options?.cloudflareConfig,
+    nimConfig: options?.nimConfig,
     model: options?.model,
     steps: options?.steps,
     localModelPath: options?.localModelPath,
     device: options?.device,
     onProgress: options?.onProgress,
+    unloadAfter: false,
   });
 
   if (result.success && result.images.length > 0) {
@@ -347,7 +486,7 @@ export async function regenerateImage(
     return { success: true, images: updatedImage ? [updatedImage] : [] };
   }
 
-  // On failure, preserve original — do nothing
+  // On failure, preserve original â€” do nothing
   return result;
 }
 
@@ -402,14 +541,15 @@ function cropImageToAspectRatio(imageUrl: string, ratioW: number, ratioH: number
 export interface SceneGenerationRequest {
   backgroundDescription: string;
   personDescription: string;
-  /** User-provided negative prompt for background (may contain inline "Negative prompt:" — will be parsed) */
+  /** User-provided negative prompt for background (may contain inline "Negative prompt:" â€” will be parsed) */
   backgroundNegativePrompt?: string;
-  /** User-provided negative prompt for person (may contain inline "Negative prompt:" — will be parsed) */
+  /** User-provided negative prompt for person (may contain inline "Negative prompt:" â€” will be parsed) */
   personNegativePrompt?: string;
   aspectRatio?: string;
   source?: 'image-generator' | 'scene-generator';
   provider?: ImageProvider;
   cloudflareConfig?: CloudflareConfig;
+  nimConfig?: NimConfig;
   model?: string;
   steps?: number;
   localModelPath?: string;
@@ -444,6 +584,7 @@ export async function generateScenePair(
     source = 'image-generator',
     provider = 'cloudflare',
     cloudflareConfig,
+    nimConfig,
     model,
     steps,
     localModelPath,
@@ -470,13 +611,13 @@ export async function generateScenePair(
     parsedPerson.negativePrompt || undefined,
   );
 
-  // Debug logging — proves negative prompts reach the pipeline
+  // Debug logging â€” proves negative prompts reach the pipeline
   console.log('[SceneGen] BACKGROUND PROMPT:', prompts.backgroundPrompt.slice(0, 120));
   console.log('[SceneGen] BACKGROUND NEGATIVE:', prompts.backgroundNegative);
   console.log('[SceneGen] PERSON PROMPT:', prompts.personPrompt.slice(0, 120));
   console.log('[SceneGen] PERSON NEGATIVE:', prompts.personNegative);
 
-  // Phase 1 — Background
+  // Phase 1 â€” Background
   onProgress?.('background', { type: 'status', message: 'Generating background...' });
 
   const bgResult = await generateImage({
@@ -486,6 +627,7 @@ export async function generateScenePair(
     source,
     provider,
     cloudflareConfig,
+    nimConfig,
     model,
     steps,
     localModelPath,
@@ -493,7 +635,9 @@ export async function generateScenePair(
     width,
     height,
     seed,
-    unloadAfter: provider === 'local', // Unload model after background to free CUDA for person model
+    // CRITICAL: unloadAfter=true for local provider so SD1.5 is unloaded from VRAM
+    // before RV6 is loaded for person generation. Prevents VRAM overflow on 4GB GPUs.
+    unloadAfter: provider === 'local',
   });
 
   if (!bgResult.success || bgResult.images.length === 0) {
@@ -508,7 +652,7 @@ export async function generateScenePair(
   const store = useDocuFlowStore.getState();
   store.updateGeneratedImage(bgImage.id, { generationType: 'scene-background' });
 
-  // Phase 2 — Person
+  // Phase 2 â€” Person
   onProgress?.('person', { type: 'status', message: 'Generating person...' });
 
   const personResult = await generateImage({
@@ -518,6 +662,7 @@ export async function generateScenePair(
     source,
     provider,
     cloudflareConfig,
+    nimConfig,
     model,
     steps,
     localModelPath,
@@ -525,6 +670,7 @@ export async function generateScenePair(
     width,
     height,
     seed: seed !== undefined ? seed + 1 : undefined,
+      unloadAfter: false,
   });
 
   if (!personResult.success || personResult.images.length === 0) {
@@ -547,4 +693,18 @@ export async function generateScenePair(
     background: bgImage,
     person: personImage,
   };
+}
+
+/**
+ * Convert Uint8Array to base64 string without hitting call stack limits.
+ * The naive approach of `btoa(String.fromCharCode(...uint8Array))` fails
+ * for large arrays due to JavaScript's argument count limits.
+ */
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }

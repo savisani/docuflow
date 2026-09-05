@@ -13,6 +13,7 @@ import type {
   QualityIssue,
   PipelineStageName,
 } from './PipelineTypes';
+import { extractErrorMessage } from '../../../../core/errors';
 
 // ---------------------------------------------------------------------------
 // Logging helper
@@ -73,7 +74,7 @@ export async function runBackgroundStage(
       return {
         success: false,
         assets: {},
-        error: result.error || 'Background generation failed',
+        error: extractErrorMessage(result.error, 'Background generation failed'),
       };
     }
 
@@ -130,7 +131,7 @@ export async function runPersonStage(
       return {
         success: false,
         assets: {},
-        error: result.error || 'Person generation failed',
+        error: extractErrorMessage(result.error, 'Person generation failed'),
       };
     }
 
@@ -272,7 +273,7 @@ export async function runCompositeStage(
       }
 
       // Fallback: use background if compositing fails
-      log('COMPOSITE', job.sceneId, `compositing failed: ${result.error} — using background`);
+      log('COMPOSITE', job.sceneId, `compositing failed: ${extractErrorMessage(result.error)} — using background`);
       return {
         success: true,
         assets: { compositePath: assets.backgroundPath },

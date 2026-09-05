@@ -367,10 +367,9 @@ def generate_image(args):
         t_load_start = time.time()
 
         # === LOAD PIPELINE ===
-        # Strategy: Load in fp32 for maximum stability.
-        # RV6 UNet produces NaN in fp16 on GTX 1650. SD1.5 can use fp16.
-        # We use fp32 for all components to guarantee correctness.
-        # Memory optimizations (attention slicing, tiling) keep VRAM under 4GB.
+        # Strategy: Load in fp16 with low_cpu_mem_usage for memory efficiency,
+        # then convert VAE to fp32 for stability (prevents black/NaN images on GTX 1650).
+        target_dtype = torch.float16
 
         if is_safetensors_file:
             # Direct path to .safetensors file (e.g. RV6 checkpoint)
@@ -390,19 +389,33 @@ def generate_image(args):
                 config=config_path,
                 safety_checker=None,
                 local_files_only=True,
+                torch_dtype=target_dtype,
+                low_cpu_mem_usage=True,
             )
             log("LOAD", "from_single_file COMPLETE", load_id=load_id, gen_id=gen_id)
 
         elif is_diffusers:
             # Diffusers directory (e.g. stable-diffusion-v1-5/)
-            log("LOAD", f"Diffusers directory: {model_path}", load_id=load_id, gen_id=gen_id)
-            log("LOAD", f"from_pretrained START path={model_path}", load_id=load_id, gen_id=gen_id)
-            pipe = StableDiffusionPipeline.from_pretrained(
-                model_path,
-                dtype=torch.float16,
-                safety_checker=None,
-                local_files_only=True,
-            )
+            # Check for fp16 variant files
+            unet_dir = Path(model_path) / "unet"
+            has_fp16 = (unet_dir / "diffusion_pytorch_model.fp16.safetensors").exists()
+            has_default = (unet_dir / "diffusion_pytorch_model.safetensors").exists()
+            variant = "fp16" if has_fp16 and not has_default else None
+            log("LOAD", f"Diffusers directory: {model_path} (variant={variant or 'default'})", load_id=load_id, gen_id=gen_id)
+
+            load_kwargs = {
+                "pretrained_model_name_or_path": model_path,
+                "safety_checker": None,
+                "local_files_only": True,
+                "torch_dtype": target_dtype,
+                "low_cpu_mem_usage": True,
+            }
+            if variant:
+                load_kwargs["variant"] = variant
+                log("LOAD", f"Using variant={variant} for fp16 weights", load_id=load_id, gen_id=gen_id)
+
+            log("LOAD", f"from_pretrained START path={model_path} variant={variant}", load_id=load_id, gen_id=gen_id)
+            pipe = StableDiffusionPipeline.from_pretrained(**load_kwargs)
             log("LOAD", "from_pretrained COMPLETE", load_id=load_id, gen_id=gen_id)
 
         elif is_safetensors_dir:
@@ -424,6 +437,8 @@ def generate_image(args):
                 config=config_path,
                 safety_checker=None,
                 local_files_only=True,
+                torch_dtype=target_dtype,
+                low_cpu_mem_usage=True,
             )
             log("LOAD", "from_single_file COMPLETE", load_id=load_id, gen_id=gen_id)
 
@@ -444,15 +459,28 @@ def generate_image(args):
         log("LOAD", "Moving to GPU...", load_id=load_id, gen_id=gen_id)
         pipe = pipe.to("cuda")
 
-        # For Diffusers directories loaded in fp16: convert UNet to fp16
-        # For single-file (RV6): keep everything in fp32 for stability
-        if is_diffusers:
-            log("LOAD", "Diffusers model: using fp16 UNet/text_encoder, fp32 VAE", load_id=load_id, gen_id=gen_id)
-        else:
-            log("LOAD", "Single-file model: using fp32 all components (stability)", load_id=load_id, gen_id=gen_id)
-            pipe.unet.to(dtype=torch.float32)
-            pipe.text_encoder.to(dtype=torch.float32)
-            pipe.vae.to(dtype=torch.float32)
+        # For all models: UNet/text_encoder in fp16, VAE in fp32
+        # VAE fp32 prevents black/NaN images on GTX 1650
+        log("LOAD", "Model loaded: fp16 UNet/text_encoder, fp32 VAE", load_id=load_id, gen_id=gen_id)
+        pipe.vae = pipe.vae.to(dtype=torch.float32)
+        # Force ALL VAE params to fp32 (from_pretrained can leave them in fp16)
+        for module in pipe.vae.modules():
+            for param in module.parameters(recurse=False):
+                param.data = param.data.to(dtype=torch.float32)
+            for buf in module.buffers(recurse=False):
+                if buf.is_floating_point():
+                    buf.data = buf.data.to(dtype=torch.float32)
+
+        # Wrap decode: UNet outputs fp16 latents, cast to fp32 before VAE
+        _original_vae_decode = pipe.vae.decode
+
+        def _safe_vae_decode(z, return_dict=True, generator=None, **kwargs):
+            if z.dtype != torch.float32:
+                z = z.to(dtype=torch.float32)
+            return _original_vae_decode(z, return_dict=return_dict, generator=generator, **kwargs)
+
+        pipe.vae.decode = _safe_vae_decode
+        log("LOAD", "VAE: forced fp32 params + decode wrapper (GPU-only)", load_id=load_id, gen_id=gen_id)
 
         # === VERIFY DEVICE PLACEMENT ===
         unet_device = str(pipe.unet.device)
@@ -606,6 +634,146 @@ def generate_image(args):
         sys.exit(1)
 
 
+def validate_local_model(model_path: str) -> dict:
+    """Validate a local model directory or file. Returns validity status with details."""
+    p = Path(model_path)
+    result = {
+        "valid": False,
+        "path": str(p),
+        "exists": p.exists(),
+        "format": None,
+        "missing_files": [],
+        "warnings": [],
+    }
+
+    if not p.exists():
+        result["error"] = f"Path does not exist: {model_path}"
+        return result
+
+    # Case 1: Single .safetensors file (e.g. RV6)
+    if p.is_file() and p.suffix == '.safetensors':
+        result["format"] = "single-file"
+        size_gb = p.stat().st_size / (1024**3)
+        result["size_gb"] = round(size_gb, 2)
+        if size_gb < 0.1:
+            result["warnings"].append(f"File is very small ({size_gb:.2f} GB), may be corrupted")
+        result["valid"] = True
+        return result
+
+    # Case 2: Directory
+    if not p.is_dir():
+        result["error"] = f"Path is not a file or directory: {model_path}"
+        return result
+
+    # Check if Diffusers directory
+    has_model_index = (p / "model_index.json").exists()
+    has_unet_dir = (p / "unet").is_dir()
+    has_vae_dir = (p / "vae").is_dir()
+    has_text_encoder_dir = (p / "text_encoder").is_dir()
+    has_tokenizer_dir = (p / "tokenizer").is_dir()
+    has_scheduler_dir = (p / "scheduler").is_dir()
+
+    # Check for safetensors files in root (single-file checkpoint dir)
+    safetensors_files = [f for f in p.iterdir() if f.suffix == '.safetensors' and f.is_file()]
+
+    if has_model_index and has_unet_dir:
+        result["format"] = "diffusers"
+
+        # Validate model_index.json
+        try:
+            with open(p / "model_index.json", 'r') as f:
+                config = json.load(f)
+            result["class_name"] = config.get("_class_name", "Unknown")
+        except Exception as e:
+            result["warnings"].append(f"Could not read model_index.json: {e}")
+
+        # Check UNet
+        if has_unet_dir:
+            unet_dir = p / "unet"
+            has_config = (unet_dir / "config.json").exists()
+            has_fp16_weights = (unet_dir / "diffusion_pytorch_model.fp16.safetensors").exists()
+            has_default_weights = (unet_dir / "diffusion_pytorch_model.safetensors").exists()
+            has_bin_weights = (unet_dir / "diffusion_pytorch_model.bin").exists()
+
+            if not has_config:
+                result["missing_files"].append("unet/config.json")
+            if not has_fp16_weights and not has_default_weights and not has_bin_weights:
+                result["missing_files"].append("unet/diffusion_pytorch_model.safetensors (or .fp16.safetensors or .bin)")
+            else:
+                if has_fp16_weights:
+                    result["unet_variant"] = "fp16"
+                    result["unet_weights"] = "diffusion_pytorch_model.fp16.safetensors"
+                elif has_default_weights:
+                    result["unet_variant"] = "default"
+                    result["unet_weights"] = "diffusion_pytorch_model.safetensors"
+                else:
+                    result["unet_variant"] = "bin"
+                    result["unet_weights"] = "diffusion_pytorch_model.bin"
+        else:
+            result["missing_files"].append("unet/ directory")
+
+        # Check VAE
+        if has_vae_dir:
+            vae_dir = p / "vae"
+            has_config = (vae_dir / "config.json").exists()
+            has_fp16_weights = (vae_dir / "diffusion_pytorch_model.fp16.safetensors").exists()
+            has_default_weights = (vae_dir / "diffusion_pytorch_model.safetensors").exists()
+
+            if not has_config:
+                result["missing_files"].append("vae/config.json")
+            if not has_fp16_weights and not has_default_weights:
+                result["missing_files"].append("vae/diffusion_pytorch_model.safetensors (or .fp16.safetensors)")
+        else:
+            result["missing_files"].append("vae/ directory")
+
+        # Check Text Encoder
+        if has_text_encoder_dir:
+            te_dir = p / "text_encoder"
+            has_config = (te_dir / "config.json").exists()
+            has_weights = any(te_dir.glob("*.safetensors")) or any(te_dir.glob("*.bin"))
+            if not has_config:
+                result["missing_files"].append("text_encoder/config.json")
+            if not has_weights:
+                result["missing_files"].append("text_encoder/ weights file")
+        else:
+            result["missing_files"].append("text_encoder/ directory")
+
+        # Check Tokenizer
+        if has_tokenizer_dir:
+            tok_dir = p / "tokenizer"
+            has_vocab = (tok_dir / "vocab.json").exists()
+            has_merges = (tok_dir / "merges.txt").exists()
+            if not has_vocab:
+                result["missing_files"].append("tokenizer/vocab.json")
+            if not has_merges:
+                result["missing_files"].append("tokenizer/merges.txt")
+        else:
+            result["missing_files"].append("tokenizer/ directory")
+
+        # Check Scheduler
+        if not has_scheduler_dir:
+            result["missing_files"].append("scheduler/ directory")
+        elif not (p / "scheduler" / "scheduler_config.json").exists():
+            result["missing_files"].append("scheduler/scheduler_config.json")
+
+    elif safetensors_files:
+        result["format"] = "safetensors-directory"
+        result["files"] = [f.name for f in safetensors_files]
+        result["valid"] = True
+        return result
+    else:
+        result["error"] = "Directory does not contain model_index.json or .safetensors files"
+        return result
+
+    # Final validity check
+    if not result["missing_files"]:
+        result["valid"] = True
+    else:
+        result["error"] = f"Missing {len(result['missing_files'])} required file(s)"
+
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description="Local Stable Diffusion image generation (GPU-only)")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
@@ -628,6 +796,9 @@ def main():
     subparsers.add_parser("detect-hardware", help="Detect hardware capabilities")
     subparsers.add_parser("gpu-status", help="Get detailed GPU/VRAM status")
 
+    validate_parser = subparsers.add_parser("validate-model", help="Validate a local model directory")
+    validate_parser.add_argument("--model_path", type=str, required=True, help="Path to model directory or file")
+
     args = parser.parse_args()
 
     if args.command == "generate":
@@ -640,6 +811,9 @@ def main():
     elif args.command == "gpu-status":
         info = get_gpu_status()
         print(json.dumps(info))
+    elif args.command == "validate-model":
+        result = validate_local_model(args.model_path)
+        print(json.dumps(result))
     else:
         parser.print_help()
         sys.exit(1)

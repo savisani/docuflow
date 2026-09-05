@@ -15,6 +15,7 @@ import {
 import { registerAssetIpc } from './ipc/assets'
 import { registerPipelineIpc } from './ipc/pipeline'
 import { getModelManager, ModelManagerRunner } from './modelManager'
+import { normalizeError, createLogger, ErrorCode } from '../core/errors'
 
 const ASSET_PROTOCOL = 'docuflow-asset'
 
@@ -189,6 +190,14 @@ function registerProjectIpc(): void {
   })
 
   ipcMain.handle('project:save', async (_event, projectName: string, projectData: any) => {
+    if (!projectName || typeof projectName !== 'string') {
+      const err = normalizeError('projectName is required', ErrorCode.VALIDATION)
+      return { success: false, error: err.toSerializable() }
+    }
+    if (!projectData || typeof projectData !== 'object') {
+      const err = normalizeError('projectData is required', ErrorCode.VALIDATION)
+      return { success: false, error: err.toSerializable() }
+    }
     try {
       const filePath = getProjectFilePath(projectName)
       const dir = join(filePath, '..')
@@ -197,21 +206,30 @@ function registerProjectIpc(): void {
       }
       writeFileSync(filePath, JSON.stringify(projectData, null, 2), 'utf-8')
       return { success: true, path: filePath }
-    } catch (err: any) {
-      return { success: false, error: err.message }
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, ErrorCode.PROJECT_SAVE)
+      return { success: false, error: normalized.toSerializable() }
     }
   })
 
   ipcMain.handle('project:load', async (_event, projectName: string) => {
+    if (!projectName || typeof projectName !== 'string') {
+      const err = normalizeError('projectName is required', ErrorCode.VALIDATION)
+      return { success: false, error: err.toSerializable() }
+    }
     try {
       const filePath = getProjectFilePath(projectName)
       if (!existsSync(filePath)) {
-        return { success: false, error: 'Project file not found' }
+        const err = normalizeError('Project file not found', ErrorCode.PROJECT_LOAD, {
+          context: { projectName },
+        })
+        return { success: false, error: err.toSerializable() }
       }
       const data = readFileSync(filePath, 'utf-8')
       return { success: true, data: JSON.parse(data) }
-    } catch (err: any) {
-      return { success: false, error: err.message }
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, ErrorCode.PROJECT_LOAD)
+      return { success: false, error: normalized.toSerializable() }
     }
   })
 
@@ -370,9 +388,31 @@ function registerLocalModelManagerIpc(): void {
     device?: string
     generationId?: string
     unloadAfter?: boolean
-  }): Promise<{ success: boolean; path?: string; error?: string }> => {
+  }): Promise<{ success: boolean; path?: string; error?: string | ReturnType<typeof normalizeError.prototype.toSerializable> }> => {
+    // Validate required fields
+    if (!params || typeof params.prompt !== 'string' || !params.prompt) {
+      const err = normalizeError('prompt is required', ErrorCode.VALIDATION)
+      return { success: false, error: err.toSerializable() }
+    }
+    if (typeof params.width !== 'number' || params.width <= 0) {
+      const err = normalizeError('width must be a positive number', ErrorCode.VALIDATION)
+      return { success: false, error: err.toSerializable() }
+    }
+    if (typeof params.height !== 'number' || params.height <= 0) {
+      const err = normalizeError('height must be a positive number', ErrorCode.VALIDATION)
+      return { success: false, error: err.toSerializable() }
+    }
+    if (typeof params.outputPath !== 'string' || !params.outputPath) {
+      const err = normalizeError('outputPath is required', ErrorCode.VALIDATION)
+      return { success: false, error: err.toSerializable() }
+    }
+    if (typeof params.modelPath !== 'string' || !params.modelPath) {
+      const err = normalizeError('modelPath is required', ErrorCode.VALIDATION)
+      return { success: false, error: err.toSerializable() }
+    }
     const genId = params.generationId || `gen-${Date.now()}`
-    console.log(`[image-gen] ENHANCED genId=${genId} model=${params.modelPath} unloadAfter=${params.unloadAfter}`)
+    const log = createLogger('image-gen')
+    log.info('ENHANCED generation started', { genId, model: params.modelPath, unloadAfter: params.unloadAfter })
 
     let resolvedOutputPath = params.outputPath
     if (resolvedOutputPath.includes('%TEMP%')) {
@@ -386,7 +426,10 @@ function registerLocalModelManagerIpc(): void {
       // Load model (reuses if same model already loaded)
       const loadResult = await mgr.loadModel(params.modelPath)
       if (!loadResult.success) {
-        return { success: false, error: loadResult.error || 'Failed to load model' }
+        const err = normalizeError(loadResult.error || 'Failed to load model', ErrorCode.MODEL, {
+          context: { modelPath: params.modelPath },
+        })
+        return { success: false, error: err.toSerializable() }
       }
 
       // Generate
@@ -403,14 +446,17 @@ function registerLocalModelManagerIpc(): void {
 
       // Unload after generation if requested (for scene generation: bg → unload → person)
       if (params.unloadAfter && genResult.success) {
-        console.log(`[image-gen] Unloading model after generation (unloadAfter=true)`)
+        log.info('Unloading model after generation')
         await mgr.unloadModel()
       }
 
       return genResult
-    } catch (err) {
-      console.error(`[image-gen] ERROR genId=${genId}`, err)
-      return { success: false, error: err instanceof Error ? err.message : 'Generation failed' }
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, ErrorCode.AI_GENERATION, {
+        context: { genId, modelPath: params.modelPath },
+      })
+      log.error('Generation failed', { genId, error: normalized.message })
+      return { success: false, error: normalized.toSerializable() }
     }
   })
 
@@ -429,18 +475,26 @@ function registerLocalModelManagerIpc(): void {
     try {
       const mgr = getModelManagerInstance()
       return await mgr.unloadModel()
-    } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : 'Unload failed' }
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, ErrorCode.MODEL)
+      return { success: false, error: normalized.toSerializable() }
     }
   })
 
   // Switch model (unload previous, load new)
   ipcMain.handle('model:switch', async (_event, params: { modelPath: string }) => {
+    if (!params || typeof params.modelPath !== 'string' || !params.modelPath) {
+      const err = normalizeError('modelPath is required', ErrorCode.VALIDATION)
+      return { success: false, error: err.toSerializable() }
+    }
     try {
       const mgr = getModelManagerInstance()
       return await mgr.switchModel(params.modelPath)
-    } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : 'Switch failed' }
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, ErrorCode.MODEL, {
+        context: { modelPath: params.modelPath },
+      })
+      return { success: false, error: normalized.toSerializable() }
     }
   })
 
@@ -456,11 +510,18 @@ function registerLocalModelManagerIpc(): void {
 
   // Begin batch session
   ipcMain.handle('model:begin-batch', async (_event, params: { modelPath: string }) => {
+    if (!params || typeof params.modelPath !== 'string' || !params.modelPath) {
+      const err = normalizeError('modelPath is required', ErrorCode.VALIDATION)
+      return { success: false, error: err.toSerializable() }
+    }
     try {
       const mgr = getModelManagerInstance()
       return await mgr.beginBatch(params.modelPath)
-    } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : 'Batch start failed' }
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, ErrorCode.MODEL, {
+        context: { modelPath: params.modelPath },
+      })
+      return { success: false, error: normalized.toSerializable() }
     }
   })
 
@@ -508,6 +569,45 @@ function registerLocalModelManagerIpc(): void {
   // Get default models directory
   ipcMain.handle('local-models:get-dir', async () => {
     return getModelsDir()
+  })
+
+  // Ollama model management
+  ipcMain.handle('local-ai:load-ollama', async (_event, modelName: string) => {
+    try {
+      const mgr = getModelManagerInstance()
+      mgr.setWindow(BrowserWindow.getAllWindows()[0])
+      return await mgr.loadOllamaModel(modelName)
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('local-ai:stop-ollama', async () => {
+    try {
+      const mgr = getModelManagerInstance()
+      await mgr.stopOllamaServer()
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('local-ai:is-ollama-running', async () => {
+    try {
+      const mgr = getModelManagerInstance()
+      return await mgr.isOllamaRunning()
+    } catch {
+      return false
+    }
+  })
+
+  ipcMain.handle('local-ai:get-active-model', async () => {
+    try {
+      const mgr = getModelManagerInstance()
+      return await mgr.getActiveModelInfo()
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
   })
 }
 
@@ -646,9 +746,10 @@ function registerTranscriptionIpc(): void {
   ipcMain.handle('transcribe-audio', async (_event, params: {
     audioPath: string;
     modelSize?: string;
-  }): Promise<{ success: boolean; text?: string; segments?: any[]; language?: string; duration?: number; error?: string }> => {
-    if (!params.audioPath) {
-      return { success: false, error: 'No audio file path provided' }
+  }): Promise<{ success: boolean; text?: string; segments?: any[]; language?: string; duration?: number; error?: string | ReturnType<typeof normalizeError.prototype.toSerializable> }> => {
+    if (!params || typeof params.audioPath !== 'string' || !params.audioPath) {
+      const err = normalizeError('audioPath is required', ErrorCode.VALIDATION)
+      return { success: false, error: err.toSerializable() }
     }
 
     return new Promise((resolve) => {
@@ -662,7 +763,8 @@ function registerTranscriptionIpc(): void {
       }
 
       const pythonPath = getPythonPath()
-      console.log('[transcribe] Running:', pythonPath, args.join(' '))
+      const log = createLogger('transcribe')
+      log.info('Running transcription', { audioPath: params.audioPath, modelSize: params.modelSize })
 
       const pythonProcess = spawn(pythonPath, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -679,7 +781,7 @@ function registerTranscriptionIpc(): void {
 
       pythonProcess.stderr.on('data', (data: Buffer) => {
         stderr += data.toString()
-        console.log('[transcribe]', data.toString().trim())
+        log.debug('Python stderr', { output: data.toString().trim() })
       })
 
       pythonProcess.on('close', (code) => {
@@ -688,17 +790,25 @@ function registerTranscriptionIpc(): void {
             const result = JSON.parse(stdout.trim())
             resolve(result)
           } catch {
-            resolve({ success: false, error: `Failed to parse transcription output: ${stdout.slice(0, 200)}` })
+            const err = normalizeError(`Failed to parse transcription output: ${stdout.slice(0, 200)}`, ErrorCode.TRANSCRIPTION)
+            resolve({ success: false, error: err.toSerializable() })
           }
         } else {
-          let errorMsg = `Python process exited with code ${code}`
-          if (stderr.trim()) errorMsg = stderr.trim().slice(0, 500)
-          resolve({ success: false, error: errorMsg })
+          const errorMsg = stderr.trim()
+            ? stderr.trim().slice(0, 500)
+            : `Python process exited with code ${code}`
+          const err = normalizeError(errorMsg, ErrorCode.TRANSCRIPTION, {
+            context: { exitCode: code, audioPath: params.audioPath },
+          })
+          resolve({ success: false, error: err.toSerializable() })
         }
       })
 
       pythonProcess.on('error', (err) => {
-        resolve({ success: false, error: `Failed to start Python: ${err.message}` })
+        const normalized = normalizeError(err, ErrorCode.TRANSCRIPTION, {
+          context: { audioPath: params.audioPath },
+        })
+        resolve({ success: false, error: normalized.toSerializable() })
       })
     })
   })
@@ -720,6 +830,9 @@ function registerSaveImageIpc(): void {
     imageBase64: string;
     defaultName?: string;
   }): Promise<{ success: boolean; path?: string; error?: string }> => {
+    if (!params || typeof params.imageBase64 !== 'string' || !params.imageBase64) {
+      return { success: false, error: 'Invalid params: imageBase64 is required' }
+    }
     try {
       const result = await dialog.showSaveDialog({
         title: 'Save Image',
@@ -747,6 +860,9 @@ function registerSaveImageIpc(): void {
     sourcePath: string;
     defaultName?: string;
   }): Promise<{ success: boolean; path?: string; error?: string }> => {
+    if (!params || typeof params.sourcePath !== 'string' || !params.sourcePath) {
+      return { success: false, error: 'Invalid params: sourcePath is required' }
+    }
     try {
       if (!params.sourcePath || !existsSync(params.sourcePath)) {
         return { success: false, error: 'Source image not found' }
@@ -779,6 +895,12 @@ function registerSaveImageIpc(): void {
     folderPath: string;
     fileName?: string;
   }): Promise<{ success: boolean; path?: string; error?: string }> => {
+    if (!params || typeof params.imageBase64 !== 'string' || !params.imageBase64) {
+      return { success: false, error: 'Invalid params: imageBase64 is required' }
+    }
+    if (typeof params.folderPath !== 'string' || !params.folderPath) {
+      return { success: false, error: 'Invalid params: folderPath is required' }
+    }
     try {
       if (!params.folderPath) {
         return { success: false, error: 'No save location configured' }
@@ -804,6 +926,9 @@ function registerSaveImageIpc(): void {
     imageBase64: string;
     filename?: string;
   }): Promise<{ success: boolean; path?: string; error?: string }> => {
+    if (!params || typeof params.imageBase64 !== 'string' || !params.imageBase64) {
+      return { success: false, error: 'Invalid params: imageBase64 is required' }
+    }
     try {
       const { tmpdir } = await import('os')
       const fileName = params.filename || `docuflow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`
@@ -840,6 +965,13 @@ function registerUpscaleIpc(): void {
     scale?: number;
     device?: string;
   }): Promise<{ success: boolean; path?: string; inputSize?: string; outputSize?: string; time?: number; model?: string; device?: string; error?: string }> => {
+    // Validate required fields
+    if (!params || typeof params.inputPath !== 'string' || !params.inputPath) {
+      return { success: false, error: 'Invalid params: inputPath is required' }
+    }
+    if (typeof params.outputPath !== 'string' || !params.outputPath) {
+      return { success: false, error: 'Invalid params: outputPath is required' }
+    }
     const pythonPath = getPythonPath()
     const scriptDir = join(getScriptPath(), '..')
     const scriptPath = join(scriptDir, 'upscale_local.py')
@@ -1006,6 +1138,21 @@ function registerBatchPipelineIpc(): void {
     summary?: { total: number; success: number; failed: number };
     error?: string;
   }> => {
+    // Validate required fields
+    if (!params || !Array.isArray(params.jobs) || params.jobs.length === 0) {
+      return { success: false, error: 'Invalid params: jobs array is required and must not be empty' }
+    }
+    if (typeof params.modelPath !== 'string' || !params.modelPath) {
+      return { success: false, error: 'Invalid params: modelPath is required' }
+    }
+    if (typeof params.outputDir !== 'string' || !params.outputDir) {
+      return { success: false, error: 'Invalid params: outputDir is required' }
+    }
+    for (const job of params.jobs) {
+      if (!job.sceneId || !job.prompt) {
+        return { success: false, error: `Invalid job: sceneId and prompt are required` }
+      }
+    }
     const pythonPath = getPythonPath()
     const scriptPath = getBatchGenerateScriptPath()
 
@@ -1138,6 +1285,18 @@ function registerBatchPipelineIpc(): void {
     summary?: { total: number; success: number; failed: number };
     error?: string;
   }> => {
+    // Validate required fields
+    if (!params || !Array.isArray(params.jobs) || params.jobs.length === 0) {
+      return { success: false, error: 'Invalid params: jobs array is required and must not be empty' }
+    }
+    if (typeof params.outputDir !== 'string' || !params.outputDir) {
+      return { success: false, error: 'Invalid params: outputDir is required' }
+    }
+    for (const job of params.jobs) {
+      if (!job.sceneId || !job.inputPath) {
+        return { success: false, error: `Invalid job: sceneId and inputPath are required` }
+      }
+    }
     const pythonPath = getPythonPath()
     const scriptPath = getBatchUpscaleScriptPath()
 

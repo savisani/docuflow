@@ -32,6 +32,7 @@ const mockLayer: LayerState = {
     { property: 'scale', startFrame: 60, endFrame: 90, from: 1, to: 2, easing: 'easeInOut' },
     { property: 'rotationZ', startFrame: 0, endFrame: 300, from: 0, to: 360, easing: 'linear' },
   ],
+  keyframeTracks: [],
   assetSegments: [{ assetId: 'asset1', assetUrl: 'test.jpg', assetType: 'image', startFrame: 0 }],
 };
 

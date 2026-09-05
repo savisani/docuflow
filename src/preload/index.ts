@@ -130,6 +130,23 @@ const docuflowAPI = {
     return ipcRenderer.invoke('ollama:start')
   },
 
+  // Local AI model management (single-model policy)
+  loadOllamaModel: (modelName: string): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke('local-ai:load-ollama', modelName)
+  },
+
+  stopOllamaServer: (): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke('local-ai:stop-ollama')
+  },
+
+  isOllamaRunning: (): Promise<boolean> => {
+    return ipcRenderer.invoke('local-ai:is-ollama-running')
+  },
+
+  getActiveLocalModel: (): Promise<{ type: 'diffusion' | 'ollama' | 'none'; model: string | null }> => {
+    return ipcRenderer.invoke('local-ai:get-active-model')
+  },
+
   // Local model management
   listLocalModels: (): Promise<{ models: Array<{ name: string; path: string; size_bytes: number; size_label: string; type: string; format?: string; has_required_files: boolean }> }> => {
     return ipcRenderer.invoke('local-models:list')

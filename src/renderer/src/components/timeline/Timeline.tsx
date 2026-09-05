@@ -5,6 +5,9 @@ import { formatTime } from '../../utils/format';
 import { Play, Pause, Eye, EyeOff, Volume2, Type, Film, Magnet, Undo2, Redo2, Copy, Minimize2, Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { Panel, IconButton, Tooltip, Divider, Badge, LabelValue } from '../ui';
+import { JobManager } from '../../../../core/jobs/JobManager';
+import { WorkerManager } from '../../workers/core/workerManager';
+import type { ExtractPeaksResult } from '../../workers/core/types';
 
 const PIXELS_PER_SECOND = 80;
 const TRACK_HEIGHT = 32;
@@ -1032,63 +1035,86 @@ const AudioWaveform: React.FC<{
   const asset = assetId ? assets.find((a) => a.id === assetId) : null;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [ready, setReady] = useState(false);
+  const jobManagerRef = useRef<JobManager>(new JobManager());
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !asset?.url || width <= 0) return;
 
+    const jobManager = jobManagerRef.current;
     let cancelled = false;
     const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
 
-    const decode = async () => {
-      try {
+    const job = jobManager.run<ExtractPeaksResult>({
+      type: 'extract-peaks',
+      execute: async ({ signal, reportProgress }: { signal: AbortSignal; reportProgress: (p: number) => void }) => {
+        reportProgress(0);
+
         const response = await fetch(asset.url!);
         const arrayBuffer = await response.arrayBuffer();
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        if (cancelled) { audioContext.close(); return; }
+        if (signal.aborted) throw new Error('Cancelled');
 
+        reportProgress(0.2);
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        if (signal.aborted) throw new Error('Cancelled');
+
+        reportProgress(0.4);
         const channelData = audioBuffer.getChannelData(0);
         const numBars = Math.max(1, Math.floor(width / 3));
-        const samplesPerBar = Math.floor(channelData.length / numBars);
-        const peaks: number[] = [];
+        const channelDataCopy = new Float32Array(channelData);
 
-        for (let i = 0; i < numBars; i++) {
-          let max = 0;
-          for (let j = 0; j < samplesPerBar; j++) {
-            const val = Math.abs(channelData[i * samplesPerBar + j] || 0);
-            if (val > max) max = val;
-          }
-          peaks.push(max);
+        const workerManager = new WorkerManager(
+          new URL('../../workers/audio/audio.worker.ts', import.meta.url)
+        );
+
+        try {
+          const result = await workerManager.run<{ channelData: Float32Array; numBars: number }, ExtractPeaksResult>({
+            type: 'extract-peaks',
+            payload: { channelData: channelDataCopy, numBars },
+            transfer: [channelDataCopy.buffer],
+          }).promise;
+
+          reportProgress(0.9);
+          return result;
+        } finally {
+          workerManager.terminate();
         }
+      },
+    });
 
-        const peakMax = Math.max(...peaks, 0.01);
-        const ctx = canvas.getContext('2d');
-        if (!ctx) { audioContext.close(); return; }
+    job.promise.then((result: ExtractPeaksResult) => {
+      if (cancelled) { audioContext.close(); return; }
 
-        canvas.width = width;
-        canvas.height = height;
-        ctx.clearRect(0, 0, width, height);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { audioContext.close(); return; }
 
-        const barW = Math.max(1, width / numBars - 1);
-        const midY = height / 2;
+      canvas.width = width;
+      canvas.height = height;
+      ctx.clearRect(0, 0, width, height);
 
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-        for (let i = 0; i < numBars; i++) {
-          const amp = peaks[i] / peakMax;
-          const barH = Math.max(1, amp * height * 0.85);
-          const x = i * (barW + 1);
-          ctx.fillRect(x, midY - barH / 2, barW, barH);
-        }
+      const numBars = Math.max(1, Math.floor(width / 3));
+      const barW = Math.max(1, width / numBars - 1);
+      const midY = height / 2;
 
-        audioContext.close();
-        setReady(true);
-      } catch {
-        audioContext.close();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      for (let i = 0; i < numBars; i++) {
+        const amp = result.peaks[i] / result.peakMax;
+        const barH = Math.max(1, amp * height * 0.85);
+        const x = i * (barW + 1);
+        ctx.fillRect(x, midY - barH / 2, barW, barH);
       }
-    };
 
-    decode();
-    return () => { cancelled = true; audioContext.close(); };
+      audioContext.close();
+      setReady(true);
+    }).catch(() => {
+      audioContext.close();
+    });
+
+    return () => {
+      cancelled = true;
+      job.cancel();
+      audioContext.close();
+    };
   }, [asset?.url, width, height]);
 
   return (

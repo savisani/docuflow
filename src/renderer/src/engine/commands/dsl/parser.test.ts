@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest';
 import { parseDsl } from './parser';
+import { Command } from '../types';
 import { Asset } from '../../../types/assets';
 import { DSL_COMMAND_NAMES, COMMAND_REGISTRY } from './registry';
 
@@ -92,7 +93,7 @@ DEPTH IMAGE 1 FROM 0 TO 300 DURING 0-6`;
       expect(types[2]).toBe('rotate3D');
       expect(types[3]).toBe('depth');
 
-      const move3d = result.commands[1];
+      const move3d = result.commands[1] as Extract<Command, { type: 'move3D' }>;
       expect(move3d.from).toEqual({ x: 0, y: 0, z: 0 });
       expect(move3d.to).toEqual({ x: 100, y: 0, z: 400 });
     });
@@ -112,10 +113,10 @@ SFX 1 AT 3`;
       expect(types[2]).toBe('slide');
       expect(types[3]).toBe('sfx');
 
-      const slide = result.commands[2];
+      const slide = result.commands[2] as Extract<Command, { type: 'slide' }>;
       expect(slide.direction).toBe('right');
 
-      const sfx = result.commands[3];
+      const sfx = result.commands[3] as Extract<Command, { type: 'sfx' }>;
       expect(sfx.start).toBe(3);
       expect(sfx.asset).toBe('uuid-audio1');
     });
@@ -128,7 +129,7 @@ SFX 1 AT 3`;
       expect(result.errors).toHaveLength(0);
       expect(result.commands).toHaveLength(1);
 
-      const cmd = result.commands[0];
+      const cmd = result.commands[0] as Extract<Command, { type: 'music' }>;
       expect(cmd.type).toBe('music');
       expect(cmd.asset).toBe('uuid-music1');
       expect(cmd.start).toBe(0);
@@ -151,7 +152,7 @@ FADE OUT IMAGE 1 DURING 4-6`;
       expect(result.errors).toHaveLength(0);
       expect(result.commands).toHaveLength(1);
 
-      const cmd = result.commands[0];
+      const cmd = result.commands[0] as Extract<Command, { type: 'sfx' }>;
       expect(cmd.type).toBe('sfx');
       expect(cmd.volume).toBe(0.8);
     });
@@ -164,7 +165,7 @@ FADE OUT IMAGE 1 DURING 4-6`;
       expect(result.errors).toHaveLength(0);
       expect(result.commands).toHaveLength(1);
 
-      const cmd = result.commands[0];
+      const cmd = result.commands[0] as Extract<Command, { type: 'cameraMove' }>;
       expect(cmd.type).toBe('cameraMove');
       expect(cmd.from.z).toBe(1200);
       expect(cmd.to.z).toBe(800);
@@ -188,7 +189,7 @@ FADE OUT IMAGE 1 DURING 4-6`;
       expect(result.errors).toHaveLength(0);
       expect(result.commands).toHaveLength(1);
 
-      const cmd = result.commands[0];
+      const cmd = result.commands[0] as Extract<Command, { type: 'opacity' }>;
       expect(cmd.type).toBe('opacity');
       expect(cmd.from).toBe(0);
       expect(cmd.to).toBe(1);
@@ -221,7 +222,7 @@ FADE OUT IMAGE 1 DURING 4-6`;
       expect(result.errors).toHaveLength(0);
       expect(result.commands).toHaveLength(1);
 
-      const cmd = result.commands[0];
+      const cmd = result.commands[0] as Extract<Command, { type: 'replace' }>;
       expect(cmd.type).toBe('replace');
       expect(cmd.target).toBe('uuid-img1');
       expect(cmd.asset).toBe('uuid-img2');
@@ -234,7 +235,7 @@ FADE OUT IMAGE 1 DURING 4-6`;
       expect(result.errors).toHaveLength(0);
       expect(result.commands).toHaveLength(1);
 
-      const cmd = result.commands[0];
+      const cmd = result.commands[0] as Extract<Command, { type: 'depth' }>;
       expect(cmd.type).toBe('depth');
       expect(cmd.from).toBe(0);
       expect(cmd.to).toBe(400);
@@ -246,7 +247,7 @@ FADE OUT IMAGE 1 DURING 4-6`;
       expect(result.errors).toHaveLength(0);
       expect(result.commands).toHaveLength(1);
 
-      const cmd = result.commands[0];
+      const cmd = result.commands[0] as Extract<Command, { type: 'move3D' }>;
       expect(cmd.from.x).toBe(-100);
       expect(cmd.to.z).toBe(500);
       expect(cmd.start).toBe(1.5);
@@ -261,7 +262,7 @@ FADE OUT IMAGE 1 DURING 4-6`;
       expect(result.errors).toHaveLength(0);
       expect(result.commands).toHaveLength(1);
 
-      const cmd = result.commands[0];
+      const cmd = result.commands[0] as Extract<Command, { type: 'text' }>;
       expect(cmd.type).toBe('text');
       expect(cmd.content).toBe('HELLO');
       expect(cmd.start).toBe(0);

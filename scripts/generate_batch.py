@@ -188,6 +188,23 @@ def generate_batch(args):
 
         # === SAFE VAE: Keep VAE in fp32 to prevent NaN/black images ===
         pipe.vae = pipe.vae.to(dtype=torch.float32)
+        # Force ALL VAE params to fp32 (from_pretrained can leave them in fp16)
+        for module in pipe.vae.modules():
+            for param in module.parameters(recurse=False):
+                param.data = param.data.to(dtype=torch.float32)
+            for buf in module.buffers(recurse=False):
+                if buf.is_floating_point():
+                    buf.data = buf.data.to(dtype=torch.float32)
+
+        # Wrap decode: UNet outputs fp16 latents, cast to fp32 before VAE
+        _original_vae_decode = pipe.vae.decode
+
+        def _safe_vae_decode(z, return_dict=True, generator=None, **kwargs):
+            if z.dtype != torch.float32:
+                z = z.to(dtype=torch.float32)
+            return _original_vae_decode(z, return_dict=return_dict, generator=generator, **kwargs)
+
+        pipe.vae.decode = _safe_vae_decode
 
         # Move entire pipeline to CUDA
         report_status("Moving pipeline to GPU...")
