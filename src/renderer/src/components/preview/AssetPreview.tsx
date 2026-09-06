@@ -81,7 +81,16 @@ export const AssetPreview: React.FC = () => {
 
   const handleAudioPlay = useCallback(() => {
     if (audioRef.current) {
-      audioRef.current.play();
+      const audio = audioRef.current;
+      audio.play().catch((err) => {
+        console.error('[AssetPreview] Audio play failed:', {
+          name: err?.name,
+          message: err?.message,
+          code: err?.code,
+          constructorName: err?.constructor?.name,
+          stack: err?.stack,
+        });
+      });
       setAudioPlaying(true);
     }
   }, []);
@@ -180,7 +189,7 @@ export const AssetPreview: React.FC = () => {
               <div className="flex items-center justify-center gap-2">
                 <Tooltip content="Restart">
                   <button
-                    onClick={() => { if (audioRef.current) { audioRef.current.currentTime = 0; if (audioPlaying) audioRef.current.play(); } }}
+                    onClick={() => { if (audioRef.current) { audioRef.current.currentTime = 0; if (audioPlaying) { audioRef.current.play().catch((err) => { console.error('[AssetPreview] Restart play failed:', { name: err?.name, message: err?.message, code: err?.code }); }); } } }}
                     className="flex items-center gap-1 px-2 py-1 rounded-df-lg text-df-xs bg-df-surface-2/80 hover:bg-df-surface-2 text-df-text-secondary transition-colors border border-df-border"
                     aria-label="Restart"
                   >

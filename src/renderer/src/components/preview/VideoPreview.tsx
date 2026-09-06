@@ -131,7 +131,17 @@ export const VideoPreview: React.FC = () => {
   const handlePlay = useCallback(() => {
     const player = playerRef.current;
     if (!player) return;
-    player.play();
+    const playResult = player.play();
+    if (playResult && typeof playResult.catch === 'function') {
+      playResult.catch((err) => {
+        console.error('[VideoPreview] Player play failed:', {
+          name: err?.name,
+          message: err?.message,
+          code: err?.code,
+          constructorName: err?.constructor?.name,
+        });
+      });
+    }
     setPlaying(true);
   }, [setPlaying]);
 
