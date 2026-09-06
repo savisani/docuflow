@@ -157,10 +157,22 @@ async function callGeminiRaw(
   const data = await resp.json() as GeminiRawResponse;
 
   if (!resp.ok) {
-    const msg =
-      (data as Record<string, unknown>).error
-        ? String((data as Record<string, unknown>).error)
-        : `HTTP ${resp.status}`;
+    const errObj = (data as Record<string, unknown>).error;
+    let msg: string;
+    if (errObj && typeof errObj === 'object') {
+      const e = errObj as Record<string, unknown>;
+      msg = typeof e.message === 'string' ? e.message
+        : typeof e.status === 'string' ? `${e.status}: ${String(e.message || '')}`
+        : JSON.stringify(e);
+    } else if (typeof errObj === 'string') {
+      msg = errObj;
+    } else {
+      msg = `HTTP ${resp.status}`;
+    }
+
+    if (resp.status === 429) {
+      throw new Error(`Gemini rate limit/quota reached. ${msg} Please wait and try again.`);
+    }
     throw new Error(`Gemini API error: ${msg}`);
   }
 

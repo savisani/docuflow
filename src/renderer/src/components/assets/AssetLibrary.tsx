@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useRef } from 'react';
 import { useDocuFlowStore } from '../../app/store';
 import { Asset, AudioRole } from '../../types/assets';
-import { loadAssetMetadata } from '../../engine/media/loader';
+import { loadAssetMetadata, importNativeAssets } from '../../engine/media/loader';
 import { v4 as uuidv4 } from 'uuid';
 import { Film, Image, Music, Mic, Volume2, CloudRain, HelpCircle, Eye, EyeOff, GripVertical, Search, Filter, PanelLeft, Upload } from 'lucide-react';
 import { Panel, Tooltip, IconButton, Button, Badge, Divider, Section } from '../ui';
@@ -52,7 +52,8 @@ export const AssetLibrary: React.FC = () => {
 
     for (const file of validFiles) {
       try {
-        const metadata = await loadAssetMetadata(file, existingAssets);
+        const filePath = (file as any).path as string | undefined;
+        const metadata = await loadAssetMetadata(file, existingAssets, filePath);
         const asset: Asset = {
           id: uuidv4(),
           logicalId: metadata.logicalId || '',
@@ -60,6 +61,7 @@ export const AssetLibrary: React.FC = () => {
           type: metadata.type || 'image',
           mimeType: metadata.mimeType || file.type || 'application/octet-stream',
           url: metadata.url,
+          filePath: metadata.filePath,
           width: metadata.width,
           height: metadata.height,
           duration: metadata.duration,
@@ -72,9 +74,22 @@ export const AssetLibrary: React.FC = () => {
     }
   }, [addAsset]);
 
-  const handleImportClick = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
+  const handleImportClick = useCallback(async () => {
+    const { projectPath } = useDocuFlowStore.getState();
+    let projectName = 'Untitled';
+
+    if (projectPath) {
+      const projectDir = projectPath.replace(/[\\/][^\\/]+$/, '');
+      projectName = projectDir.split(/[\\/]/).pop() || 'Untitled';
+    }
+
+    const currentAssets = useDocuFlowStore.getState().assets;
+    const newAssets = await importNativeAssets(projectName, currentAssets);
+
+    for (const asset of newAssets) {
+      addAsset(asset);
+    }
+  }, [addAsset]);
 
   const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;

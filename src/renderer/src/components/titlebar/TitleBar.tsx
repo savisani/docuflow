@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Minus, Square, X, Maximize2, Play, RotateCcw, Undo2, Redo2, PanelLeft, Image, SlidersHorizontal, Sparkles, Film, Clapperboard, Cpu, Zap } from 'lucide-react';
+import { Minus, Square, X, Maximize2, Play, RotateCcw, Undo2, Redo2, PanelLeft, Image, SlidersHorizontal, Sparkles, Film, Clapperboard, Cpu, Zap, FileText, FolderOpen, Save, FilePlus } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { buildTimeline } from '../../engine/timeline/builder';
 import { validateCommands } from '../../engine/commands/validator';
@@ -26,6 +26,8 @@ export const TitleBar: React.FC = () => {
     gpuStatus, setGpuStatus, setGpuStatusLoading,
     localModelCount, localModelNames, setLocalModelInfo,
     loadedModelName, modelLoadState, setLoadedModel,
+    saveStatus, projectPath,
+    newProject, openProjectFromDialog, saveProject, saveAsProject,
   } = useDocuFlowStore();
 
   const [gpuPolling, setGpuPolling] = useState(false);
@@ -95,6 +97,22 @@ export const TitleBar: React.FC = () => {
   const handleMinimize = useCallback(() => { window.docuflow?.minimize(); }, []);
   const handleMaximize = useCallback(() => { window.docuflow?.maximize(); }, []);
   const handleClose = useCallback(() => { window.docuflow?.close(); }, []);
+
+  const handleNewProject = useCallback(() => {
+    newProject();
+  }, [newProject]);
+
+  const handleOpenProject = useCallback(async () => {
+    await openProjectFromDialog();
+  }, [openProjectFromDialog]);
+
+  const handleSave = useCallback(async () => {
+    await saveProject();
+  }, [saveProject]);
+
+  const handleSaveAs = useCallback(async () => {
+    await saveAsProject();
+  }, [saveAsProject]);
 
   const handleOffload = useCallback(async () => {
     try {
@@ -208,6 +226,74 @@ export const TitleBar: React.FC = () => {
             <span>{tab.label}</span>
           </button>
         ))}
+      </div>
+
+      <div className="w-px h-4 bg-df-divider mx-1" />
+
+      {/* File Menu */}
+      <div
+        className="flex items-center gap-0.5"
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      >
+        <Tooltip content="New Project" position="bottom">
+          <button
+            onClick={handleNewProject}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-df-sm text-df-xs font-medium bg-df-surface-2 hover:bg-df-surface-3 border border-df-border text-df-text-secondary hover:text-df-text-primary transition-all duration-df-fast active:scale-[0.97]"
+          >
+            <FilePlus size={11} />
+            <span>New</span>
+          </button>
+        </Tooltip>
+        <Tooltip content="Open Project" position="bottom">
+          <button
+            onClick={handleOpenProject}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-df-sm text-df-xs font-medium bg-df-surface-2 hover:bg-df-surface-3 border border-df-border text-df-text-secondary hover:text-df-text-primary transition-all duration-df-fast active:scale-[0.97]"
+          >
+            <FolderOpen size={11} />
+            <span>Open</span>
+          </button>
+        </Tooltip>
+        <Tooltip content="Save Project (Ctrl+S)" position="bottom">
+          <button
+            onClick={handleSave}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-df-sm text-df-xs font-medium bg-df-surface-2 hover:bg-df-surface-3 border border-df-border text-df-text-secondary hover:text-df-text-primary transition-all duration-df-fast active:scale-[0.97]"
+          >
+            <Save size={11} />
+            <span>Save</span>
+          </button>
+        </Tooltip>
+        <Tooltip content="Save As..." position="bottom">
+          <button
+            onClick={handleSaveAs}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-df-sm text-df-xs font-medium bg-df-surface-2 hover:bg-df-surface-3 border border-df-border text-df-text-secondary hover:text-df-text-primary transition-all duration-df-fast active:scale-[0.97]"
+          >
+            <FileText size={11} />
+            <span>Save As</span>
+          </button>
+        </Tooltip>
+      </div>
+
+      {/* Save Status Indicator */}
+      <div
+        className="flex items-center gap-2 px-2"
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      >
+        {projectPath && (
+          <span className="text-df-xs text-df-text-dim max-w-[200px] truncate" title={projectPath}>
+            {projectPath.split(/[/\\]/).pop()}
+          </span>
+        )}
+        <span className={`text-df-xs font-medium ${
+          saveStatus === 'saved' ? 'text-df-success' :
+          saveStatus === 'unsaved' ? 'text-df-warning' :
+          saveStatus === 'saving' ? 'text-df-accent animate-pulse' :
+          'text-df-error'
+        }`}>
+          {saveStatus === 'saved' ? '● Saved' :
+           saveStatus === 'unsaved' ? '○ Unsaved' :
+           saveStatus === 'saving' ? '◐ Saving...' :
+           '✕ Save failed'}
+        </span>
       </div>
 
       <div className="w-px h-4 bg-df-divider mx-1" />

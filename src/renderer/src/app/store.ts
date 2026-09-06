@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { Asset } from '../types/assets';
-import { ProjectSettings, Project, ProjectVoiceover, ProjectTranscript, ProjectSceneMarker } from '../types/project';
+import { ProjectSettings, Project, ProjectVoiceover, ProjectTranscript, ProjectSceneMarker, ProjectScene } from '../types/project';
 import { Command } from '../engine/commands/types';
 import { TimelineState } from '../types/timeline';
 import { buildTimeline } from '../engine/timeline/builder';
@@ -108,6 +108,7 @@ interface DocuFlowState {
 
   activeTab: ActiveTab;
   generatedImages: GeneratedImage[];
+  scenes: ProjectScene[];
 
   currentTime: number;
   playing: boolean;
@@ -171,6 +172,11 @@ interface DocuFlowState {
   batchActive: boolean;
   batchSnapshot: HistoryState | null;
 
+  // Project file path and save state
+  projectPath: string | null;
+  isDirty: boolean;
+  saveStatus: 'saved' | 'unsaved' | 'saving' | 'save-failed';
+
   setProject: (project: Project) => void;
   setAssets: (assets: Asset[]) => void;
   addAsset: (asset: Asset) => void;
@@ -186,6 +192,7 @@ interface DocuFlowState {
   addGeneratedImage: (image: GeneratedImage) => void;
   updateGeneratedImage: (id: string, updates: Partial<GeneratedImage>) => void;
   getGeneratedImagesBySceneId: (sceneId: string) => GeneratedImage[];
+  setScenes: (scenes: ProjectScene[]) => void;
   addToTimeline: (imageId: string) => void;
   setCurrentTime: (time: number) => void;
   setPlaying: (playing: boolean) => void;
@@ -241,8 +248,15 @@ interface DocuFlowState {
   resetHistory: () => void;
   duplicateCommand: (id: string) => void;
   replaceCommands: (commands: Command[]) => void;
-  saveProject: (projectName: string) => Promise<{ success: boolean; error?: string }>;
+  saveProject: (projectName?: string) => Promise<{ success: boolean; error?: string }>;
   loadProject: (projectName: string) => Promise<{ success: boolean; error?: string }>;
+  newProject: () => void;
+  saveAsProject: () => Promise<{ success: boolean; error?: string }>;
+  openProjectFromDialog: () => Promise<{ success: boolean; error?: string }>;
+  setProjectPath: (path: string | null) => void;
+  setSaveStatus: (status: 'saved' | 'unsaved' | 'saving' | 'save-failed') => void;
+  markDirty: () => void;
+  markClean: () => void;
 }
 
 const MAX_HISTORY = 100;
@@ -318,6 +332,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
 
   activeTab: 'studio',
   generatedImages: [],
+  scenes: [],
 
   currentTime: 0,
   playing: false,
@@ -380,6 +395,10 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
   batchActive: false,
   batchSnapshot: null,
 
+  projectPath: null,
+  isDirty: false,
+  saveStatus: 'unsaved',
+
   setProject: (project) => {
     const state = get();
     const newVoiceover = project.voiceover ?? null;
@@ -404,7 +423,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       const newHistory = state.history.slice(0, state.historyIndex + 1);
       newHistory.push(postSnap);
       if (newHistory.length > MAX_HISTORY) newHistory.shift();
-      set({ assets: newAssets, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1 });
+      set({ assets: newAssets, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1, isDirty: true, saveStatus: 'unsaved' });
     } else {
       set({ assets: newAssets, timeline: tl });
     }
@@ -418,7 +437,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       const newHistory = state.history.slice(0, state.historyIndex + 1);
       newHistory.push(postSnap);
       if (newHistory.length > MAX_HISTORY) newHistory.shift();
-      set({ assets: newAssets, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1 });
+      set({ assets: newAssets, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1, isDirty: true, saveStatus: 'unsaved' });
     } else {
       set({ assets: newAssets, timeline: tl });
     }
@@ -427,7 +446,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
     const state = get();
     const newAssets = state.assets.map((a) => (a.id === id ? { ...a, ...updates } : a));
     const tl = buildTimelineFromState(state.commands, newAssets, state.settings, state.voiceover);
-    set({ assets: newAssets, timeline: tl });
+    set({ assets: newAssets, timeline: tl, isDirty: true, saveStatus: 'unsaved' });
   },
   setCommands: (commands) => {
     const state = get();
@@ -444,7 +463,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       const newHistory = state.history.slice(0, state.historyIndex + 1);
       newHistory.push(postSnap);
       if (newHistory.length > MAX_HISTORY) newHistory.shift();
-      set({ commands: newCommands, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1 });
+      set({ commands: newCommands, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1, isDirty: true, saveStatus: 'unsaved' });
     } else {
       set({ commands: newCommands, timeline: tl });
     }
@@ -459,7 +478,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       const newHistory = state.history.slice(0, state.historyIndex + 1);
       newHistory.push(postSnap);
       if (newHistory.length > MAX_HISTORY) newHistory.shift();
-      set({ commands: newCommands, selectedCommandId: newSelectedId, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1 });
+      set({ commands: newCommands, selectedCommandId: newSelectedId, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1, isDirty: true, saveStatus: 'unsaved' });
     } else {
       set({ commands: newCommands, selectedCommandId: newSelectedId, timeline: tl });
     }
@@ -473,13 +492,13 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       const newHistory = state.history.slice(0, state.historyIndex + 1);
       newHistory.push(postSnap);
       if (newHistory.length > MAX_HISTORY) newHistory.shift();
-      set({ commands: newCommands, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1 });
+      set({ commands: newCommands, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1, isDirty: true, saveStatus: 'unsaved' });
     } else {
       set({ commands: newCommands, timeline: tl });
     }
   },
   setTimeline: (timeline) => set({ timeline }),
-  setSettings: (settings) => set({ settings }),
+  setSettings: (settings) => set({ settings, isDirty: true, saveStatus: 'unsaved' }),
   setActiveTab: (tab) => set({ activeTab: tab }),
   addGeneratedImage: (image) => set((state) => ({ generatedImages: [...state.generatedImages, image] })),
   updateGeneratedImage: (id, updates) => set((state) => ({
@@ -488,6 +507,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
     ),
   })),
   getGeneratedImagesBySceneId: (sceneId) => get().generatedImages.filter((img) => img.sceneId === sceneId),
+  setScenes: (scenes) => set({ scenes, isDirty: true, saveStatus: 'unsaved' }),
   addToTimeline: (imageId) => {
     const state = get();
     const image = state.generatedImages.find((img) => img.id === imageId);
@@ -502,7 +522,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
     const command: Command = {
       id: uuidv4(),
       type: 'show',
-      asset: asset.logicalId,
+      asset: asset.id,
       start,
       duration: 3,
     } as Command;
@@ -519,6 +539,8 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       timeline: tl,
       history: newHistory,
       historyIndex: newHistory.length - 1,
+      isDirty: true,
+      saveStatus: 'unsaved',
     });
   },
   setCurrentTime: (time) => set({ currentTime: time }),
@@ -554,7 +576,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       const newHistory = state.history.slice(0, state.historyIndex + 1);
       newHistory.push(postSnap);
       if (newHistory.length > MAX_HISTORY) newHistory.shift();
-      set({ commands: newCommands, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1 });
+      set({ commands: newCommands, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1, isDirty: true, saveStatus: 'unsaved' });
     } else {
       set({ commands: newCommands, timeline: tl });
     }
@@ -605,14 +627,13 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
 
   setVoiceover: (voiceover) => {
     const state = get();
-    // Rebuild timeline with new audio duration constraint
     const tl = buildTimelineFromState(state.commands, state.assets, state.settings, voiceover);
-    set({ voiceover, timeline: tl });
+    set({ voiceover, timeline: tl, isDirty: true, saveStatus: 'unsaved' });
   },
-  setTranscript: (transcript) => set({ transcript }),
-  setSceneMarkers: (sceneMarkers) => set({ sceneMarkers }),
-  addSceneMarker: (marker) => set((s) => ({ sceneMarkers: [...s.sceneMarkers, marker] })),
-  removeSceneMarker: (id) => set((s) => ({ sceneMarkers: s.sceneMarkers.filter((m) => m.id !== id) })),
+  setTranscript: (transcript) => set({ transcript, isDirty: true, saveStatus: 'unsaved' }),
+  setSceneMarkers: (sceneMarkers) => set({ sceneMarkers, isDirty: true, saveStatus: 'unsaved' }),
+  addSceneMarker: (marker) => set((s) => ({ sceneMarkers: [...s.sceneMarkers, marker], isDirty: true, saveStatus: 'unsaved' })),
+  removeSceneMarker: (id) => set((s) => ({ sceneMarkers: s.sceneMarkers.filter((m) => m.id !== id), isDirty: true, saveStatus: 'unsaved' })),
   setTranscriptionStatus: (transcriptionStatus) => {
     if (transcriptionStatus === 'processing') {
       set({ transcriptionStatus, transcriptionStartedAt: Date.now() });
@@ -648,7 +669,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       const newHistory = state.history.slice(0, state.historyIndex + 1);
       newHistory.push(postSnap);
       if (newHistory.length > MAX_HISTORY) newHistory.shift();
-      set({ assets: newAssets, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1 });
+      set({ assets: newAssets, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1, isDirty: true, saveStatus: 'unsaved' });
     } else {
       set({ assets: newAssets, timeline: tl });
     }
@@ -742,7 +763,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       const newHistory = state.history.slice(0, state.historyIndex + 1);
       newHistory.push(postSnap);
       if (newHistory.length > MAX_HISTORY) newHistory.shift();
-      set({ commands: newCommands, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1 });
+      set({ commands: newCommands, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1, isDirty: true, saveStatus: 'unsaved' });
     } else {
       set({ commands: newCommands, timeline: tl });
     }
@@ -756,7 +777,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       const newHistory = state.history.slice(0, state.historyIndex + 1);
       newHistory.push(postSnap);
       if (newHistory.length > MAX_HISTORY) newHistory.shift();
-      set({ commands, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1 });
+      set({ commands, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1, isDirty: true, saveStatus: 'unsaved' });
     } else {
       set({ commands, timeline: tl });
     }
@@ -764,6 +785,14 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
 
   saveProject: async (projectName) => {
     const state = get();
+
+    // If no project path exists, show Save As dialog
+    if (!state.projectPath) {
+      return state.saveAsProject();
+    }
+
+    // Subsequent save - save directly to existing path
+    set({ saveStatus: 'saving' });
     const projectData = {
       version: CURRENT_PROJECT_VERSION,
       settings: state.settings,
@@ -783,27 +812,43 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       voiceover: state.voiceover,
       transcript: state.transcript,
       sceneMarkers: state.sceneMarkers,
+      scenes: state.scenes.map(({ imageUrl: _imageUrl, ...scene }) => scene),
+      generatedImages: state.generatedImages.map(img => ({
+        id: img.id,
+        prompt: img.prompt,
+        style: img.style,
+        aspectRatio: img.aspectRatio,
+        timestamp: img.timestamp,
+        source: img.source,
+        sceneId: img.sceneId,
+        provider: img.provider,
+        model: img.model,
+        generationType: img.generationType,
+      })),
     };
-    // Validate before writing to disk
+
     const validation = ProjectSchema.safeParse(projectData);
     if (!validation.success) {
       const err = normalizeError(validation.error, 'PROJECT_SAVE' as ErrorCode);
+      set({ saveStatus: 'save-failed' });
       return { success: false, error: err.message };
     }
+
     try {
       if (window.docuflow) {
-        const result = await window.docuflow.saveProject(projectName, projectData);
-        if (!result.success && result.error) {
-          const err = normalizeError(result.error, 'PROJECT_SAVE' as ErrorCode);
-          return { success: false, error: err.message };
+        const result = await window.docuflow.saveProjectToPath(state.projectPath, projectData);
+        if (!result.success) {
+          set({ saveStatus: 'save-failed' });
+          return { success: false, error: result.error };
         }
-        return { success: result.success, error: result.error };
+        set({ saveStatus: 'saved', isDirty: false });
+        return { success: true };
       }
-      // Fallback: save to localStorage
-      localStorage.setItem(`docuflow-project-${projectName}`, JSON.stringify(projectData));
-      return { success: true };
+      set({ saveStatus: 'save-failed' });
+      return { success: false, error: 'DocuFlow API not available' };
     } catch (err: unknown) {
       const normalized = normalizeError(err, 'PROJECT_SAVE' as ErrorCode);
+      set({ saveStatus: 'save-failed' });
       return { success: false, error: normalized.message };
     }
   },
@@ -821,7 +866,6 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
         }
       }
       if (!projectData) {
-        // Fallback: load from localStorage
         const stored = localStorage.getItem(`docuflow-project-${projectName}`);
         if (stored) projectData = JSON.parse(stored);
       }
@@ -831,7 +875,6 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
         });
         return { success: false, error: err.message };
       }
-      // Migrate project data to current version before Zod validation
       const migrationResult = migrateProject(projectData);
       if ('error' in migrationResult) {
         const err = normalizeError(migrationResult.error, migrationResult.code as ErrorCode, {
@@ -840,7 +883,6 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
         return { success: false, error: err.message };
       }
       projectData = migrationResult.project;
-      // Validate loaded project data
       const validation = ProjectSchema.safeParse(projectData);
       if (!validation.success) {
         const err = normalizeError(validation.error, 'PROJECT_LOAD' as ErrorCode);
@@ -851,6 +893,19 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
         ...a,
         url: a.filePath ? (window.docuflow ? window.docuflow.filePathToAssetUrl(a.filePath) : undefined) : a.url,
       })) as Asset[];
+
+      const assetUrlMap = new Map(newAssets.map(a => [a.id, a.url]));
+
+      const restoredGeneratedImages = (projectData.generatedImages || []).map((img: any) => ({
+        ...img,
+        url: assetUrlMap.get(img.id) || img.url,
+      }));
+
+      const restoredScenes = (projectData.scenes || []).map((scene: any) => ({
+        ...scene,
+        imageUrl: scene.imageId ? assetUrlMap.get(scene.imageId) : scene.imageUrl,
+      }));
+
       set({
         settings: projectData.settings || state.settings,
         assets: newAssets,
@@ -858,16 +913,16 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
         voiceover: projectData.voiceover || null,
         transcript: projectData.transcript || null,
         sceneMarkers: projectData.sceneMarkers || [],
+        scenes: restoredScenes,
+        generatedImages: restoredGeneratedImages,
       });
-      // Rebuild timeline
       const tl = buildTimelineFromState(
         projectData.commands || [],
         newAssets,
         projectData.settings || state.settings,
         projectData.voiceover || null
       );
-      set({ timeline: tl });
-      // Reset history
+      set({ timeline: tl, saveStatus: 'saved', isDirty: false });
       const snap = captureState({ ...get() });
       set({ history: [snap], historyIndex: 0 });
       return { success: true };
@@ -876,6 +931,197 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
       return { success: false, error: normalized.message };
     }
   },
+
+  newProject: () => {
+    set({
+      project: null,
+      assets: [],
+      commands: [],
+      timeline: null,
+      settings: { width: 1920, height: 1080, fps: 30 },
+      voiceover: null,
+      transcript: null,
+      sceneMarkers: [],
+      projectPath: null,
+      isDirty: false,
+      saveStatus: 'unsaved',
+      generatedImages: [],
+      scenes: [],
+      error: null,
+      history: [{
+        commands: [],
+        assets: [],
+        voiceover: null,
+        transcript: null,
+        sceneMarkers: [],
+        settings: { width: 1920, height: 1080, fps: 30 },
+      }],
+      historyIndex: 0,
+    });
+  },
+
+  saveAsProject: async () => {
+    const state = get();
+    set({ saveStatus: 'saving' });
+
+    const projectData = {
+      version: CURRENT_PROJECT_VERSION,
+      settings: state.settings,
+      assets: state.assets.map(a => ({
+        id: a.id,
+        logicalId: a.logicalId,
+        filename: a.filename,
+        type: a.type,
+        mimeType: a.mimeType,
+        width: a.width,
+        height: a.height,
+        duration: a.duration,
+        filePath: a.filePath,
+        audioRole: a.audioRole,
+      })),
+      commands: state.commands,
+      voiceover: state.voiceover,
+      transcript: state.transcript,
+      sceneMarkers: state.sceneMarkers,
+      scenes: state.scenes.map(({ imageUrl: _imageUrl, ...scene }) => scene),
+      generatedImages: state.generatedImages.map(img => ({
+        id: img.id,
+        prompt: img.prompt,
+        style: img.style,
+        aspectRatio: img.aspectRatio,
+        timestamp: img.timestamp,
+        source: img.source,
+        sceneId: img.sceneId,
+        provider: img.provider,
+        model: img.model,
+        generationType: img.generationType,
+      })),
+    };
+
+    const validation = ProjectSchema.safeParse(projectData);
+    if (!validation.success) {
+      const err = normalizeError(validation.error, 'PROJECT_SAVE' as ErrorCode);
+      set({ saveStatus: 'save-failed' });
+      return { success: false, error: err.message };
+    }
+
+    try {
+      if (!window.docuflow) {
+        set({ saveStatus: 'save-failed' });
+        return { success: false, error: 'DocuFlow API not available' };
+      }
+
+      // Show Save As dialog
+      const dialogResult = await window.docuflow.showSaveProjectDialog();
+      if (dialogResult.canceled || !dialogResult.filePath) {
+        set({ saveStatus: state.isDirty ? 'unsaved' : 'saved' });
+        return { success: false, error: 'Save cancelled' };
+      }
+
+      // Save to the selected path
+      const saveResult = await window.docuflow.saveProjectToPath(dialogResult.filePath, projectData);
+      if (!saveResult.success) {
+        set({ saveStatus: 'save-failed' });
+        return { success: false, error: saveResult.error };
+      }
+
+      set({ projectPath: dialogResult.filePath, saveStatus: 'saved', isDirty: false });
+      return { success: true };
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, 'PROJECT_SAVE' as ErrorCode);
+      set({ saveStatus: 'save-failed' });
+      return { success: false, error: normalized.message };
+    }
+  },
+
+  openProjectFromDialog: async () => {
+    try {
+      if (!window.docuflow) {
+        return { success: false, error: 'DocuFlow API not available' };
+      }
+
+      const dialogResult = await window.docuflow.showOpenProjectDialog();
+      if (dialogResult.canceled || !dialogResult.filePath) {
+        return { success: false, error: 'Open cancelled' };
+      }
+
+      const loadResult = await window.docuflow.loadProjectFromPath(dialogResult.filePath);
+      if (!loadResult.success) {
+        return { success: false, error: loadResult.error };
+      }
+
+      const projectData = loadResult.data;
+      const migrationResult = migrateProject(projectData);
+      if ('error' in migrationResult) {
+        const err = normalizeError(migrationResult.error, migrationResult.code as ErrorCode, {
+          context: migrationResult.context,
+        });
+        return { success: false, error: err.message };
+      }
+      const migratedData = migrationResult.project;
+
+      const validation = ProjectSchema.safeParse(migratedData);
+      if (!validation.success) {
+        const err = normalizeError(validation.error, 'PROJECT_LOAD' as ErrorCode);
+        return { success: false, error: err.message };
+      }
+
+      const state = get();
+      const newAssets = (migratedData.assets || []).map((a: any) => ({
+        ...a,
+        url: a.filePath ? (window.docuflow ? window.docuflow.filePathToAssetUrl(a.filePath) : undefined) : a.url,
+      })) as Asset[];
+
+      const assetUrlMap = new Map(newAssets.map(a => [a.id, a.url]));
+
+      const restoredGeneratedImages = (migratedData.generatedImages || []).map((img: any) => ({
+        ...img,
+        url: assetUrlMap.get(img.id) || img.url,
+      }));
+
+      const restoredScenes = (migratedData.scenes || []).map((scene: any) => ({
+        ...scene,
+        imageUrl: scene.imageId ? assetUrlMap.get(scene.imageId) : scene.imageUrl,
+      }));
+
+      set({
+        projectPath: dialogResult.filePath,
+        settings: migratedData.settings || state.settings,
+        assets: newAssets,
+        commands: migratedData.commands || [],
+        voiceover: migratedData.voiceover || null,
+        transcript: migratedData.transcript || null,
+        sceneMarkers: migratedData.sceneMarkers || [],
+        scenes: restoredScenes,
+        generatedImages: restoredGeneratedImages,
+        saveStatus: 'saved',
+        isDirty: false,
+      });
+
+      const tl = buildTimelineFromState(
+        migratedData.commands || [],
+        newAssets,
+        migratedData.settings || state.settings,
+        migratedData.voiceover || null
+      );
+      set({ timeline: tl });
+
+      const snap = captureState({ ...get() });
+      set({ history: [snap], historyIndex: 0 });
+      return { success: true };
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, 'PROJECT_LOAD' as ErrorCode);
+      return { success: false, error: normalized.message };
+    }
+  },
+
+  setProjectPath: (path) => set({ projectPath: path }),
+
+  setSaveStatus: (status) => set({ saveStatus: status }),
+
+  markDirty: () => set({ isDirty: true, saveStatus: 'unsaved' }),
+
+  markClean: () => set({ isDirty: false, saveStatus: 'saved' }),
 }));
 
 function historySnapshotsEqual(a: HistoryState, b: HistoryState): boolean {

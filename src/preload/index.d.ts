@@ -38,8 +38,10 @@ export interface DocuFlowAPI {
   saveBytes(params: {
     imageBase64: string;
     filename?: string;
+    baseDir?: string;
   }): Promise<{ success: boolean; path?: string; error?: string }>
   readImageAsBase64(filePath: string): Promise<string>
+  deleteFile(filePath: string): Promise<{ success: boolean; error?: string }>
   transcribeAudio(params: {
     audioPath: string;
     modelSize?: string;
@@ -151,6 +153,10 @@ export interface DocuFlowAPI {
   saveProject(projectName: string, projectData: any): Promise<{ success: boolean; path?: string; error?: string }>
   loadProject(projectName: string): Promise<{ success: boolean; data?: any; error?: string }>
   listProjects(): Promise<{ success: boolean; projects?: Array<{ name: string; hasFile: boolean }>; error?: string }>
+  showSaveProjectDialog(defaultName?: string): Promise<{ canceled: boolean; filePath?: string }>
+  showOpenProjectDialog(): Promise<{ canceled: boolean; filePath?: string }>
+  saveProjectToPath(filePath: string, projectData: any): Promise<{ success: boolean; error?: string }>
+  loadProjectFromPath(filePath: string): Promise<{ success: boolean; data?: any; error?: string }>
   onLocalGenerationProgress(callback: (data: { type: string; step?: number; total?: number; percent?: number; message?: string }) => void): (() => void)
 }
 

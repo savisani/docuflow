@@ -15,6 +15,7 @@ export interface SerializedAsset {
   width?: number;
   height?: number;
   duration?: number;
+  filePath?: string;
   serverUrl?: string;
   audioRole?: 'voiceover' | 'music' | 'sfx' | 'ambient' | 'unassigned';
   sampleRate?: number;
@@ -50,6 +51,21 @@ export interface ProjectSceneMarker {
   transcriptSegmentIds: string[];
 }
 
+export interface ProjectScene {
+  sceneId: number;
+  startTime: number;
+  endTime: number;
+  transcriptChunk: string;
+  visualDescription: string;
+  imagePrompt: string;
+  cameraMotion: 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right' | 'static';
+  reasoning?: string;
+  status: 'pending' | 'generating' | 'done' | 'error';
+  imageUrl?: string;
+  imageId?: string;
+  error?: string;
+}
+
 export interface Project {
   version: number;
   settings: ProjectSettings;
@@ -58,4 +74,5 @@ export interface Project {
   voiceover?: ProjectVoiceover;
   transcript?: ProjectTranscript;
   sceneMarkers?: ProjectSceneMarker[];
+  scenes?: ProjectScene[];
 }

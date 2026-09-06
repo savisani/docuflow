@@ -1,14 +1,15 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { useDocuFlowStore } from '../../app/store';
 import { v4 as uuidv4 } from 'uuid';
 import { generateId } from '../../utils/format';
 import { loadAssetMetadata } from '../../engine/media/loader';
 import { formatTimestamp } from '../../engine/transcription/service';
 import { getAvailableModels, type WhisperModelInfo } from '../../engine/transcription/localProvider';
-import { Mic, Play, Pause, Trash2, Languages, FileText, MapPin, AlertCircle, CheckCircle, Loader2, Cpu, RefreshCw, Power, Minimize2, Trash } from 'lucide-react';
+import { Mic, Play, Pause, Trash2, Languages, FileText, MapPin, AlertCircle, CheckCircle, Loader2, Cpu, RefreshCw, Power, Minimize2, Trash, Clock, AudioLines } from 'lucide-react';
 import { Command } from '../../engine/commands/types';
 import { useServerStatus } from '../../hooks/useServerStatus';
 import { Panel, Section, Divider, LabelValue, Badge, IconButton, Tooltip, Toggle, Select, Slider, Input } from '../ui';
+import { Asset } from '../../types/assets';
 
 const LANGUAGES = [
   { code: 'auto', label: 'Auto Detect' },
@@ -77,32 +78,52 @@ export const VoiceoverPanel: React.FC = () => {
   }, [serverOnline]);
 
   const handleImportVoiceover = useCallback(async () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'audio/*,.mp3,.wav,.m4a,.aac,.ogg,.webm,.flac';
-    input.onchange = async (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) return;
+    if (!(window as any).docuflow?.selectAudioFile) {
+      console.error('Audio file selection not available');
+      return;
+    }
 
-      setImporting(true);
-      try {
-        const currentAssets = useDocuFlowStore.getState().assets;
-        const metadata = await loadAssetMetadata(file, currentAssets);
-        const newAsset: any = {
-          id: generateId(),
-          ...metadata,
-          audioRole: 'voiceover' as const,
-        };
-        useDocuFlowStore.getState().addAsset(newAsset);
-        setVoiceover({ assetId: newAsset.id, language: selectedLanguage });
-        setAudioRole(newAsset.id, 'voiceover');
-      } catch (err) {
-        console.error('Failed to import voiceover:', err);
-      } finally {
-        setImporting(false);
+    setImporting(true);
+    try {
+      const result = await (window as any).docuflow.selectAudioFile();
+      if (result.canceled || !result.filePath) {
+        return;
       }
-    };
-    input.click();
+
+      const filePath = result.filePath;
+      const fileName = filePath.split(/[/\\]/).pop() || 'audio.mp3';
+      const url = (window as any).docuflow.filePathToAssetUrl(filePath);
+
+      const currentAssets = useDocuFlowStore.getState().assets;
+      const logicalId = `audio${currentAssets.filter(a => a.type === 'audio').length + 1}`;
+
+      const tempAudio = new Audio();
+      await new Promise<void>((resolve, reject) => {
+        tempAudio.onloadedmetadata = () => resolve();
+        tempAudio.onerror = () => reject(new Error('Failed to load audio metadata'));
+        tempAudio.src = url;
+      });
+
+      const newAsset: Asset = {
+        id: generateId(),
+        logicalId,
+        filename: fileName,
+        type: 'audio',
+        mimeType: 'audio/mpeg',
+        url,
+        filePath,
+        duration: tempAudio.duration || undefined,
+        audioRole: 'voiceover',
+      };
+
+      useDocuFlowStore.getState().addAsset(newAsset);
+      setVoiceover({ assetId: newAsset.id, language: selectedLanguage });
+      setAudioRole(newAsset.id, 'voiceover');
+    } catch (err) {
+      console.error('Failed to import voiceover:', err);
+    } finally {
+      setImporting(false);
+    }
   }, [selectedLanguage, setVoiceover, setAudioRole]);
 
   const handleTranscribe = useCallback(async () => {
@@ -241,10 +262,6 @@ export const VoiceoverPanel: React.FC = () => {
     setSceneMarkers(markers);
   }, [transcript, setSceneMarkers]);
 
-  const progressPercent = transcriptionStep >= 0
-    ? Math.round(((transcriptionStep + 1) / TRANSCRIPTION_STEPS.length) * 100)
-    : 0;
-
   // Elapsed time for transcription
   const [elapsedSec, setElapsedSec] = useState(0);
   useEffect(() => {
@@ -257,6 +274,41 @@ export const VoiceoverPanel: React.FC = () => {
     }, 1000);
     return () => clearInterval(interval);
   }, [transcriptionStatus, transcriptionStartedAt]);
+
+  // Progress percentage - honest calculation based on known steps
+  // Step 2 (Transcribing) cannot show real progress since backend doesn't expose it
+  const progressPercent = useMemo(() => {
+    if (transcriptionStep === 2) {
+      return null; // Indeterminate during actual transcription
+    }
+    if (transcriptionStep >= 0 && transcriptionStep < TRANSCRIPTION_STEPS.length - 1) {
+      return Math.round(((transcriptionStep + 1) / TRANSCRIPTION_STEPS.length) * 100);
+    }
+    if (transcriptionStep === TRANSCRIPTION_STEPS.length - 1) {
+      return 100; // Complete
+    }
+    return 0;
+  }, [transcriptionStep]);
+
+  // Total audio duration (from voiceoverAsset)
+  const totalDuration = voiceoverAsset?.duration ?? null;
+
+  // Last spoken word info (from transcript)
+  const lastSpokenInfo = useMemo(() => {
+    if (!transcript || transcript.segments.length === 0) return null;
+    const lastSegment = transcript.segments[transcript.segments.length - 1];
+    if (lastSegment.words && lastSegment.words.length > 0) {
+      const lastWord = lastSegment.words[lastSegment.words.length - 1];
+      return {
+        word: lastWord.text,
+        time: lastWord.end,
+      };
+    }
+    return {
+      word: lastSegment.text.trim(),
+      time: lastSegment.end,
+    };
+  }, [transcript]);
 
   return (
     <Panel title="Voiceover" icon={<Mic size={10} />} className="h-full flex flex-col">
@@ -461,18 +513,32 @@ export const VoiceoverPanel: React.FC = () => {
 
           {transcriptionStatus === 'processing' && (
             <div className="space-y-1">
-              <div className="text-df-xs text-[var(--color-accent-primary)]">
-                {transcriptionStepLabel || 'Starting...'}
+              <div className="flex items-center justify-between text-df-xs">
+                <span className="text-[var(--color-accent-primary)]">
+                  {transcriptionStepLabel || 'Processing...'}
+                </span>
+                {elapsedSec > 0 && (
+                  <span className="flex items-center gap-1 text-[var(--color-text-muted)]">
+                    <Clock size={10} />
+                    {elapsedSec}s elapsed
+                  </span>
+                )}
               </div>
               <div className="w-full bg-[var(--color-border)] rounded-full h-1.5 overflow-hidden">
-                <div
-                  className="h-full bg-[var(--color-accent-primary)] rounded-full transition-all duration-500"
-                  style={{ width: `${progressPercent}%` }}
-                />
+                {progressPercent !== null ? (
+                  <div
+                    className="h-full bg-[var(--color-accent-primary)] rounded-full transition-all duration-300"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                ) : (
+                  <div className="h-full bg-[var(--color-accent-primary)] rounded-full animate-pulse" style={{ width: '100%' }} />
+                )}
               </div>
-              <div className="text-df-xs text-[var(--color-text-muted)]">
-                {transcriptionStepLabel || 'Processing...'} {elapsedSec > 0 && `(${elapsedSec}s elapsed)`}
-              </div>
+              {progressPercent !== null && (
+                <div className="text-df-xs text-[var(--color-text-muted)]">
+                  {progressPercent}%
+                </div>
+              )}
             </div>
           )}
 
@@ -491,7 +557,29 @@ export const VoiceoverPanel: React.FC = () => {
         </Section>
 
         {transcript && transcript.segments.length > 0 && (
-          <Section title={`Transcript (${transcript.language})`} className="space-y-2">
+          <Section
+            title={
+              <div className="flex items-center justify-between w-full">
+                <span>Transcript ({transcript.language})</span>
+                {transcriptionStatus === 'complete' && (
+                  <div className="flex items-center gap-3 text-df-xs text-[var(--color-text-muted)]">
+                    {totalDuration !== null && (
+                      <span className="flex items-center gap-1">
+                        <AudioLines size={10} />
+                        {formatTimestamp(totalDuration)}
+                      </span>
+                    )}
+                    {lastSpokenInfo && (
+                      <span className="flex items-center gap-1">
+                        Last spoken: <span className="text-[var(--color-text-secondary)]">{lastSpokenInfo.word}</span> — {formatTimestamp(lastSpokenInfo.time)}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            }
+            className="space-y-2"
+          >
             <div className="space-y-1 max-h-60 overflow-y-auto">
               {transcript.segments.map((segment) => (
                 <button
@@ -504,19 +592,22 @@ export const VoiceoverPanel: React.FC = () => {
                       : 'bg-[var(--color-bg-elevated)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-elevated)]/50 border border-transparent'}
                   `}
                 >
-                  <div className="font-mono text-df-xs text-[var(--color-text-muted)] mb-0.5">
-                    {formatTimestamp(segment.start)}
+                  <div className="font-mono text-df-xs text-[var(--color-text-muted)] mb-1">
+                    {formatTimestamp(segment.start)} — {formatTimestamp(segment.end)}
                   </div>
-                  <div>{segment.text}</div>
-                  {segment.words && segment.words.length > 0 && (
-                    <div className="mt-1 text-df-xs text-[var(--color-border)]">
+                  {segment.words && segment.words.length > 0 ? (
+                    <div className="space-y-0.5">
                       {segment.words.map((w, i) => (
-                        <span key={i}>
-                          <span className="text-[var(--color-text-muted)]">{w.text}</span>
-                          <span className="text-[var(--color-divider)] mx-0.5">|</span>
-                        </span>
+                        <div key={i} className="flex items-baseline gap-2">
+                          <span className="font-mono text-df-xs text-[var(--color-accent-primary)] min-w-[60px]">
+                            {formatTimestamp(w.start)}
+                          </span>
+                          <span className="text-[var(--color-text-secondary)]">{w.text}</span>
+                        </div>
                       ))}
                     </div>
+                  ) : (
+                    <div>{segment.text}</div>
                   )}
                 </button>
               ))}

@@ -1,9 +1,9 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Settings, Wand2, Image as ImageIcon, Download, Film, Plus, Cloud, X, Sliders, Sparkles, ZoomIn, Save, CheckCircle, FolderOpen, RefreshCw, Cpu, Monitor, ArrowUp, CpuIcon } from 'lucide-react';
+import { Settings, Wand2, Image as ImageIcon, Download, Film, Plus, Cloud, X, Sliders, Sparkles, ZoomIn, Save, CheckCircle, FolderOpen, RefreshCw, Cpu, Monitor, ArrowUp, CpuIcon, Flower } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { Button } from '../ui';
 import { CLOUDFLARE_MODELS, CloudflareConfig } from '../../utils/cloudflareApi';
-import { NIM_MODELS, NIM_DEFAULT_MODEL, NimConfig, loadNimConfig, saveNimConfig, NimModelId } from '../../utils/nvidiaNimApi';
+import { POLLINATIONS_MODELS, PollinationsConfig } from '../../utils/pollinationsApi';
 import { generateImage, regenerateImage, generateScenePair, ImageProvider } from '../../services/imageGenerationService';
 import { listLocalModels, detectHardware, importModel, LocalModel, LocalHardware, getRecommendedSettings, QUALITY_PRESETS, QualityPreset } from '../../services/localImageProvider';
 
@@ -28,6 +28,18 @@ function loadCloudflareConfig(): CloudflareConfig {
 
 function saveCloudflareConfig(config: CloudflareConfig) {
   localStorage.setItem('docuflow-cloudflare-config', JSON.stringify(config));
+}
+
+function loadPollinationsConfig(): PollinationsConfig {
+  try {
+    const stored = localStorage.getItem('docuflow-pollinations-config');
+    if (stored) return JSON.parse(stored);
+  } catch {}
+  return { apiKey: '' };
+}
+
+function savePollinationsConfig(config: PollinationsConfig) {
+  localStorage.setItem('docuflow-pollinations-config', JSON.stringify(config));
 }
 
 function loadAdvancedSettings(): { model: string; steps: number } {
@@ -80,7 +92,7 @@ async function blobUrlToBase64(url: string): Promise<string> {
 }
 
 export const ImageGenerator: React.FC = () => {
-  const { generatedImages, assets, addToTimeline, setLoadedModel } = useDocuFlowStore();
+  const { generatedImages, assets, addToTimeline, setLoadedModel, projectPath } = useDocuFlowStore();
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -91,14 +103,8 @@ export const ImageGenerator: React.FC = () => {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [cloudflareConfig, setCloudflareConfig] = useState<CloudflareConfig>(loadCloudflareConfig);
   const [tempWorkerUrl, setTempWorkerUrl] = useState(cloudflareConfig.workerUrl);
-
-  // NVIDIA NIM state
-  const [nimConfig, setNimConfig] = useState<NimConfig>(loadNimConfig);
-  const [tempNimApiKey, setTempNimApiKey] = useState(nimConfig.apiKey);
-  const [nimModel, setNimModel] = useState<NimModelId>(() => {
-    const stored = localStorage.getItem('docuflow-nim-model');
-    return (stored as NimModelId) || NIM_DEFAULT_MODEL;
-  });
+  const [pollinationsConfig, setPollinationsConfig] = useState<PollinationsConfig>(loadPollinationsConfig);
+  const [tempPollinationsApiKey, setTempPollinationsApiKey] = useState(pollinationsConfig.apiKey);
 
   const [advancedSettings, setAdvancedSettings] = useState(loadAdvancedSettings);
   const [tempAdvanced, setTempAdvanced] = useState(advancedSettings);
@@ -128,6 +134,11 @@ export const ImageGenerator: React.FC = () => {
   const [localSteps, setLocalSteps] = useState<number>(() => {
     const stored = localStorage.getItem('docuflow-local-steps');
     return stored ? parseInt(stored, 10) : 0; // 0 means use quality preset
+  });
+
+  // Pollinations model state
+  const [pollinationsModel, setPollinationsModel] = useState<string>(() => {
+    return localStorage.getItem('docuflow-pollinations-model') || 'flux';
   });
 
   const [lightboxImage, setLightboxImage] = useState<{ id: string; url: string; prompt: string; aspectRatio: string } | null>(null);
@@ -160,11 +171,12 @@ export const ImageGenerator: React.FC = () => {
   const selectedRatio = ASPECT_RATIOS.find(r => r.id === selectedAspectRatio) ?? ASPECT_RATIOS[2];
 
   useEffect(() => { saveCloudflareConfig(cloudflareConfig); }, [cloudflareConfig]);
+  useEffect(() => { savePollinationsConfig(pollinationsConfig); }, [pollinationsConfig]);
   useEffect(() => { saveAdvancedSettings(advancedSettings); }, [advancedSettings]);
   useEffect(() => { localStorage.setItem('docuflow-image-provider', imageProvider); }, [imageProvider]);
   useEffect(() => { localStorage.setItem('docuflow-local-model-path', selectedLocalModel); }, [selectedLocalModel]);
   useEffect(() => { localStorage.setItem('docuflow-local-steps', String(localSteps)); }, [localSteps]);
-  useEffect(() => { localStorage.setItem('docuflow-nim-model', nimModel); }, [nimModel]);
+  useEffect(() => { localStorage.setItem('docuflow-pollinations-model', pollinationsModel); }, [pollinationsModel]);
 
   // Load local models and hardware when switching to local provider
   useEffect(() => {
@@ -187,9 +199,10 @@ export const ImageGenerator: React.FC = () => {
 
   const handleSaveSettings = useCallback(() => {
     setCloudflareConfig({ workerUrl: tempWorkerUrl });
+    setPollinationsConfig({ apiKey: tempPollinationsApiKey });
     setAdvancedSettings(tempAdvanced);
     setShowSettings(false);
-  }, [tempWorkerUrl, tempAdvanced]);
+  }, [tempWorkerUrl, tempPollinationsApiKey, tempAdvanced]);
 
   // Regeneration handler
   const handleRegenerate = useCallback(async (imageId: string) => {
@@ -215,11 +228,13 @@ export const ImageGenerator: React.FC = () => {
         {
           provider: imageProvider,
           cloudflareConfig,
-          model: advancedSettings.model,
+          pollinationsConfig,
+          model: imageProvider === 'pollinations' ? pollinationsModel : advancedSettings.model,
           steps: imageProvider === 'local' ? effectiveSteps : advancedSettings.steps,
           negativePrompt: negativePrompt || undefined,
           localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
           device: imageProvider === 'local' ? localDevice : undefined,
+          projectPath,
           onProgress: imageProvider === 'local' ? (p) => {
             if (p.type === 'progress' && p.percent !== undefined) {
               setLocalProgress({ percent: p.percent, message: `Regenerating... ${p.percent}%` });
@@ -245,7 +260,7 @@ export const ImageGenerator: React.FC = () => {
       setRegenerateOriginalUrl(null);
       setLocalProgress(null);
     }
-  }, [generatedImages, imageProvider, cloudflareConfig, selectedLocalModel, advancedSettings, negativePrompt, localQualityPreset, localDevice]);
+  }, [generatedImages, imageProvider, cloudflareConfig, pollinationsConfig, selectedLocalModel, pollinationsModel, advancedSettings, negativePrompt, localQualityPreset, localDevice, projectPath]);
 
   const handleSelectFolder = useCallback(async () => {
     const result = await window.docuflow.selectFolder();
@@ -289,8 +304,8 @@ export const ImageGenerator: React.FC = () => {
       return;
     }
 
-    if (imageProvider === 'nvidia-nim' && !nimConfig.apiKey) {
-      setError('Please configure your NVIDIA API key in Settings first.');
+    if (imageProvider === 'pollinations' && !pollinationsConfig.apiKey) {
+      setError('Please configure your Pollinations API key in Settings first.');
       return;
     }
 
@@ -319,8 +334,8 @@ export const ImageGenerator: React.FC = () => {
         source: 'image-generator',
         provider: imageProvider,
         cloudflareConfig,
-        nimConfig: imageProvider === 'nvidia-nim' ? nimConfig : undefined,
-        model: imageProvider === 'nvidia-nim' ? nimModel : advancedSettings.model,
+        pollinationsConfig,
+        model: imageProvider === 'pollinations' ? pollinationsModel : advancedSettings.model,
         steps: imageProvider === 'local' ? effectiveSteps : advancedSettings.steps,
         count: imageProvider === 'local' ? 1 : batchSize,
         localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
@@ -331,6 +346,7 @@ export const ImageGenerator: React.FC = () => {
         // generations. The user explicitly switches model in the dropdown
         // (which triggers unload+load) or clicks the GPU unload button.
         unloadAfter: false,
+        projectPath,
         onProgress: imageProvider === 'local' ? (p) => {
           if (p.type === 'progress' && p.percent !== undefined) {
             setLocalProgress({ percent: p.percent, message: `Generating... ${p.percent}%` });
@@ -375,7 +391,7 @@ export const ImageGenerator: React.FC = () => {
       setIsGenerating(false);
       setLocalProgress(null);
     }
-  }, [prompt, isGenerating, imageProvider, cloudflareConfig, selectedLocalModel, advancedSettings, selectedAspectRatio, batchSize, negativePrompt, localQualityPreset, localDevice, setLoadedModel]);
+  }, [prompt, isGenerating, imageProvider, cloudflareConfig, pollinationsConfig, selectedLocalModel, pollinationsModel, advancedSettings, selectedAspectRatio, batchSize, negativePrompt, localQualityPreset, localDevice, setLoadedModel, projectPath]);
 
   const handleDownload = useCallback(async (url: string, filename: string, imageId?: string) => {
     try {
@@ -546,8 +562,8 @@ export const ImageGenerator: React.FC = () => {
       return;
     }
 
-    if (imageProvider === 'nvidia-nim' && !nimConfig.apiKey) {
-      setError('Please configure your NVIDIA API key in Settings first.');
+    if (imageProvider === 'pollinations' && !pollinationsConfig.apiKey) {
+      setError('Please configure your Pollinations API key in Settings first.');
       return;
     }
 
@@ -577,13 +593,14 @@ export const ImageGenerator: React.FC = () => {
         source: 'image-generator',
         provider: imageProvider,
         cloudflareConfig,
-        nimConfig: imageProvider === 'nvidia-nim' ? nimConfig : undefined,
-        model: imageProvider === 'nvidia-nim' ? nimModel : advancedSettings.model,
+        pollinationsConfig,
+        model: imageProvider === 'pollinations' ? pollinationsModel : advancedSettings.model,
         steps: imageProvider === 'local' ? preset.steps : advancedSettings.steps,
         localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
         device: imageProvider === 'local' ? localDevice : undefined,
         width: imageProvider === 'local' ? preset.width : undefined,
         height: imageProvider === 'local' ? preset.height : undefined,
+        projectPath,
         onProgress: (phase, progress) => {
           setSceneProgress({
             phase,
@@ -702,24 +719,24 @@ export const ImageGenerator: React.FC = () => {
               <div className={`w-7 h-7 rounded-df-md flex items-center justify-center ${
                 imageProvider === 'local'
                   ? 'bg-df-success'
-                  : imageProvider === 'nvidia-nim'
-                    ? 'bg-[#76b900]'
+                  : imageProvider === 'pollinations'
+                    ? 'bg-pink-500'
                     : 'bg-df-accent'
               }`}>
                 {imageProvider === 'local' ? (
                   <Cpu size={14} className="text-white" />
-                ) : imageProvider === 'nvidia-nim' ? (
-                  <Cpu size={14} className="text-white" />
+                ) : imageProvider === 'pollinations' ? (
+                  <Flower size={14} className="text-white" />
                 ) : (
                   <Cloud size={14} className="text-white" />
                 )}
               </div>
               <div>
                 <h1 className="text-df-md font-bold text-df-text-primary">
-                  {imageProvider === 'local' ? 'Local Image Generator' : imageProvider === 'nvidia-nim' ? 'NVIDIA NIM Generator' : 'AI Image Generator'}
+                  {imageProvider === 'local' ? 'Local Image Generator' : imageProvider === 'pollinations' ? 'Pollinations Generator' : 'AI Image Generator'}
                 </h1>
                 <p className="text-df-xs text-df-text-muted">
-                  {imageProvider === 'local' ? 'Offline Stable Diffusion' : imageProvider === 'nvidia-nim' ? 'Powered by NVIDIA Inference Microservices' : 'Powered by Cloudflare Workers AI'}
+                  {imageProvider === 'local' ? 'Offline Stable Diffusion' : imageProvider === 'pollinations' ? 'Powered by Pollinations AI' : 'Powered by Cloudflare Workers AI'}
                 </p>
               </div>
             </div>
@@ -763,15 +780,15 @@ export const ImageGenerator: React.FC = () => {
                   <span>Cloud</span>
                 </button>
                 <button
-                  onClick={() => setImageProvider('nvidia-nim')}
+                  onClick={() => setImageProvider('pollinations')}
                   className={`flex items-center gap-1 px-2 py-1 rounded-df-sm text-df-xs font-medium transition-all ${
-                    imageProvider === 'nvidia-nim'
-                      ? 'bg-[#76b900]/15 text-[#76b900]'
+                    imageProvider === 'pollinations'
+                      ? 'bg-pink-500/20 text-pink-400'
                       : 'text-df-text-muted hover:text-df-text-primary'
                   }`}
                 >
-                  <Cpu size={10} />
-                  <span>NIM</span>
+                  <Flower size={10} />
+                  <span>Pollinations</span>
                 </button>
                 <button
                   onClick={() => setImageProvider('local')}
@@ -841,37 +858,27 @@ export const ImageGenerator: React.FC = () => {
                 </>
               )}
 
-              {/* NVIDIA NIM Settings */}
-              {imageProvider === 'nvidia-nim' && (
+              {/* Pollinations Settings */}
+              {imageProvider === 'pollinations' && (
                 <>
                   {/* API Key */}
                   <div className="mb-3">
                     <label className="text-df-xs font-medium text-df-text-muted uppercase tracking-wider mb-1 block">
-                      NVIDIA API Key
+                      Pollinations API Key
                     </label>
                     <div className="flex gap-2">
                       <input
                         type="password"
-                        value={tempNimApiKey}
-                        onChange={(e) => setTempNimApiKey(e.target.value)}
-                        placeholder="nvapi-..."
-                        className="flex-1 bg-df-surface-3 border border-df-border rounded-df-md px-2 py-1.5 text-df-sm text-df-text-primary placeholder:text-df-text-dim focus:outline-none focus:ring-1 focus:ring-[#76b900]"
+                        value={tempPollinationsApiKey}
+                        onChange={(e) => setTempPollinationsApiKey(e.target.value)}
+                        placeholder="Enter your Pollinations API key"
+                        className="flex-1 bg-df-surface-3 border border-df-border rounded-df-md px-2 py-1.5 text-df-sm text-df-text-primary placeholder:text-df-text-dim focus:outline-none focus:ring-1 focus:ring-pink-500"
                       />
-                      <Button
-                        variant="primary"
-                        onClick={() => {
-                          const updated = { apiKey: tempNimApiKey.trim() };
-                          setNimConfig(updated);
-                          saveNimConfig(updated);
-                        }}
-                        className="px-3 py-1.5 text-[10px]"
-                      >
+                      <Button variant="primary" onClick={handleSaveSettings} className="px-3 py-1.5 text-[10px]">
                         Save
                       </Button>
                     </div>
-                    <p className="mt-1 text-[9px] text-slate-500">
-                      Get your key from build.nvidia.com → API Catalog
-                    </p>
+                    <p className="mt-1 text-[9px] text-slate-500">Get your key from app.pollinations.ai</p>
                   </div>
                   {/* Model Selection */}
                   <div className="mb-3">
@@ -879,11 +886,11 @@ export const ImageGenerator: React.FC = () => {
                       Model
                     </label>
                     <select
-                      value={nimModel}
-                      onChange={(e) => setNimModel(e.target.value as NimModelId)}
-                      className="w-full bg-df-surface-3 border border-df-border rounded-df-md px-2 py-1.5 text-df-sm text-df-text-primary focus:outline-none focus:ring-1 focus:ring-[#76b900]"
+                      value={pollinationsModel}
+                      onChange={(e) => setPollinationsModel(e.target.value)}
+                      className="w-full bg-df-surface-3 border border-df-border rounded-df-md px-2 py-1.5 text-df-sm text-df-text-primary focus:outline-none focus:ring-1 focus:ring-pink-500"
                     >
-                      {NIM_MODELS.map((m) => (
+                      {POLLINATIONS_MODELS.map((m) => (
                         <option key={m.id} value={m.id}>
                           {m.label} — {m.description}
                         </option>

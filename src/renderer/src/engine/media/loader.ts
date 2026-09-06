@@ -19,11 +19,13 @@ export async function uploadAssetToServer(file: File): Promise<string | null> {
 
 /**
  * Loads asset metadata from a File object (browser drag-and-drop / legacy flow).
- * Creates a blob URL for display.
+ * When filePath is provided (Electron drag-drop), uses filePathToAssetUrl for persistence.
+ * Otherwise creates a blob URL (non-persistent).
  */
 export async function loadAssetMetadata(
   file: File,
-  existingAssets: Asset[]
+  existingAssets: Asset[],
+  filePath?: string
 ): Promise<Partial<Asset>> {
   const mimeType = file.type;
   let assetType: AssetType;
@@ -38,8 +40,17 @@ export async function loadAssetMetadata(
     assetType = 'image';
   }
 
-  const url = URL.createObjectURL(file);
   const logicalId = generateLogicalId(assetType, existingAssets);
+
+  let url: string;
+  let resolvedFilePath: string | undefined;
+
+  if (filePath && window.docuflow) {
+    resolvedFilePath = filePath;
+    url = window.docuflow.filePathToAssetUrl(filePath);
+  } else {
+    url = URL.createObjectURL(file);
+  }
 
   const metadata: Partial<Asset> = {
     logicalId,
@@ -47,6 +58,7 @@ export async function loadAssetMetadata(
     type: assetType,
     mimeType,
     url,
+    filePath: resolvedFilePath,
   };
 
   if (assetType === 'image') {

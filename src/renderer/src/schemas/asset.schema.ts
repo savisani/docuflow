@@ -41,6 +41,7 @@ export const SerializedAssetSchema = z.object({
   width: z.number().optional(),
   height: z.number().optional(),
   duration: z.number().optional(),
+  filePath: z.string().optional(),
   serverUrl: z.string().optional(),
   audioRole: AudioRoleSchema.optional(),
   sampleRate: z.number().optional(),

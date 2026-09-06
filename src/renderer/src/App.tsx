@@ -4,10 +4,13 @@ import { EditorLayout } from './components/editor/EditorLayout';
 import { ImageGenerator } from './components/generator/ImageGenerator';
 import { SceneGenerator } from './components/generator/SceneGenerator';
 import { DropZone } from './components/ui/DropZone';
+import { Console } from './components/console/Console';
+import { useConsoleStore } from './components/console/ConsoleStore';
 import { useDocuFlowStore } from './app/store';
 import { v4 as uuidv4 } from 'uuid';
 import { Asset, AssetType } from './types/assets';
 import { generateLogicalId } from './engine/media/findAsset';
+import { logger } from './services/logger';
 
 const ACCEPTED_EXTENSIONS = new Set([
   'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg',
@@ -102,6 +105,12 @@ function App() {
       const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable;
       if (isInput) return;
 
+      if (e.code === 'F12') {
+        e.preventDefault();
+        useConsoleStore.getState().toggleConsole();
+        return;
+      }
+
       if (e.code === 'Delete' || e.code === 'Backspace') {
         const { selectedCommandId, removeCommand } = useDocuFlowStore.getState();
         if (selectedCommandId) {
@@ -113,18 +122,37 @@ function App() {
       if (e.code === 'KeyS' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         const state = useDocuFlowStore.getState();
-        const projectName = state.project?.name || 'Untitled';
-        state.saveProject(projectName).then(result => {
+        state.saveProject().then(result => {
           if (result.success) {
-            console.log('Project saved successfully');
-          } else {
-            console.error('Failed to save project:', result.error);
+            logger.info('Project saved successfully');
+          } else if (result.error !== 'Save cancelled') {
+            logger.error('Project save failed', result.error);
           }
         });
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    logger.info('DocuFlow started', { version: '1.0.0' });
+
+    const handleError = (message: string, source: string, lineno: number, colno: number, error: Error) => {
+      logger.error('Unhandled error', { message, source, lineno, colno, stack: error?.stack });
+    };
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      logger.error('Unhandled promise rejection', event.reason);
+    };
+
+    window.addEventListener('error', handleError as EventListener);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+
+    return () => {
+      window.removeEventListener('error', handleError as EventListener);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
   }, []);
 
   const handleDrop = useCallback(async (e: DragEvent) => {
@@ -138,7 +166,13 @@ function App() {
     if (files.length === 0) return;
 
     const existingAssets = useDocuFlowStore.getState().assets;
-    const projectName = 'Untitled';
+    const { projectPath } = useDocuFlowStore.getState();
+    let projectName = 'Untitled';
+
+    if (projectPath) {
+      const projectDir = projectPath.replace(/[\\/][^\\/]+$/, '');
+      projectName = projectDir.split(/[\\/]/).pop() || 'Untitled';
+    }
 
     const filePaths: string[] = [];
     for (const file of files) {
@@ -271,6 +305,7 @@ function App() {
         </div>
       </div>
       <DropZone visible={dropVisible} fileCount={dropFileCount} />
+      <Console />
     </div>
   );
 }

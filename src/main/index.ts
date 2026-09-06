@@ -135,6 +135,36 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  // Capture renderer console messages and print to Electron terminal for debugging
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    const levels = ['DEBUG', 'LOG', 'WARN', 'ERROR', 'VERBOSE'];
+    const prefix = levels[level] || 'LOG';
+    const sourceFile = sourceId ? sourceId.split('/').pop() : 'unknown';
+    const location = line ? `Source: ${sourceFile} Line: ${line}` : '';
+    const formatted = `[RENDERER:${prefix}] ${message}${location ? ' | ' + location : ''}`;
+    if (level === 3 || level === 4) { // ERROR or VERBOSE
+      console.error(formatted);
+    } else if (level === 2) { // WARN
+      console.warn(formatted);
+    } else {
+      console.log(formatted);
+    }
+  });
+
+  // Capture uncaught JavaScript exceptions in the renderer
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    if (details.reason === 'crashed') {
+      console.error('[RENDERER:CRASH] Renderer process crashed:', details.reason);
+    } else if (details.reason === 'killed') {
+      console.warn('[RENDERER:KILLED] Renderer process was killed');
+    }
+  });
+
+  // Capture page-load failures
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, _isMainFrame) => {
+    console.error(`[RENDERER:PAGE_ERROR] Failed to load: ${errorCode} - ${errorDescription}`);
+  });
+
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
@@ -921,19 +951,32 @@ function registerSaveImageIpc(): void {
     }
   })
 
-  // Save raw image bytes to a temp file (for persisting Cloudflare images to disk)
+  // Save raw image bytes to a persistent file (for persisting generated images to disk)
   ipcMain.handle('image:saveBytes', async (_event, params: {
     imageBase64: string;
     filename?: string;
+    baseDir?: string;
   }): Promise<{ success: boolean; path?: string; error?: string }> => {
     if (!params || typeof params.imageBase64 !== 'string' || !params.imageBase64) {
       return { success: false, error: 'Invalid params: imageBase64 is required' }
     }
     try {
-      const { tmpdir } = await import('os')
       const fileName = params.filename || `docuflow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`
-      const filePath = join(tmpdir(), 'docuflow', fileName)
-      const dir = join(tmpdir(), 'docuflow')
+      let dir: string
+      let filePath: string
+
+      if (params.baseDir) {
+        // Save to project-relative generated/images directory for persistence
+        dir = join(params.baseDir, 'generated', 'images')
+        filePath = join(dir, fileName)
+      } else {
+        // Fall back to user data directory (persistent but not temp)
+        const { app } = await import('electron')
+        const userDataPath = app.getPath('userData')
+        dir = join(userDataPath, 'docuflow-generated')
+        filePath = join(dir, fileName)
+      }
+
       if (!existsSync(dir)) {
         const { mkdirSync } = await import('fs')
         mkdirSync(dir, { recursive: true })
@@ -954,6 +997,20 @@ function registerSaveImageIpc(): void {
       return buffer.toString('base64');
     } catch {
       return '';
+    }
+  })
+
+  // Delete a file (for cleaning up temp files)
+  ipcMain.handle('file:delete', async (_event, filePath: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      if (!filePath || typeof filePath !== 'string') {
+        return { success: false, error: 'Invalid filePath' };
+      }
+      const { unlinkSync } = await import('fs');
+      unlinkSync(filePath);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Delete failed' };
     }
   })
 }
@@ -1397,10 +1454,80 @@ function registerBatchPipelineIpc(): void {
   })
 }
 
+function registerProjectDialogIpc(): void {
+  ipcMain.handle('dialog:saveProject', async (_event, defaultName?: string): Promise<{ canceled: boolean; filePath?: string }> => {
+    const result = await dialog.showSaveDialog({
+      title: 'Save DocuFlow Project',
+      defaultPath: defaultName || 'Untitled.docuflow.json',
+      filters: [
+        { name: 'DocuFlow Project', extensions: ['docuflow.json'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    })
+    if (result.canceled || !result.filePath) {
+      return { canceled: true }
+    }
+    return { canceled: false, filePath: result.filePath }
+  })
+
+  ipcMain.handle('dialog:openProject', async (): Promise<{ canceled: boolean; filePath?: string }> => {
+    const result = await dialog.showOpenDialog({
+      title: 'Open DocuFlow Project',
+      filters: [
+        { name: 'DocuFlow Project', extensions: ['docuflow.json'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+      properties: ['openFile'],
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true }
+    }
+    return { canceled: false, filePath: result.filePaths[0] }
+  })
+
+  ipcMain.handle('project:saveToPath', async (_event, filePath: string, projectData: any): Promise<{ success: boolean; error?: string }> => {
+    if (!filePath || typeof filePath !== 'string') {
+      return { success: false, error: 'Invalid file path' }
+    }
+    if (!projectData || typeof projectData !== 'object') {
+      return { success: false, error: 'Invalid project data' }
+    }
+    try {
+      const dir = join(filePath, '..')
+      if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true })
+      }
+      writeFileSync(filePath, JSON.stringify(projectData, null, 2), 'utf-8')
+      return { success: true }
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, ErrorCode.PROJECT_SAVE)
+      return { success: false, error: normalized.message }
+    }
+  })
+
+  ipcMain.handle('project:loadFromPath', async (_event, filePath: string): Promise<{ success: boolean; data?: any; error?: string }> => {
+    if (!filePath || typeof filePath !== 'string') {
+      return { success: false, error: 'Invalid file path' }
+    }
+    try {
+      if (!existsSync(filePath)) {
+        const err = normalizeError('Project file not found', ErrorCode.PROJECT_LOAD, { context: { filePath } })
+        return { success: false, error: err.message }
+      }
+      const data = readFileSync(filePath, 'utf-8')
+      return { success: true, data: JSON.parse(data) }
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, ErrorCode.PROJECT_LOAD)
+      return { success: false, error: normalized.message }
+    }
+  })
+}
+
 app.whenReady().then(() => {
   registerAssetProtocol()
   registerWindowControls()
   registerProjectIpc()
+  registerProjectDialogIpc()
   registerLocalGenerationIpc()
   registerLocalModelManagerIpc()
   registerTranscriptionIpc()

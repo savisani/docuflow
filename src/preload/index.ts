@@ -100,12 +100,17 @@ const docuflowAPI = {
   saveBytes: (params: {
     imageBase64: string;
     filename?: string;
+    baseDir?: string;
   }): Promise<{ success: boolean; path?: string; error?: string }> => {
     return ipcRenderer.invoke('image:saveBytes', params)
   },
 
   readImageAsBase64: (filePath: string): Promise<string> => {
     return ipcRenderer.invoke('image:readAsBase64', filePath)
+  },
+
+  deleteFile: (filePath: string): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke('file:delete', filePath)
   },
 
   transcribeAudio: (params: {
@@ -314,6 +319,22 @@ const docuflowAPI = {
 
   listProjects: (): Promise<{ success: boolean; projects?: Array<{ name: string; hasFile: boolean }>; error?: string }> => {
     return ipcRenderer.invoke('project:list')
+  },
+
+  showSaveProjectDialog: (defaultName?: string): Promise<{ canceled: boolean; filePath?: string }> => {
+    return ipcRenderer.invoke('dialog:saveProject', defaultName)
+  },
+
+  showOpenProjectDialog: (): Promise<{ canceled: boolean; filePath?: string }> => {
+    return ipcRenderer.invoke('dialog:openProject')
+  },
+
+  saveProjectToPath: (filePath: string, projectData: any): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke('project:saveToPath', filePath, projectData)
+  },
+
+  loadProjectFromPath: (filePath: string): Promise<{ success: boolean; data?: any; error?: string }> => {
+    return ipcRenderer.invoke('project:loadFromPath', filePath)
   },
 
   onLocalGenerationProgress: (callback: (data: { type: string; step?: number; total?: number; percent?: number; message?: string }) => void): (() => void) => {

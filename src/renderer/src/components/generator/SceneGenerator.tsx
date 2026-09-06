@@ -506,7 +506,8 @@ export const SceneGenerator: React.FC = () => {
     }
 
     setScenes([...updated]);
-  }, [scenes, negativePrompt, imageProvider, cloudflareConfig, pollinationsConfig, pollinationsModel, advancedSettings, selectedLocalModel, localDevice, projectPath]);
+    setStoreScenes(updated);
+  }, [scenes, setStoreScenes, negativePrompt, imageProvider, cloudflareConfig, pollinationsConfig, pollinationsModel, advancedSettings, selectedLocalModel, localDevice, projectPath]);
 
   // -----------------------------------------------------------------------
   // Step 3a: Generate images only
@@ -558,7 +559,8 @@ export const SceneGenerator: React.FC = () => {
     const doneCount = updated.filter((s) => s.status === 'done').length;
     setToast({ message: `Image generation complete: ${doneCount}/${updated.length} scenes`, type: doneCount > 0 ? 'success' : 'error' });
     setGeneratingAll(false);
-  }, [scenes, negativePrompt, imageProvider, cloudflareConfig, pollinationsConfig, pollinationsModel, advancedSettings, selectedLocalModel, localDevice, projectPath]);
+    setStoreScenes(updated);
+  }, [scenes, setStoreScenes, negativePrompt, imageProvider, cloudflareConfig, pollinationsConfig, pollinationsModel, advancedSettings, selectedLocalModel, localDevice, projectPath]);
 
   // -----------------------------------------------------------------------
   // Step 3b: Build timeline from completed scenes
@@ -579,9 +581,10 @@ export const SceneGenerator: React.FC = () => {
       const sceneImages = new Map<number, string>();
       const completedScenes: StoryboardScene[] = [];
 
-      for (const sc of scenes) {
+      for (let i = 0; i < scenes.length; i++) {
+        const sc = scenes[i];
         if (sc.status === 'done' && sc.imageUrl) {
-          sceneImages.set(sc.sceneId - 1, `scene-${sc.sceneId}.png`);
+          sceneImages.set(i, `scene-${sc.sceneId}.png`);
           completedScenes.push(sc);
         }
       }
@@ -630,19 +633,27 @@ export const SceneGenerator: React.FC = () => {
       // The command's asset field is the logicalId (e.g., 'image1'), not filename
       const assetMapByLogicalId = new Map<string, { logicalId: string; assetId: string }>();
 
-      for (const [filename, assetInfo] of compiled.assetMap) {
-        const sceneIdx = parseInt(filename.replace('scene-', '').replace('.png', ''), 10) - 1;
-        const sc = completedScenes[sceneIdx];
+      // Build a position-aware lookup: filename -> (position in completedScenes, scene)
+      // This correctly handles deleted scenes where sceneId values are non-consecutive
+      for (let pos = 0; pos < completedScenes.length; pos++) {
+        const sc = completedScenes[pos];
         if (!sc?.imageUrl || !sc?.imageId) continue;
-
-        // Find the existing generated asset by imageId
-        const existingAsset = currentAssets.find(a => a.id === sc.imageId);
-        if (existingAsset) {
-          // Key by logicalId so command's asset lookup works
-          assetMapByLogicalId.set(assetInfo.logicalId, {
-            logicalId: assetInfo.logicalId,
-            assetId: existingAsset.id,
-          });
+        // Find the corresponding filename in compiled.assetMap by checking which entry
+        // would map to this position in completedScenes
+        for (const [filename, assetInfo] of compiled.assetMap) {
+          // Parse filename to get expected position
+          const expectedPos = parseInt(filename.replace('scene-', '').replace('.png', ''), 10) - 1;
+          if (expectedPos === pos) {
+            // Find the existing generated asset by imageId
+            const existingAsset = currentAssets.find(a => a.id === sc.imageId);
+            if (existingAsset) {
+              assetMapByLogicalId.set(assetInfo.logicalId, {
+                logicalId: assetInfo.logicalId,
+                assetId: existingAsset.id,
+              });
+            }
+            break;
+          }
         }
       }
       console.log('[DEBUG handleBuildTimeline] assetMapByLogicalId:', Array.from(assetMapByLogicalId.entries()));
@@ -650,16 +661,23 @@ export const SceneGenerator: React.FC = () => {
       console.log('[DEBUG handleBuildTimeline] compiled.allCommands count:', compiled.allCommands.length);
 
       // Build commands using existing assets
+      // NOTE: compileSceneDSL outputs start/duration in FRAMES, but the command
+      // system expects SECONDS. We must divide by fps to convert.
       const newCommands: Command[] = [];
       for (const cmd of compiled.allCommands) {
         const logicalId = (cmd as any).asset;
         console.log('[DEBUG handleBuildTimeline] processing cmd.asset:', logicalId, 'assetMapByLogicalId.has(logicalId):', assetMapByLogicalId.has(logicalId));
         if (logicalId && assetMapByLogicalId.has(logicalId)) {
           const { assetId } = assetMapByLogicalId.get(logicalId)!;
+          const cmdAny = cmd as any;
           newCommands.push({
             ...cmd,
             id: uuidv4(),
-            asset: assetId,  // Use the actual asset ID for proper resolution
+            asset: assetId,
+            // Convert frames to seconds: the compiler outputs frames, but the
+            // timeline builder multiplies by fps (cmd.start * fps = startFrame)
+            start: typeof cmdAny.start === 'number' ? cmdAny.start / fps : cmdAny.start,
+            duration: typeof cmdAny.duration === 'number' ? cmdAny.duration / fps : cmdAny.duration,
           } as Command);
         }
       }
@@ -732,6 +750,7 @@ export const SceneGenerator: React.FC = () => {
       }
 
       setGeneratingAll(false);
+      setStoreScenes(updated);
 
       // Phase 2: Verify completed scenes
       const completedScenes: StoryboardScene[] = updated.filter((s) => s.status === 'done' && s.imageUrl);
@@ -746,8 +765,9 @@ export const SceneGenerator: React.FC = () => {
       const store = useDocuFlowStore.getState();
       const sceneImages = new Map<number, string>();
 
-      for (const sc of completedScenes) {
-        sceneImages.set(sc.sceneId - 1, `scene-${sc.sceneId}.png`);
+      for (let i = 0; i < completedScenes.length; i++) {
+        const sc = completedScenes[i];
+        sceneImages.set(i, `scene-${sc.sceneId}.png`);
       }
       console.log('[DEBUG handleGenerateAndBuild] sceneImages map:', Array.from(sceneImages.entries()));
 
@@ -800,37 +820,46 @@ export const SceneGenerator: React.FC = () => {
 
       // Build assetMap using existing assets (created by generateImage)
       // Key by logicalId since command's asset field is the logicalId
+      // Use position-aware lookup to correctly handle deleted scenes
       const assetMapByLogicalId = new Map<string, { logicalId: string; assetId: string }>();
-      for (const [filename, assetInfo] of compiled.assetMap) {
-        const sceneIdx = parseInt(filename.replace('scene-', '').replace('.png', ''), 10) - 1;
-        console.log('[DEBUG handleGenerateAndBuild] parsing filename:', filename, '-> sceneIdx:', sceneIdx);
-        const sc = completedScenes[sceneIdx];
-        console.log('[DEBUG handleGenerateAndBuild] completedScenes[', sceneIdx, ']:', sc ? { sceneId: sc.sceneId, imageId: sc.imageId } : 'UNDEFINED');
+      for (let pos = 0; pos < completedScenes.length; pos++) {
+        const sc = completedScenes[pos];
         if (!sc?.imageUrl) continue;
-
-        // Find the existing asset created by generateImage
-        const existingAsset = assetByImageId.get(sc.imageId);
-        console.log('[DEBUG handleGenerateAndBuild] looking for asset with id:', sc.imageId, '-> found:', !!existingAsset, existingAsset ? { id: existingAsset.id, logicalId: existingAsset.logicalId } : null);
-        if (existingAsset) {
-          // Key by logicalId so command's asset lookup works
-          assetMapByLogicalId.set(assetInfo.logicalId, {
-            logicalId: existingAsset.logicalId,
-            assetId: existingAsset.id,
-          });
+        // Find the corresponding filename in compiled.assetMap by matching position
+        for (const [filename, assetInfo] of compiled.assetMap) {
+          const expectedPos = parseInt(filename.replace('scene-', '').replace('.png', ''), 10) - 1;
+          if (expectedPos === pos) {
+            // Find the existing asset created by generateImage
+            const existingAsset = assetByImageId.get(sc.imageId);
+            if (existingAsset) {
+              assetMapByLogicalId.set(assetInfo.logicalId, {
+                logicalId: existingAsset.logicalId,
+                assetId: existingAsset.id,
+              });
+            }
+            break;
+          }
         }
       }
       console.log('[DEBUG handleGenerateAndBuild] assetMapByLogicalId:', Array.from(assetMapByLogicalId.entries()));
 
       // Build commands using existing assets
+      // NOTE: compileSceneDSL outputs start/duration in FRAMES, but the command
+      // system expects SECONDS. We must divide by fps to convert.
       const newCommands: Command[] = [];
       for (const cmd of compiled.allCommands) {
         const logicalId = (cmd as any).asset;
         if (logicalId && assetMapByLogicalId.has(logicalId)) {
           const { assetId } = assetMapByLogicalId.get(logicalId)!;
+          const cmdAny = cmd as any;
           newCommands.push({
             ...cmd,
             id: uuidv4(),
-            asset: assetId,  // Use the actual asset ID for proper resolution
+            asset: assetId,
+            // Convert frames to seconds: the compiler outputs frames, but the
+            // timeline builder multiplies by fps (cmd.start * fps = startFrame)
+            start: typeof cmdAny.start === 'number' ? cmdAny.start / fps : cmdAny.start,
+            duration: typeof cmdAny.duration === 'number' ? cmdAny.duration / fps : cmdAny.duration,
           } as Command);
         }
       }
@@ -848,7 +877,7 @@ export const SceneGenerator: React.FC = () => {
       setBuildingTimeline(false);
       setGenerateAndBuildRunning(false);
     }
-  }, [scenes, negativePrompt, imageProvider, cloudflareConfig, pollinationsConfig, pollinationsModel, advancedSettings, selectedLocalModel, localDevice, transcription, setActiveTab, projectPath]);
+  }, [scenes, setStoreScenes, negativePrompt, imageProvider, cloudflareConfig, pollinationsConfig, pollinationsModel, advancedSettings, selectedLocalModel, localDevice, transcription, setActiveTab, projectPath]);
 
   // -----------------------------------------------------------------------
   // Edit helpers
