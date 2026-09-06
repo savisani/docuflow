@@ -32,34 +32,33 @@ interface DragState {
 }
 
 export const Timeline: React.FC = () => {
-  const {
-    assets,
-    commands,
-    settings,
-    timeline: storeTimeline,
-    currentTime,
-    playing,
-    setCurrentTime,
-    selectedCommandId,
-    selectCommand,
-    updateCommand,
-    addCommand,
-    removeCommand,
-    trackVisibility,
-    setTrackVisibility,
-    hiddenAssetIds,
-    snapEnabled,
-    setSnapEnabled,
-    undo,
-    redo,
-    duplicateCommand,
-    voiceover,
-    transcript,
-    history,
-    historyIndex,
-    beginBatch,
-    endBatch,
-  } = useDocuFlowStore();
+  // Narrow selectors to prevent full rerenders on unrelated state changes
+  const assets = useDocuFlowStore((s) => s.assets);
+  const commands = useDocuFlowStore((s) => s.commands);
+  const settings = useDocuFlowStore((s) => s.settings);
+  const storeTimeline = useDocuFlowStore((s) => s.timeline);
+  const currentTime = useDocuFlowStore((s) => s.currentTime);
+  const playing = useDocuFlowStore((s) => s.playing);
+  const setCurrentTime = useDocuFlowStore((s) => s.setCurrentTime);
+  const selectedCommandId = useDocuFlowStore((s) => s.selectedCommandId);
+  const selectCommand = useDocuFlowStore((s) => s.selectCommand);
+  const updateCommand = useDocuFlowStore((s) => s.updateCommand);
+  const addCommand = useDocuFlowStore((s) => s.addCommand);
+  const removeCommand = useDocuFlowStore((s) => s.removeCommand);
+  const trackVisibility = useDocuFlowStore((s) => s.trackVisibility);
+  const setTrackVisibility = useDocuFlowStore((s) => s.setTrackVisibility);
+  const hiddenAssetIds = useDocuFlowStore((s) => s.hiddenAssetIds);
+  const snapEnabled = useDocuFlowStore((s) => s.snapEnabled);
+  const setSnapEnabled = useDocuFlowStore((s) => s.setSnapEnabled);
+  const undo = useDocuFlowStore((s) => s.undo);
+  const redo = useDocuFlowStore((s) => s.redo);
+  const duplicateCommand = useDocuFlowStore((s) => s.duplicateCommand);
+  const voiceover = useDocuFlowStore((s) => s.voiceover);
+  const transcript = useDocuFlowStore((s) => s.transcript);
+  const history = useDocuFlowStore((s) => s.history);
+  const historyIndex = useDocuFlowStore((s) => s.historyIndex);
+  const beginBatch = useDocuFlowStore((s) => s.beginBatch);
+  const endBatch = useDocuFlowStore((s) => s.endBatch);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
@@ -71,6 +70,9 @@ export const Timeline: React.FC = () => {
   const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
   const [containerWidth, setContainerWidth] = useState(0);
   const [dragOverTrackId, setDragOverTrackId] = useState<string | null>(null);
+  // Visual-only drag offset: pixels moved during drag, not committed to store yet
+  const [dragVisualOffset, setDragVisualOffset] = useState<{ clipId: string; dx: number; dy: number } | null>(null);
+  const dragVisualOffsetRef = useRef<{ clipId: string; dx: number; dy: number } | null>(null);
 
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -213,9 +215,13 @@ export const Timeline: React.FC = () => {
   useEffect(() => {
     if (!isDraggingPlayhead) return;
 
-    const onMove = (e: MouseEvent) => {
+    let rafId: number | null = null;
+    let lastMouseEvent: MouseEvent | null = null;
+
+    const processMove = () => {
       const drag = playheadDragRef.current;
-      if (!drag) return;
+      const e = lastMouseEvent;
+      if (!drag || !e) { rafId = null; return; }
       const dx = e.clientX - drag.startX;
       const dt = dx / (PIXELS_PER_SECOND * zoom);
       const newTime = Math.max(0, Math.min(drag.startTime + dt, maxEndTime || totalSeconds));
@@ -223,9 +229,18 @@ export const Timeline: React.FC = () => {
       setCurrentTime(snapped);
       const frame = Math.round(snapped * fps);
       window.dispatchEvent(new CustomEvent('docuflow:seek', { detail: { frame } }));
+      rafId = null;
+    };
+
+    const onMove = (e: MouseEvent) => {
+      lastMouseEvent = e;
+      if (rafId === null) {
+        rafId = requestAnimationFrame(processMove);
+      }
     };
 
     const onUp = () => {
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
       playheadDragRef.current = null;
       setIsDraggingPlayhead(false);
     };
@@ -235,6 +250,7 @@ export const Timeline: React.FC = () => {
     return () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      if (rafId !== null) cancelAnimationFrame(rafId);
     };
   }, [isDraggingPlayhead, zoom, maxEndTime, totalSeconds, setCurrentTime, fps, snap]);
 
@@ -402,6 +418,8 @@ export const Timeline: React.FC = () => {
   useEffect(() => {
       if (!dragState) {
         prevDragStateRef.current = null;
+        dragVisualOffsetRef.current = null;
+        setDragVisualOffset(null);
         return;
       }
 
@@ -427,67 +445,84 @@ export const Timeline: React.FC = () => {
       }
     }
 
+    let rafId: number | null = null;
+
     const handleMouseMove = (e: MouseEvent) => {
       const dx = e.clientX - dragState.startX;
       const dy = e.clientY - dragState.startY;
-      const dt = dx / (PIXELS_PER_SECOND * zoom);
-
       const hasMoved = Math.abs(dx) > 3 || Math.abs(dy) > 3;
 
-      if (dragState.mode === 'move') {
-        const rawStart = dragState.originalStart + dt;
-        const newStart = Math.max(0, snap(rawStart, dragState.clipId));
-        const rawTrackIndex = dragState.originalLayerIndex + Math.round(dy / TRACK_HEIGHT);
-        const clampedTrackIndex = Math.max(0, rawTrackIndex);
-        const delta = newStart - dragState.originalStart;
+      // Store visual offset in ref (no store update = no rerender during drag)
+      dragVisualOffsetRef.current = { clipId: dragState.clipId, dx, dy };
 
-        let targetZIndex = dragState.originalZIndex;
-        if (clampedTrackIndex !== dragState.originalLayerIndex) {
-          const otherZIndices = trackLayerMap
-            .filter((_, i) => i !== dragState.originalLayerIndex)
-            .sort((a, b) => a - b);
-          const len = otherZIndices.length;
-          if (clampedTrackIndex <= 0) {
-            targetZIndex = len > 0 ? otherZIndices[len - 1] + 1 : 0;
-          } else if (clampedTrackIndex >= len + 1) {
-            targetZIndex = len > 0 ? otherZIndices[0] - 1 : 0;
-          } else {
-            const above = otherZIndices[len - clampedTrackIndex];
-            const below = otherZIndices[len - clampedTrackIndex - 1];
-            targetZIndex = below !== undefined && above !== undefined
-              ? Math.floor((below + above) / 2)
-              : below !== undefined ? below + 1 : (above !== undefined ? above - 1 : 0);
-          }
-        }
-
-        updateCommand(dragState.clipId, { start: newStart, layer: targetZIndex });
-        setDragState((prev) =>
-          prev ? { ...prev, currentTrackIndex: clampedTrackIndex, hasMoved } : null
-        );
-      } else if (dragState.mode === 'resize-right') {
-        const rawEnd = dragState.originalStart + dragState.originalDuration + dt;
-        const maxEnd = dragState.maxDuration != null
-          ? dragState.originalStart + dragState.maxDuration
-          : Infinity;
-        const newEnd = Math.max(dragState.originalStart + MIN_DURATION, Math.min(snap(rawEnd, dragState.clipId), maxEnd));
-        const newDuration = Math.max(MIN_DURATION, newEnd - dragState.originalStart);
-        if (!isFinite(newDuration) || newDuration <= 0) return;
-        updateCommand(dragState.clipId, { duration: newDuration });
-        setDragState((prev) => (prev ? { ...prev, hasMoved } : null));
-      } else if (dragState.mode === 'resize-left') {
-        const rawStart = dragState.originalStart + dt;
-        const newStart = Math.max(0, snap(rawStart, dragState.clipId));
-        const deltaStart = newStart - dragState.originalStart;
-        const newDuration = Math.max(MIN_DURATION, dragState.originalDuration - deltaStart);
-        if (!isFinite(newDuration) || newDuration <= 0 || !isFinite(newStart) || newStart < 0) return;
-        if (Math.abs(newStart - dragState.originalStart) > 0.001) {
-          updateCommand(dragState.clipId, { start: newStart, duration: newDuration });
-        }
-        setDragState((prev) => (prev ? { ...prev, hasMoved } : null));
-      }
+      // Update visual position via CSS transform (lightweight)
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        setDragVisualOffset(dragVisualOffsetRef.current);
+        // Update hasMoved flag for mouseup logic
+        setDragState((prev) => prev && !prev.hasMoved && hasMoved ? { ...prev, hasMoved } : prev);
+        rafId = null;
+      });
     };
 
     const handleMouseUp = () => {
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+      const visualOffset = dragVisualOffsetRef.current;
+      dragVisualOffsetRef.current = null;
+      setDragVisualOffset(null);
+
+      // Commit final position to store on mouseup only
+      if (visualOffset) {
+        const dx = visualOffset.dx;
+        const dy = visualOffset.dy;
+        const dt = dx / (PIXELS_PER_SECOND * zoom);
+
+        if (dragState.mode === 'move') {
+          const rawStart = dragState.originalStart + dt;
+          const newStart = Math.max(0, snap(rawStart, dragState.clipId));
+          const rawTrackIndex = dragState.originalLayerIndex + Math.round(dy / TRACK_HEIGHT);
+          const clampedTrackIndex = Math.max(0, rawTrackIndex);
+
+          let targetZIndex = dragState.originalZIndex;
+          if (clampedTrackIndex !== dragState.originalLayerIndex) {
+            const otherZIndices = trackLayerMap
+              .filter((_, i) => i !== dragState.originalLayerIndex)
+              .sort((a, b) => a - b);
+            const len = otherZIndices.length;
+            if (clampedTrackIndex <= 0) {
+              targetZIndex = len > 0 ? otherZIndices[len - 1] + 1 : 0;
+            } else if (clampedTrackIndex >= len + 1) {
+              targetZIndex = len > 0 ? otherZIndices[0] - 1 : 0;
+            } else {
+              const above = otherZIndices[len - clampedTrackIndex];
+              const below = otherZIndices[len - clampedTrackIndex - 1];
+              targetZIndex = below !== undefined && above !== undefined
+                ? Math.floor((below + above) / 2)
+                : below !== undefined ? below + 1 : (above !== undefined ? above - 1 : 0);
+            }
+          }
+          updateCommand(dragState.clipId, { start: newStart, layer: targetZIndex });
+        } else if (dragState.mode === 'resize-right') {
+          const rawEnd = dragState.originalStart + dragState.originalDuration + dt;
+          const maxEnd = dragState.maxDuration != null
+            ? dragState.originalStart + dragState.maxDuration
+            : Infinity;
+          const newEnd = Math.max(dragState.originalStart + MIN_DURATION, Math.min(snap(rawEnd, dragState.clipId), maxEnd));
+          const newDuration = Math.max(MIN_DURATION, newEnd - dragState.originalStart);
+          if (isFinite(newDuration) && newDuration > 0) {
+            updateCommand(dragState.clipId, { duration: newDuration });
+          }
+        } else if (dragState.mode === 'resize-left') {
+          const rawStart = dragState.originalStart + dt;
+          const newStart = Math.max(0, snap(rawStart, dragState.clipId));
+          const deltaStart = newStart - dragState.originalStart;
+          const newDuration = Math.max(MIN_DURATION, dragState.originalDuration - deltaStart);
+          if (isFinite(newDuration) && newDuration > 0 && isFinite(newStart) && newStart >= 0 && Math.abs(newStart - dragState.originalStart) > 0.001) {
+            updateCommand(dragState.clipId, { start: newStart, duration: newDuration });
+          }
+        }
+      }
+
       setDragState(null);
       endBatch();
     };
@@ -497,6 +532,7 @@ export const Timeline: React.FC = () => {
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
+      if (rafId !== null) cancelAnimationFrame(rafId);
     };
   }, [dragState, zoom, updateCommand, snap, fps, trackLayerMap, beginBatch, endBatch]);
 
@@ -948,6 +984,62 @@ export const Timeline: React.FC = () => {
                         const isImage = asset?.type === 'image';
                         const isAudio = asset?.type === 'audio';
 
+                        // Apply visual-only drag offset via CSS transform (no store update)
+                        const isDragTarget = dragVisualOffset && dragVisualOffset.clipId === (clip.layerId || clip.id);
+                        const dragDx = isDragTarget ? dragVisualOffset!.dx : 0;
+                        const dragDy = isDragTarget ? dragVisualOffset!.dy : 0;
+                        const dragDt = dragDx / (PIXELS_PER_SECOND * zoom);
+                        let visualLeft = left;
+                        let visualWidth = width;
+                        if (isDragTarget && dragState) {
+                          if (dragState.mode === 'move') {
+                            // Move: translate via transform
+                          } else if (dragState.mode === 'resize-right') {
+                            const rawEnd = dragState.originalStart + dragState.originalDuration + dragDt;
+                            const maxEnd = dragState.maxDuration != null ? dragState.originalStart + dragState.maxDuration : Infinity;
+                            const newEnd = Math.max(dragState.originalStart + MIN_DURATION, Math.min(rawEnd, maxEnd));
+                            visualWidth = Math.max(4, (newEnd - dragState.originalStart) * PIXELS_PER_SECOND * zoom);
+                          } else if (dragState.mode === 'resize-left') {
+                            const rawStart = dragState.originalStart + dragDt;
+                            const newStart = Math.max(0, rawStart);
+                            const deltaStart = newStart - dragState.originalStart;
+                            const newDuration = Math.max(MIN_DURATION, dragState.originalDuration - deltaStart);
+                            visualLeft = newStart * PIXELS_PER_SECOND * zoom;
+                            visualWidth = Math.max(4, newDuration * PIXELS_PER_SECOND * zoom);
+                          }
+                        }
+                        const clipStyle: React.CSSProperties = isDragTarget && dragState?.mode === 'move'
+                          ? {
+                              left,
+                              width,
+                              backgroundColor: track.color + 'dd',
+                              color: 'white',
+                              borderLeftWidth: '3px',
+                              borderLeftColor: track.color,
+                              transform: `translate(${dragDx}px, ${dragDy}px)`,
+                              zIndex: 50,
+                              opacity: 0.9,
+                            }
+                          : isDragTarget
+                          ? {
+                              left: visualLeft,
+                              width: visualWidth,
+                              backgroundColor: track.color + 'dd',
+                              color: 'white',
+                              borderLeftWidth: '3px',
+                              borderLeftColor: track.color,
+                              zIndex: 50,
+                              opacity: 0.9,
+                            }
+                          : {
+                              left,
+                              width,
+                              backgroundColor: track.color + 'dd',
+                              color: 'white',
+                              borderLeftWidth: '3px',
+                              borderLeftColor: track.color,
+                            };
+
                         return (
                           <div
                             key={clip.id}
@@ -958,14 +1050,7 @@ export const Timeline: React.FC = () => {
                                 ? 'ring-2 ring-df-accent/60 ring-offset-1 ring-offset-df-surface-1 z-10 border-df-accent/40'
                                 : 'hover:border-df-border-strong hover:brightness-110'}
                             `}
-                            style={{
-                              left,
-                              width,
-                              backgroundColor: track.color + 'dd',
-                              color: 'white',
-                              borderLeftWidth: '3px',
-                              borderLeftColor: track.color,
-                            }}
+                            style={clipStyle}
                             onMouseDown={(e) => handleClipMouseDown(e, clip, track.type, 'move')}
                           >
                             {isAudio && showWaveforms && width > 30 && (

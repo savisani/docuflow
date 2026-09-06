@@ -45,7 +45,13 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({
   currentFrame,
   fps,
 }) => {
-  const { selectedCommandId, timeline, settings, updateCommand, beginBatch, endBatch } = useDocuFlowStore();
+  // Narrow selectors to prevent full rerenders on unrelated state changes
+  const selectedCommandId = useDocuFlowStore((s) => s.selectedCommandId);
+  const timeline = useDocuFlowStore((s) => s.timeline);
+  const settings = useDocuFlowStore((s) => s.settings);
+  const updateCommand = useDocuFlowStore((s) => s.updateCommand);
+  const beginBatch = useDocuFlowStore((s) => s.beginBatch);
+  const endBatch = useDocuFlowStore((s) => s.endBatch);
 
   const selectedCommand = useDocuFlowStore((s) =>
     s.commands.find((c) => c.id === s.selectedCommandId)

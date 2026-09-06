@@ -13,8 +13,16 @@ import { TransformOverlay } from './TransformOverlay';
 const ZOOM_LEVELS = [25, 50, 75, 100, 150, 200];
 
 export const VideoPreview: React.FC = () => {
-  const { assets, commands, settings, timeline, currentTime, playing, setCurrentTime, setPlaying, voiceover } =
-    useDocuFlowStore();
+  // Narrow selectors to prevent full rerenders on unrelated state changes
+  const assets = useDocuFlowStore((s) => s.assets);
+  const commands = useDocuFlowStore((s) => s.commands);
+  const settings = useDocuFlowStore((s) => s.settings);
+  const timeline = useDocuFlowStore((s) => s.timeline);
+  const currentTime = useDocuFlowStore((s) => s.currentTime);
+  const playing = useDocuFlowStore((s) => s.playing);
+  const setCurrentTime = useDocuFlowStore((s) => s.setCurrentTime);
+  const setPlaying = useDocuFlowStore((s) => s.setPlaying);
+  const voiceover = useDocuFlowStore((s) => s.voiceover);
 
   const playerRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);

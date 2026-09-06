@@ -344,7 +344,17 @@ const EASING_OPTIONS: { value: EasingType; label: string }[] = [
 ];
 
 export const AnimationPanel: React.FC = () => {
-  const { commands, selectedCommandId, timeline, currentTime, settings, addCommand, updateCommand, removeCommand, beginBatch, endBatch } = useDocuFlowStore();
+  // Narrow selectors to prevent full rerenders on unrelated state changes
+  const commands = useDocuFlowStore((s) => s.commands);
+  const selectedCommandId = useDocuFlowStore((s) => s.selectedCommandId);
+  const timeline = useDocuFlowStore((s) => s.timeline);
+  const currentTime = useDocuFlowStore((s) => s.currentTime);
+  const settings = useDocuFlowStore((s) => s.settings);
+  const addCommand = useDocuFlowStore((s) => s.addCommand);
+  const updateCommand = useDocuFlowStore((s) => s.updateCommand);
+  const removeCommand = useDocuFlowStore((s) => s.removeCommand);
+  const beginBatch = useDocuFlowStore((s) => s.beginBatch);
+  const endBatch = useDocuFlowStore((s) => s.endBatch);
   const [expandedPresets, setExpandedPresets] = useState(true);
   const [expandedTransitions, setExpandedTransitions] = useState(true);
   const [expandedKeyframes, setExpandedKeyframes] = useState(true);

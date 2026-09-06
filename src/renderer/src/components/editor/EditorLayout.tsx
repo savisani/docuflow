@@ -24,18 +24,17 @@ const RIGHT_TABS = [
 ] as const;
 
 export const EditorLayout: React.FC = () => {
-  const {
-    panelVisibility,
-    setPanelVisibility,
-    workspaceLayout,
-    setAssetsWidth,
-    setPreviewTimelineSplit,
-    selectedCommandId,
-    rightPanel,
-    setRightPanel,
-    rightPanelWidth,
-    setRightPanelWidth,
-  } = useDocuFlowStore();
+  // Narrow selectors to prevent full rerenders on unrelated state changes
+  const panelVisibility = useDocuFlowStore((s) => s.panelVisibility);
+  const setPanelVisibility = useDocuFlowStore((s) => s.setPanelVisibility);
+  const workspaceLayout = useDocuFlowStore((s) => s.workspaceLayout);
+  const setAssetsWidth = useDocuFlowStore((s) => s.setAssetsWidth);
+  const setPreviewTimelineSplit = useDocuFlowStore((s) => s.setPreviewTimelineSplit);
+  const selectedCommandId = useDocuFlowStore((s) => s.selectedCommandId);
+  const rightPanel = useDocuFlowStore((s) => s.rightPanel);
+  const setRightPanel = useDocuFlowStore((s) => s.setRightPanel);
+  const rightPanelWidth = useDocuFlowStore((s) => s.rightPanelWidth);
+  const setRightPanelWidth = useDocuFlowStore((s) => s.setRightPanelWidth);
 
   const rightPanelVisible = panelVisibility.inspector;
 

@@ -6,7 +6,20 @@ import { resolveLayerState, resolveCameraState } from '../../engine/timeline/res
 import { Panel, Section, Divider, LabelValue, Badge, IconButton, Tooltip, Toggle, Slider, Input, Select, NumberInput } from '../ui';
 
 export const Inspector: React.FC = () => {
-  const { commands, selectedCommandId, settings, setSettings, assets, timeline, updateCommand, removeCommand, duplicateCommand, currentTime, setAudioRole, beginBatch, endBatch } = useDocuFlowStore();
+  // Narrow selectors to prevent full rerenders on unrelated state changes
+  const commands = useDocuFlowStore((s) => s.commands);
+  const selectedCommandId = useDocuFlowStore((s) => s.selectedCommandId);
+  const settings = useDocuFlowStore((s) => s.settings);
+  const setSettings = useDocuFlowStore((s) => s.setSettings);
+  const assets = useDocuFlowStore((s) => s.assets);
+  const timeline = useDocuFlowStore((s) => s.timeline);
+  const updateCommand = useDocuFlowStore((s) => s.updateCommand);
+  const removeCommand = useDocuFlowStore((s) => s.removeCommand);
+  const duplicateCommand = useDocuFlowStore((s) => s.duplicateCommand);
+  const currentTime = useDocuFlowStore((s) => s.currentTime);
+  const setAudioRole = useDocuFlowStore((s) => s.setAudioRole);
+  const beginBatch = useDocuFlowStore((s) => s.beginBatch);
+  const endBatch = useDocuFlowStore((s) => s.endBatch);
 
   const selectedCommand = commands.find((c) => c.id === selectedCommandId);
   const isAudioCommand = selectedCommand && (selectedCommand.type === 'sfx' || selectedCommand.type === 'music' || selectedCommand.type === 'ambient');
