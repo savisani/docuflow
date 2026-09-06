@@ -665,15 +665,18 @@ export const SceneGenerator: React.FC = () => {
       // system expects SECONDS. We must divide by fps to convert.
       const newCommands: Command[] = [];
       for (const cmd of compiled.allCommands) {
-        const logicalId = (cmd as any).asset;
-        console.log('[DEBUG handleBuildTimeline] processing cmd.asset:', logicalId, 'assetMapByLogicalId.has(logicalId):', assetMapByLogicalId.has(logicalId));
+        // Commands use either 'asset' (show) or 'target' (scale, move, rotate, etc.) to reference assets
+        const logicalId = (cmd as any).asset || (cmd as any).target;
+        console.log('[DEBUG handleBuildTimeline] processing cmd.asset/target:', logicalId, 'assetMapByLogicalId.has(logicalId):', assetMapByLogicalId.has(logicalId));
         if (logicalId && assetMapByLogicalId.has(logicalId)) {
           const { assetId } = assetMapByLogicalId.get(logicalId)!;
           const cmdAny = cmd as any;
+          const isTargetBased = !(cmd as any).asset;
           newCommands.push({
             ...cmd,
             id: uuidv4(),
-            asset: assetId,
+            // Preserve the original reference field (asset or target)
+            [isTargetBased ? 'target' : 'asset']: assetId,
             // Convert frames to seconds: the compiler outputs frames, but the
             // timeline builder multiplies by fps (cmd.start * fps = startFrame)
             start: typeof cmdAny.start === 'number' ? cmdAny.start / fps : cmdAny.start,
