@@ -114,6 +114,7 @@ interface DocuFlowState {
   playing: boolean;
   selectedAssetId: string | null;
   selectedCommandId: string | null;
+  selectedCommandIds: string[];
   previewAssetUrl: string | null;
   previewMode: PreviewMode;
   selectedPreviewAsset: Asset | null;
@@ -177,6 +178,9 @@ interface DocuFlowState {
   isDirty: boolean;
   saveStatus: 'saved' | 'unsaved' | 'saving' | 'save-failed';
 
+  // Clipboard for cut/copy/paste
+  clipboardCommands: Command[];
+
   setProject: (project: Project) => void;
   setAssets: (assets: Asset[]) => void;
   addAsset: (asset: Asset) => void;
@@ -198,6 +202,8 @@ interface DocuFlowState {
   setPlaying: (playing: boolean) => void;
   selectAsset: (id: string | null) => void;
   selectCommand: (id: string | null) => void;
+  toggleCommandSelection: (id: string) => void;
+  setSelectedCommandIds: (ids: string[]) => void;
   setPreviewAssetUrl: (url: string | null) => void;
   setPreviewMode: (mode: PreviewMode) => void;
   setSelectedPreviewAsset: (asset: Asset | null) => void;
@@ -248,6 +254,12 @@ interface DocuFlowState {
   resetHistory: () => void;
   duplicateCommand: (id: string) => void;
   replaceCommands: (commands: Command[]) => void;
+  splitCommandAtPlayhead: (id: string) => void;
+  deleteSelectedCommands: () => void;
+  copySelectedCommands: () => void;
+  cutSelectedCommands: () => void;
+  pasteCommands: () => void;
+  selectAllCommands: () => void;
   saveProject: (projectName?: string) => Promise<{ success: boolean; error?: string }>;
   loadProject: (projectName: string) => Promise<{ success: boolean; error?: string }>;
   newProject: () => void;
@@ -338,6 +350,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
   playing: false,
   selectedAssetId: null,
   selectedCommandId: null,
+  selectedCommandIds: [],
   previewAssetUrl: null,
   previewMode: 'timeline',
   selectedPreviewAsset: null,
@@ -398,6 +411,8 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
   projectPath: null,
   isDirty: false,
   saveStatus: 'unsaved',
+
+  clipboardCommands: [],
 
   setProject: (project) => {
     const state = get();
@@ -546,7 +561,20 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
   setCurrentTime: (time) => set({ currentTime: time }),
   setPlaying: (playing) => set({ playing }),
   selectAsset: (id) => set({ selectedAssetId: id }),
-  selectCommand: (id) => set({ selectedCommandId: id }),
+  selectCommand: (id) => set({ selectedCommandId: id, selectedCommandIds: id ? [id] : [] }),
+  toggleCommandSelection: (id) => set((state) => {
+    const ids = state.selectedCommandIds.includes(id)
+      ? state.selectedCommandIds.filter((i) => i !== id)
+      : [...state.selectedCommandIds, id];
+    return {
+      selectedCommandIds: ids,
+      selectedCommandId: ids.length > 0 ? ids[ids.length - 1] : null,
+    };
+  }),
+  setSelectedCommandIds: (ids) => set({
+    selectedCommandIds: ids,
+    selectedCommandId: ids.length > 0 ? ids[ids.length - 1] : null,
+  }),
   setPreviewAssetUrl: (url) => set({ previewAssetUrl: url }),
   setPreviewMode: (mode) => set({ previewMode: mode }),
   setSelectedPreviewAsset: (asset) => set({ selectedPreviewAsset: asset }),
@@ -781,6 +809,115 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
     } else {
       set({ commands, timeline: tl });
     }
+  },
+
+  splitCommandAtPlayhead: (id) => {
+    const state = get();
+    const cmd = state.commands.find((c) => c.id === id);
+    if (!cmd || !('duration' in cmd) || !(cmd as any).duration) return;
+
+    const fps = state.settings.fps;
+    const splitTime = state.currentTime;
+    const cmdStart = cmd.start;
+    const cmdDuration = (cmd as any).duration as number;
+    const cmdEnd = cmdStart + cmdDuration;
+
+    // Only split if playhead is within the clip
+    if (splitTime <= cmdStart || splitTime >= cmdEnd) return;
+
+    const splitFrameDuration = Math.round((cmdEnd - splitTime) * fps);
+    const newDuration = splitFrameDuration / fps;
+
+    const secondCmd = { ...cmd, id: uuidv4(), start: splitTime, duration: newDuration } as Command;
+    const firstCmd = { ...cmd, duration: splitTime - cmdStart } as Command;
+
+    const newCommands = state.commands.map((c) => (c.id === id ? firstCmd : c));
+    newCommands.push(secondCmd);
+    newCommands.sort((a, b) => a.start - b.start);
+
+    const tl = buildTimelineFromState(newCommands, state.assets, state.settings, state.voiceover);
+    const postSnap = captureState({ ...state, commands: newCommands, timeline: tl });
+    const newHistory = state.history.slice(0, state.historyIndex + 1);
+    newHistory.push(postSnap);
+    if (newHistory.length > MAX_HISTORY) newHistory.shift();
+    set({ commands: newCommands, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1, isDirty: true, saveStatus: 'unsaved' });
+  },
+
+  deleteSelectedCommands: () => {
+    const state = get();
+    const ids = state.selectedCommandIds.length > 0 ? state.selectedCommandIds : (state.selectedCommandId ? [state.selectedCommandId] : []);
+    if (ids.length === 0) return;
+
+    const newCommands = state.commands.filter((c) => !ids.includes(c.id));
+    const tl = buildTimelineFromState(newCommands, state.assets, state.settings, state.voiceover);
+    const postSnap = captureState({ ...state, commands: newCommands, timeline: tl });
+    const newHistory = state.history.slice(0, state.historyIndex + 1);
+    newHistory.push(postSnap);
+    if (newHistory.length > MAX_HISTORY) newHistory.shift();
+    set({ commands: newCommands, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1, selectedCommandId: null, selectedCommandIds: [], isDirty: true, saveStatus: 'unsaved' });
+  },
+
+  copySelectedCommands: () => {
+    const state = get();
+    const ids = state.selectedCommandIds.length > 0 ? state.selectedCommandIds : (state.selectedCommandId ? [state.selectedCommandId] : []);
+    if (ids.length === 0) return;
+
+    const copied = state.commands.filter((c) => ids.includes(c.id)).map((c) => ({ ...c }) as Command);
+    set({ clipboardCommands: copied });
+  },
+
+  cutSelectedCommands: () => {
+    const state = get();
+    const ids = state.selectedCommandIds.length > 0 ? state.selectedCommandIds : (state.selectedCommandId ? [state.selectedCommandId] : []);
+    if (ids.length === 0) return;
+
+    const copied = state.commands.filter((c) => ids.includes(c.id)).map((c) => ({ ...c }) as Command);
+    const newCommands = state.commands.filter((c) => !ids.includes(c.id));
+    const tl = buildTimelineFromState(newCommands, state.assets, state.settings, state.voiceover);
+    const postSnap = captureState({ ...state, commands: newCommands, timeline: tl });
+    const newHistory = state.history.slice(0, state.historyIndex + 1);
+    newHistory.push(postSnap);
+    if (newHistory.length > MAX_HISTORY) newHistory.shift();
+    set({ commands: newCommands, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1, clipboardCommands: copied, selectedCommandId: null, selectedCommandIds: [], isDirty: true, saveStatus: 'unsaved' });
+  },
+
+  pasteCommands: () => {
+    const state = get();
+    if (state.clipboardCommands.length === 0) return;
+
+    const pasteTime = state.currentTime;
+    const newCommands = state.clipboardCommands.map((cmd) => {
+      const originalDuration = ('duration' in cmd && (cmd as any).duration) ? (cmd as any).duration as number : 3;
+      return {
+        ...cmd,
+        id: uuidv4(),
+        start: pasteTime,
+      } as Command;
+    });
+
+    // Sort by start time to maintain order, then offset pasted commands
+    let offset = 0;
+    const sorted = [...newCommands].sort((a, b) => a.start - b.start);
+    for (const cmd of sorted) {
+      (cmd as any).start = pasteTime + offset;
+      const dur = ('duration' in cmd && (cmd as any).duration) ? (cmd as any).duration as number : 3;
+      offset += dur;
+    }
+
+    const allCommands = [...state.commands, ...newCommands];
+    const tl = buildTimelineFromState(allCommands, state.assets, state.settings, state.voiceover);
+    const postSnap = captureState({ ...state, commands: allCommands, timeline: tl });
+    const newHistory = state.history.slice(0, state.historyIndex + 1);
+    newHistory.push(postSnap);
+    if (newHistory.length > MAX_HISTORY) newHistory.shift();
+    const pastedIds = newCommands.map((c) => c.id);
+    set({ commands: allCommands, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1, selectedCommandIds: pastedIds, selectedCommandId: pastedIds[pastedIds.length - 1], isDirty: true, saveStatus: 'unsaved' });
+  },
+
+  selectAllCommands: () => {
+    const state = get();
+    const ids = state.commands.map((c) => c.id);
+    set({ selectedCommandIds: ids, selectedCommandId: ids.length > 0 ? ids[ids.length - 1] : null });
   },
 
   saveProject: async (projectName) => {
