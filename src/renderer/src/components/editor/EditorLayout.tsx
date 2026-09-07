@@ -57,6 +57,9 @@ export const EditorLayout: React.FC = () => {
   const previewSplitRightRef = useRef<HTMLDivElement>(null);
   const upperRowRef = useRef<HTMLDivElement>(null);
 
+  // Initial timeline height from store (read once, used to seed drag start)
+  const initialTimelineHeightRef = useRef(workspaceLayout.timelineHeight);
+
   // Visual-only overrides during drag (no React re-renders)
   const visualOverridesRef = useRef<{
     assetsWidth?: number;
@@ -73,8 +76,16 @@ export const EditorLayout: React.FC = () => {
     if (rightPanelRef.current && v.rightPanelWidth !== undefined) {
       rightPanelRef.current.style.width = `${v.rightPanelWidth}px`;
     }
-    if (timelinePanelRef.current && v.timelineHeight !== undefined) {
-      timelinePanelRef.current.style.height = `${v.timelineHeight}px`;
+    if (timelinePanelRef.current) {
+      if (timelineDragRef.current) {
+        // During drag: lock to explicit height, disable flex-1
+        timelinePanelRef.current.style.height = `${v.timelineHeight ?? initialTimelineHeightRef.current}px`;
+        timelinePanelRef.current.style.flex = 'none';
+      } else {
+        // Idle: restore flex-1 (CSS class will be applied on next render)
+        timelinePanelRef.current.style.height = '';
+        timelinePanelRef.current.style.flex = '';
+      }
     }
     if (previewSplitLeftRef.current && v.previewSplit !== undefined) {
       previewSplitLeftRef.current.style.width = `${v.previewSplit}%`;
@@ -123,6 +134,7 @@ export const EditorLayout: React.FC = () => {
         const clamped = Math.max(180, Math.min(newHeight, bottomOfContainer - topOfTimeline - 4));
         visualOverridesRef.current.timelineHeight = clamped;
         timelineEl.style.height = `${clamped}px`;
+        timelineEl.style.flex = 'none';
       }
     };
 
@@ -147,6 +159,12 @@ export const EditorLayout: React.FC = () => {
       splitDragRef.current = false;
       rightPanelDragRef.current = false;
       timelineDragRef.current = false;
+
+      // Restore flex layout on timeline after drag
+      if (timelinePanelRef.current) {
+        timelinePanelRef.current.style.flex = '';
+      }
+
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
@@ -183,6 +201,13 @@ export const EditorLayout: React.FC = () => {
   const handleTimelineMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     timelineDragRef.current = true;
+    const el = timelinePanelRef.current;
+    if (el) {
+      const currentHeight = el.getBoundingClientRect().height;
+      visualOverridesRef.current.timelineHeight = currentHeight;
+      el.style.height = `${currentHeight}px`;
+      el.style.flex = 'none';
+    }
     document.body.style.cursor = 'ns-resize';
     document.body.style.userSelect = 'none';
   }, []);
