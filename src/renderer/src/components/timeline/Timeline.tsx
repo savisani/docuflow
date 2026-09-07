@@ -674,22 +674,48 @@ export const Timeline: React.FC = () => {
 
           let targetZIndex = dragState.originalZIndex;
           if (clampedTrackIndex !== dragState.originalLayerIndex) {
-            const otherZIndices = trackLayerMap
-              .filter((_, i) => i !== dragState.originalLayerIndex)
-              .sort((a, b) => a - b);
-            const len = otherZIndices.length;
+            const allZIndices = [...trackLayerMap].sort((a, b) => a - b);
+            const otherZIndices = allZIndices.filter((z) => z !== dragState.originalZIndex);
+            const minZ = allZIndices.length > 0 ? allZIndices[0] : 0;
+            const maxZ = allZIndices.length > 0 ? allZIndices[allZIndices.length - 1] : 0;
+
             if (clampedTrackIndex <= 0) {
-              targetZIndex = len > 0 ? otherZIndices[len - 1] + 1 : 0;
-            } else if (clampedTrackIndex >= len + 1) {
-              targetZIndex = len > 0 ? otherZIndices[0] - 1 : 0;
+              // Top track = highest zIndex
+              targetZIndex = maxZ + 1;
+            } else if (clampedTrackIndex >= trackLayerMap.length - 1) {
+              // Bottom track = lowest zIndex
+              targetZIndex = minZ - 1;
             } else {
-              const above = otherZIndices[len - clampedTrackIndex];
-              const below = otherZIndices[len - clampedTrackIndex - 1];
+              // Between tracks: pick zIndex between neighbors
+              // clampedTrackIndex in track space → sorted position = len - clampedTrackIndex
+              const sortedPos = otherZIndices.length - clampedTrackIndex;
+              const above = otherZIndices[sortedPos];
+              const below = otherZIndices[sortedPos - 1];
               targetZIndex = below !== undefined && above !== undefined
                 ? Math.floor((below + above) / 2)
                 : below !== undefined ? below + 1 : (above !== undefined ? above - 1 : 0);
             }
           }
+          // Handle overlaps on target layer
+          const newEnd = newStart + dragState.originalDuration;
+          const overlappingCmds = commands.filter(
+            (c) => c.layer === targetZIndex && c.id !== dragState.clipId && c.start < newEnd && (c.start + (c.duration ?? 5)) > newStart
+          );
+          if (overlappingCmds.length > 0) {
+            for (const other of overlappingCmds) {
+              const otherEnd = other.start + (other.duration ?? 5);
+              if (other.start >= newStart && otherEnd <= newEnd) {
+                removeCommand(other.id);
+              } else if (other.start < newStart && otherEnd > newEnd) {
+                updateCommand(other.id, { duration: newStart - other.start });
+              } else if (other.start < newStart) {
+                updateCommand(other.id, { duration: newStart - other.start });
+              } else {
+                updateCommand(other.id, { start: newEnd, duration: otherEnd - newEnd });
+              }
+            }
+          }
+
           updateCommand(dragState.clipId, { start: newStart, layer: targetZIndex });
         } else if (dragState.mode === 'resize-right') {
           const rawEnd = dragState.originalStart + dragState.originalDuration + dt;
@@ -725,7 +751,7 @@ export const Timeline: React.FC = () => {
       window.removeEventListener('mouseup', handleMouseUp);
       if (rafId !== null) cancelAnimationFrame(rafId);
     };
-  }, [dragState, zoom, updateCommand, snap, fps, trackLayerMap, beginBatch, endBatch]);
+  }, [dragState, zoom, updateCommand, snap, fps, trackLayerMap, beginBatch, endBatch, commands, removeCommand]);
 
   const getDropTimeFromEvent = useCallback((e: React.DragEvent | MouseEvent) => {
     const container = scrollContainerRef.current;
@@ -771,12 +797,34 @@ export const Timeline: React.FC = () => {
         nextZIndex = existingZIndices.length > 0 ? Math.max(...existingZIndices) + 1 : 0;
       }
 
+      const cmdDuration = asset.duration && asset.duration > 0 ? Math.min(asset.duration, 30) : 5;
+
+      // Handle overlaps on target layer
+      const newEnd = snapped + cmdDuration;
+      const overlappingCmds = state.commands.filter(
+        (c) => c.layer === nextZIndex && c.start < newEnd && (c.start + (c.duration ?? 5)) > snapped
+      );
+      if (overlappingCmds.length > 0) {
+        for (const other of overlappingCmds) {
+          const otherEnd = other.start + (other.duration ?? 5);
+          if (other.start >= snapped && otherEnd <= newEnd) {
+            removeCommand(other.id);
+          } else if (other.start < snapped && otherEnd > newEnd) {
+            updateCommand(other.id, { duration: snapped - other.start });
+          } else if (other.start < snapped) {
+            updateCommand(other.id, { duration: snapped - other.start });
+          } else {
+            updateCommand(other.id, { start: newEnd, duration: otherEnd - newEnd });
+          }
+        }
+      }
+
       const cmd = {
         id: uuidv4(),
         type: 'show' as const,
         asset: asset.logicalId,
         start: snapped,
-        duration: asset.duration && asset.duration > 0 ? Math.min(asset.duration, 30) : 5,
+        duration: cmdDuration,
         layer: nextZIndex,
       };
       addCommand(cmd);
@@ -816,7 +864,7 @@ export const Timeline: React.FC = () => {
     const state = useDocuFlowStore.getState();
     const tl = buildTimeline(state.commands, state.assets, state.settings, state.voiceover ? state.assets.find(a => a.id === state.voiceover!.assetId)?.duration : undefined);
     state.setTimeline(tl);
-  }, [getDropTimeFromEvent, snap, dragOverTrackId, addCommand]);
+  }, [getDropTimeFromEvent, snap, dragOverTrackId, addCommand, commands, removeCommand, updateCommand]);
 
   const tracks = useMemo(() => {
     if (!effectiveTimeline) return [];
