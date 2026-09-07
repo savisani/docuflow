@@ -637,10 +637,9 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
   setTimelineHeight: (height) =>
     set((state) => {
       const titlebarHeight = 32;
-      const previewHeight = 300;
       const resizeHandleHeight = 1;
-      const availableHeight = window.innerHeight - titlebarHeight - previewHeight - resizeHandleHeight;
-      const maxHeight = Math.floor(availableHeight * 0.9);
+      const availableHeight = window.innerHeight - titlebarHeight - resizeHandleHeight;
+      const maxHeight = Math.floor(availableHeight * 0.7);
       const next = { ...state.workspaceLayout, timelineHeight: Math.max(180, Math.min(maxHeight, height)) };
       saveWorkspaceLayout(next);
       return { workspaceLayout: next };

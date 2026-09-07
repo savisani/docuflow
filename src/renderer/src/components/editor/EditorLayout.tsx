@@ -20,7 +20,6 @@ const RIGHT_TABS = [
 ] as const;
 
 export const EditorLayout: React.FC = () => {
-  // Narrow selectors to prevent full rerenders on unrelated state changes
   const panelVisibility = useDocuFlowStore((s) => s.panelVisibility);
   const setPanelVisibility = useDocuFlowStore((s) => s.setPanelVisibility);
   const workspaceLayout = useDocuFlowStore((s) => s.workspaceLayout);
@@ -44,20 +43,21 @@ export const EditorLayout: React.FC = () => {
     }
   }, [selectedCommandId, panelVisibility.inspector, setPanelVisibility]);
 
-  // Refs for drag state — avoid store updates during drag
+  // Refs for drag state
   const assetsDragRef = useRef(false);
   const splitDragRef = useRef(false);
   const rightPanelDragRef = useRef(false);
   const timelineDragRef = useRef(false);
 
-  // Refs to panel DOM elements for direct style manipulation during drag
+  // Refs to panel DOM elements
   const assetsPanelRef = useRef<HTMLDivElement>(null);
   const rightPanelRef = useRef<HTMLDivElement>(null);
   const timelinePanelRef = useRef<HTMLDivElement>(null);
   const previewSplitLeftRef = useRef<HTMLDivElement>(null);
   const previewSplitRightRef = useRef<HTMLDivElement>(null);
+  const upperRowRef = useRef<HTMLDivElement>(null);
 
-  // Visual-only width overrides during drag (not in React state = no re-renders)
+  // Visual-only overrides during drag (no React re-renders)
   const visualOverridesRef = useRef<{
     assetsWidth?: number;
     rightPanelWidth?: number;
@@ -65,7 +65,6 @@ export const EditorLayout: React.FC = () => {
     previewSplit?: number;
   }>({});
 
-  // Apply visual overrides directly to DOM (bypasses React rendering)
   useLayoutEffect(() => {
     const v = visualOverridesRef.current;
     if (assetsPanelRef.current && v.assetsWidth !== undefined) {
@@ -95,18 +94,17 @@ export const EditorLayout: React.FC = () => {
         }
       }
       if (splitDragRef.current) {
-        const container = document.getElementById('center-area');
+        const leftRef = previewSplitLeftRef.current;
+        const rightRef = previewSplitRightRef.current;
+        if (!leftRef || !rightRef) return;
+        const container = leftRef.parentElement;
         if (!container) return;
         const rect = container.getBoundingClientRect();
         const relX = e.clientX - rect.left;
         const pct = Math.max(15, Math.min(85, (relX / rect.width) * 100));
         visualOverridesRef.current.previewSplit = pct;
-        if (previewSplitLeftRef.current) {
-          previewSplitLeftRef.current.style.width = `${pct}%`;
-        }
-        if (previewSplitRightRef.current) {
-          previewSplitRightRef.current.style.width = `${100 - pct}%`;
-        }
+        leftRef.style.width = `${pct}%`;
+        rightRef.style.width = `${100 - pct}%`;
       }
       if (rightPanelDragRef.current) {
         const newWidth = Math.max(RIGHT_PANEL_MIN_WIDTH, Math.min(RIGHT_PANEL_MAX_WIDTH, window.innerWidth - e.clientX));
@@ -116,14 +114,15 @@ export const EditorLayout: React.FC = () => {
         }
       }
       if (timelineDragRef.current) {
-        const container = document.getElementById('center-area');
-        if (!container) return;
-        const rect = container.getBoundingClientRect();
-        const newHeight = rect.bottom - e.clientY;
-        visualOverridesRef.current.timelineHeight = newHeight;
-        if (timelinePanelRef.current) {
-          timelinePanelRef.current.style.height = `${newHeight}px`;
-        }
+        const upperEl = upperRowRef.current;
+        const timelineEl = timelinePanelRef.current;
+        if (!timelineEl) return;
+        const topOfTimeline = upperEl ? upperEl.getBoundingClientRect().bottom : 0;
+        const bottomOfContainer = timelineEl.parentElement?.getBoundingClientRect().bottom ?? window.innerHeight;
+        const newHeight = bottomOfContainer - e.clientY;
+        const clamped = Math.max(180, Math.min(newHeight, bottomOfContainer - topOfTimeline - 4));
+        visualOverridesRef.current.timelineHeight = clamped;
+        timelineEl.style.height = `${clamped}px`;
       }
     };
 
@@ -131,7 +130,6 @@ export const EditorLayout: React.FC = () => {
       const overrides = visualOverridesRef.current;
       visualOverridesRef.current = {};
 
-      // Commit final values to store (one state update per drag, not per mousemove)
       if (assetsDragRef.current && overrides.assetsWidth !== undefined) {
         setAssetsWidth(overrides.assetsWidth);
       }
@@ -189,165 +187,170 @@ export const EditorLayout: React.FC = () => {
     document.body.style.userSelect = 'none';
   }, []);
 
-  const anyVisible = panelVisibility.assets || panelVisibility.assetPreview || panelVisibility.timelinePreview || panelVisibility.timeline;
+  const hasUpperContent = panelVisibility.assets || panelVisibility.assetPreview || panelVisibility.timelinePreview || rightPanelVisible;
 
   return (
     <div className="w-full h-full flex flex-col bg-df-bg text-df-text-primary overflow-hidden">
-      <div className="flex-1 w-full h-full flex flex-row overflow-hidden">
-        {/* Assets Panel */}
-        <div
-          ref={assetsPanelRef}
-          className="bg-df-surface-1 flex flex-col overflow-hidden shrink-0 border-r border-df-border"
-          style={{ width: panelVisibility.assets ? workspaceLayout.assetsWidth : 0 }}
-        >
-          <AssetLibrary />
-        </div>
-        {panelVisibility.assets && (
-          <div
-            className="w-px bg-df-border hover:bg-df-accent cursor-col-resize shrink-0 transition-colors"
-            onMouseDown={handleAssetsMouseDown}
-            aria-label="Resize assets panel"
-          />
-        )}
 
-        {/* Center Area */}
-        <div id="center-area" className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
-          {!anyVisible && (
-            <div className="flex-1 flex items-center justify-center bg-df-bg">
-              <div className="text-center text-df-text-muted">
-                <div className="text-df-sm mb-1">No panels visible</div>
-                <div className="text-df-xs text-df-text-dim">Enable panels from the toolbar</div>
-              </div>
-            </div>
-          )}
+      {/* ── UPPER WORKSPACE: Assets | Preview | Inspector ── */}
+      {hasUpperContent && (
+        <div ref={upperRowRef} className="w-full flex flex-row shrink-0 overflow-hidden" style={{ flex: '0 1 auto' }}>
 
-          {(panelVisibility.assetPreview || panelVisibility.timelinePreview) && (
-            <div className="h-[300px] flex-shrink-0 flex flex-col overflow-hidden">
-              <div className="flex flex-row overflow-hidden h-full" style={{ minHeight: 0 }}>
-                {panelVisibility.assetPreview && panelVisibility.timelinePreview ? (
-                  <>
-                    <div
-                      ref={previewSplitLeftRef}
-                      style={{ width: `${workspaceLayout.previewTimelineSplit}%` }}
-                      className="overflow-hidden min-w-0 flex flex-col h-full"
-                    >
-                      <AssetPreview />
-                    </div>
-                    <div
-                      className="w-px bg-df-border hover:bg-df-accent cursor-col-resize shrink-0 transition-colors"
-                      onMouseDown={handleSplitMouseDown}
-                      aria-label="Resize preview panels"
-                    />
-                    <div
-                      ref={previewSplitRightRef}
-                      style={{ width: `${100 - workspaceLayout.previewTimelineSplit}%` }}
-                      className="overflow-hidden min-w-0 flex flex-col h-full"
-                    >
-                      <VideoPreview />
-                    </div>
-                  </>
-                ) : panelVisibility.assetPreview ? (
-                  <div className="flex-1 overflow-hidden flex flex-col h-full">
-                    <AssetPreview />
-                  </div>
-                ) : (
-                  <div className="flex-1 overflow-hidden flex flex-col h-full">
-                    <VideoPreview />
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {panelVisibility.timeline && (
+          {/* Assets Panel */}
+          {panelVisibility.assets && (
             <>
               <div
-                className="h-1 w-full cursor-ns-resize hover:bg-df-accent/30 transition-colors shrink-0 relative"
-                onMouseDown={handleTimelineMouseDown}
-                aria-label="Resize timeline panel"
+                ref={assetsPanelRef}
+                className="bg-df-surface-1 flex flex-col overflow-hidden shrink-0 border-r border-df-border"
+                style={{ width: workspaceLayout.assetsWidth }}
               >
-                <div className="absolute inset-x-0 top-1/2 h-px bg-df-border" />
+                <AssetLibrary />
               </div>
               <div
-                ref={timelinePanelRef}
-                className="flex-1 min-h-0 flex flex-col relative bg-df-surface-1 overflow-hidden"
-              >
-                <Timeline />
-              </div>
+                className="w-px bg-df-border hover:bg-df-accent cursor-col-resize shrink-0 transition-colors"
+                onMouseDown={handleAssetsMouseDown}
+                aria-label="Resize assets panel"
+              />
             </>
           )}
-        </div>
 
-        {/* Right Panel Collapse Button */}
-        {!rightPanelVisible && (
-          <button
-            onClick={() => setPanelVisibility('inspector', true)}
-            className="w-5 bg-df-surface-1 border-l border-df-border flex flex-col items-center pt-2 hover:bg-df-surface-2 shrink-0 cursor-pointer transition-colors"
-            aria-label="Expand right panel"
-          >
-            <ChevronLeft size={10} className="text-df-text-muted" />
-          </button>
-        )}
+          {/* Preview Area */}
+          {(panelVisibility.assetPreview || panelVisibility.timelinePreview) && (
+            <div className="flex-1 min-w-0 flex flex-row overflow-hidden" style={{ minHeight: 0 }}>
+              {panelVisibility.assetPreview && panelVisibility.timelinePreview ? (
+                <>
+                  <div
+                    ref={previewSplitLeftRef}
+                    style={{ width: `${workspaceLayout.previewTimelineSplit}%` }}
+                    className="overflow-hidden min-w-0 flex flex-col"
+                  >
+                    <AssetPreview />
+                  </div>
+                  <div
+                    className="w-px bg-df-border hover:bg-df-accent cursor-col-resize shrink-0 transition-colors"
+                    onMouseDown={handleSplitMouseDown}
+                    aria-label="Resize preview panels"
+                  />
+                  <div
+                    ref={previewSplitRightRef}
+                    style={{ width: `${100 - workspaceLayout.previewTimelineSplit}%` }}
+                    className="overflow-hidden min-w-0 flex flex-col"
+                  >
+                    <VideoPreview />
+                  </div>
+                </>
+              ) : panelVisibility.assetPreview ? (
+                <div className="flex-1 overflow-hidden flex flex-col">
+                  <AssetPreview />
+                </div>
+              ) : (
+                <div className="flex-1 overflow-hidden flex flex-col">
+                  <VideoPreview />
+                </div>
+              )}
+            </div>
+          )}
 
-        {/* Right Panel */}
-        <div
-          ref={rightPanelRef}
-          className="bg-df-surface-1 border-l border-df-border flex flex-col overflow-hidden shrink-0 relative"
-          style={{ width: rightPanelVisible ? rightPanelWidth : 0 }}
-        >
+          {/* Right Panel (Inspector / Animation / Commands) */}
           {rightPanelVisible && (
             <>
-              {/* Resize handle */}
               <div
-                className="w-px bg-df-border hover:bg-df-accent cursor-col-resize shrink-0 transition-colors absolute left-0 top-0 bottom-0 z-10"
+                className="w-px bg-df-border hover:bg-df-accent cursor-col-resize shrink-0 transition-colors"
                 onMouseDown={handleRightPanelMouseDown}
                 aria-label="Resize right panel"
               />
-
-              {/* Panel tabs */}
-              <div className="flex border-b border-df-divider shrink-0">
-                <button
-                  onClick={() => setPanelVisibility('inspector', false)}
-                  className="px-1.5 text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-2 transition-colors shrink-0"
-                  aria-label="Collapse right panel"
-                >
-                  <ChevronRight size={10} />
-                </button>
-                {RIGHT_TABS.map((tab) => (
-                  <Tooltip key={tab.id} content={`${tab.label} (Ctrl+${tab.id[0].toUpperCase()})`} position="bottom">
-                    <button
-                      onClick={() => setRightPanel(tab.id)}
-                      className={`
-                        flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-df-xs font-medium
-                        border-b-2 transition-colors duration-df-fast
-                        ${rightPanel === tab.id
-                          ? 'text-df-accent border-df-accent'
-                          : 'text-df-text-muted border-transparent hover:text-df-text-primary hover:bg-df-surface-2'}
-                      `}
-                    >
-                      <tab.icon size={10} className="shrink-0" />
-                      <span>{tab.label}</span>
-                    </button>
-                  </Tooltip>
-                ))}
-              </div>
-
-              {/* Panel content */}
-              <div className="flex-1 overflow-hidden">
-                <div style={{ display: rightPanel === 'inspector' ? 'contents' : 'none' }} className="w-full h-full">
-                  <Inspector />
+              <div
+                ref={rightPanelRef}
+                className="bg-df-surface-1 border-l border-df-border flex flex-col overflow-hidden shrink-0"
+                style={{ width: rightPanelWidth }}
+              >
+                {/* Panel tabs */}
+                <div className="flex border-b border-df-divider shrink-0">
+                  <button
+                    onClick={() => setPanelVisibility('inspector', false)}
+                    className="px-1.5 text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-2 transition-colors shrink-0"
+                    aria-label="Collapse right panel"
+                  >
+                    <ChevronRight size={10} />
+                  </button>
+                  {RIGHT_TABS.map((tab) => (
+                    <Tooltip key={tab.id} content={`${tab.label} (Ctrl+${tab.id[0].toUpperCase()})`} position="bottom">
+                      <button
+                        onClick={() => setRightPanel(tab.id)}
+                        className={`
+                          flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-df-xs font-medium
+                          border-b-2 transition-colors duration-df-fast
+                          ${rightPanel === tab.id
+                            ? 'text-df-accent border-df-accent'
+                            : 'text-df-text-muted border-transparent hover:text-df-text-primary hover:bg-df-surface-2'}
+                        `}
+                      >
+                        <tab.icon size={10} className="shrink-0" />
+                        <span>{tab.label}</span>
+                      </button>
+                    </Tooltip>
+                  ))}
                 </div>
-                <div style={{ display: rightPanel === 'animation' ? 'contents' : 'none' }} className="w-full h-full">
-                  <AnimationPanel />
-                </div>
-                <div style={{ display: rightPanel === 'commands' ? 'contents' : 'none' }} className="w-full h-full">
-                  <CommandEditor />
+
+                {/* Panel content */}
+                <div className="flex-1 overflow-hidden">
+                  <div style={{ display: rightPanel === 'inspector' ? 'contents' : 'none' }} className="w-full h-full">
+                    <Inspector />
+                  </div>
+                  <div style={{ display: rightPanel === 'animation' ? 'contents' : 'none' }} className="w-full h-full">
+                    <AnimationPanel />
+                  </div>
+                  <div style={{ display: rightPanel === 'commands' ? 'contents' : 'none' }} className="w-full h-full">
+                    <CommandEditor />
+                  </div>
                 </div>
               </div>
             </>
           )}
+
+          {/* Right Panel Expand Button */}
+          {!rightPanelVisible && (
+            <button
+              onClick={() => setPanelVisibility('inspector', true)}
+              className="w-5 bg-df-surface-1 border-l border-df-border flex flex-col items-center pt-2 hover:bg-df-surface-2 shrink-0 cursor-pointer transition-colors"
+              aria-label="Expand right panel"
+            >
+              <ChevronLeft size={10} className="text-df-text-muted" />
+            </button>
+          )}
         </div>
-      </div>
+      )}
+
+      {/* ── TIMELINE RESIZE HANDLE ── */}
+      {panelVisibility.timeline && (
+        <div
+          className="h-1 w-full cursor-ns-resize hover:bg-df-accent/30 transition-colors shrink-0 relative"
+          onMouseDown={handleTimelineMouseDown}
+          aria-label="Resize timeline panel"
+        >
+          <div className="absolute inset-x-0 top-1/2 h-px bg-df-border" />
+        </div>
+      )}
+
+      {/* ── FULL-WIDTH TIMELINE ── */}
+      {panelVisibility.timeline && (
+        <div
+          ref={timelinePanelRef}
+          className="flex-1 min-h-0 flex flex-col relative bg-df-surface-1 overflow-hidden w-full"
+        >
+          <Timeline />
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!hasUpperContent && !panelVisibility.timeline && (
+        <div className="flex-1 flex items-center justify-center bg-df-bg">
+          <div className="text-center text-df-text-muted">
+            <div className="text-df-sm mb-1">No panels visible</div>
+            <div className="text-df-xs text-df-text-dim">Enable panels from the toolbar</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
