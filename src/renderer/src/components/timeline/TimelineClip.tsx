@@ -10,9 +10,10 @@ interface ClipData {
   start: number;
   end: number;
   label: string;
-  layerId?: string;
-  commandId?: string;
-  zIndex?: number;
+  layerId: string;
+  commandId: string;
+  zIndex: number;
+  assetId?: string;
 }
 
 interface AssetData {
@@ -74,7 +75,7 @@ export const TimelineClip: React.FC<TimelineClipProps> = React.memo(({
   const isImage = asset?.type === 'image';
   const isAudio = asset?.type === 'audio';
 
-  const isDragTarget = dragVisualOffset && dragVisualOffset.clipId === (clip.commandId || clip.layerId || clip.id);
+  const isDragTarget = dragVisualOffset && dragVisualOffset.clipId === clip.commandId;
   const dragDx = isDragTarget ? dragVisualOffset!.dx : 0;
   const dragDy = isDragTarget ? dragVisualOffset!.dy : 0;
   const dragDt = dragDx / (PIXELS_PER_SECOND * zoom);
