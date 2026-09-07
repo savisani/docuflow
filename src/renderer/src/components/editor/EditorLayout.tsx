@@ -43,6 +43,14 @@ export const EditorLayout: React.FC = () => {
     }
   }, [selectedCommandId, panelVisibility.inspector, setPanelVisibility]);
 
+  // Sanitize persisted timeline height on mount: fix 0, negative, NaN, or out-of-range values
+  useEffect(() => {
+    const h = workspaceLayout.timelineHeight;
+    if (!Number.isFinite(h) || h < 180) {
+      setTimelineHeight(288);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Refs for drag state
   const assetsDragRef = useRef(false);
   const splitDragRef = useRef(false);
@@ -345,29 +353,25 @@ export const EditorLayout: React.FC = () => {
       )}
 
       {/* ── TIMELINE RESIZE HANDLE ── */}
-      {panelVisibility.timeline && (
-        <div
-          className="h-1 w-full cursor-ns-resize hover:bg-df-accent/30 transition-colors shrink-0 relative"
-          onMouseDown={handleTimelineMouseDown}
-          aria-label="Resize timeline panel"
-        >
-          <div className="absolute inset-x-0 top-1/2 h-px bg-df-border" />
-        </div>
-      )}
+      <div
+        className="h-1 w-full cursor-ns-resize hover:bg-df-accent/30 transition-colors shrink-0 relative"
+        onMouseDown={handleTimelineMouseDown}
+        aria-label="Resize timeline panel"
+      >
+        <div className="absolute inset-x-0 top-1/2 h-px bg-df-border" />
+      </div>
 
       {/* ── FULL-WIDTH TIMELINE ── */}
-      {panelVisibility.timeline && (
-        <div
-          ref={timelinePanelRef}
-          className="min-h-0 flex flex-col relative bg-df-surface-1 overflow-hidden w-full"
-          style={{ height: Math.max(180, workspaceLayout.timelineHeight || 288), flex: 'none' }}
-        >
-          <Timeline />
-        </div>
-      )}
+      <div
+        ref={timelinePanelRef}
+        className="min-h-0 flex flex-col relative bg-df-surface-1 overflow-hidden w-full"
+        style={{ height: Math.max(180, workspaceLayout.timelineHeight || 288), flex: 'none' }}
+      >
+        <Timeline />
+      </div>
 
       {/* Empty state */}
-      {!hasUpperContent && !panelVisibility.timeline && (
+      {!hasUpperContent && (
         <div className="flex-1 flex items-center justify-center bg-df-bg">
           <div className="text-center text-df-text-muted">
             <div className="text-df-sm mb-1">No panels visible</div>

@@ -66,7 +66,7 @@ function loadPanelVisibility(): PanelVisibility {
         assets: parsed.assets ?? true,
         assetPreview: parsed.assetPreview ?? true,
         timelinePreview: parsed.timelinePreview ?? true,
-        timeline: parsed.timeline ?? true,
+        timeline: true,
         inspector: parsed.inspector ?? true,
       };
     }
