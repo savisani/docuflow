@@ -651,7 +651,9 @@ export const Timeline: React.FC = () => {
       const dy = e.clientY - state.startY;
       const hasMoved = Math.abs(dx) > 3 || Math.abs(dy) > 3;
 
-      dragVisualOffsetRef.current = { clipId: state.clipId, dx, dy };
+      if (hasMoved) {
+        dragVisualOffsetRef.current = { clipId: state.clipId, dx, dy };
+      }
 
       const currentZoom = zoomRef.current;
       const dt = dx / (PIXELS_PER_SECOND * currentZoom);
@@ -688,7 +690,9 @@ export const Timeline: React.FC = () => {
 
       if (rafId !== null) cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(() => {
-        setDragVisualOffset(dragVisualOffsetRef.current);
+        if (hasMoved) {
+          setDragVisualOffset(dragVisualOffsetRef.current);
+        }
         setDragState((prev) => prev && !prev.hasMoved && hasMoved ? { ...prev, hasMoved } : prev);
         rafId = null;
       });
