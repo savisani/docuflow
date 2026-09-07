@@ -9,8 +9,7 @@ export const AudioWaveform: React.FC<{
   width: number;
   height: number;
 }> = ({ assetId, width, height }) => {
-  const assets = useDocuFlowStore((s) => s.assets);
-  const asset = assetId ? assets.find((a) => a.id === assetId) : null;
+  const asset = useDocuFlowStore((s) => assetId ? s.assets.find((a) => a.id === assetId) : null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [ready, setReady] = useState(false);
   const jobManagerRef = useRef<JobManager>(new JobManager());

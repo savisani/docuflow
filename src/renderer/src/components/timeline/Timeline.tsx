@@ -81,10 +81,12 @@ export const Timeline: React.FC = () => {
   const [dragVisualOffset, setDragVisualOffset] = useState<{ clipId: string; dx: number; dy: number } | null>(null);
   const dragVisualOffsetRef = useRef<{ clipId: string; dx: number; dy: number } | null>(null);
   // Marquee selection state
-  const [marqueeState, setMarqueeState] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
-  const marqueeRef = useRef<{ startX: number; startY: number } | null>(null);
-  // Snap guide visual line position
-  const [snapGuideX, setSnapGuideX] = useState<number | null>(null);
+  const [marqueeActive, setMarqueeActive] = useState(false);
+  const marqueeRef = useRef<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
+  const marqueeOverlayRef = useRef<HTMLDivElement>(null);
+  // Snap guide visual line position (ref to avoid re-renders during drag)
+  const snapGuideXRef = useRef<number | null>(null);
+  const snapGuideElementRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -574,29 +576,34 @@ export const Timeline: React.FC = () => {
 
       // Calculate snap guide position
       const dt = dx / (PIXELS_PER_SECOND * zoom);
+      let newSnapX: number | null = null;
       if (dragState.mode === 'move') {
         const rawStart = dragState.originalStart + dt;
         const snappedTime = snap(rawStart, dragState.clipId);
         if (Math.abs(rawStart - snappedTime) < 0.05) {
-          setSnapGuideX(snappedTime * PIXELS_PER_SECOND * zoom);
-        } else {
-          setSnapGuideX(null);
+          newSnapX = snappedTime * PIXELS_PER_SECOND * zoom;
         }
       } else if (dragState.mode === 'resize-right') {
         const rawEnd = dragState.originalStart + dragState.originalDuration + dt;
         const snappedTime = snap(rawEnd, dragState.clipId);
         if (Math.abs(rawEnd - snappedTime) < 0.05) {
-          setSnapGuideX(snappedTime * PIXELS_PER_SECOND * zoom);
-        } else {
-          setSnapGuideX(null);
+          newSnapX = snappedTime * PIXELS_PER_SECOND * zoom;
         }
       } else if (dragState.mode === 'resize-left') {
         const rawStart = dragState.originalStart + dt;
         const snappedTime = snap(rawStart, dragState.clipId);
         if (Math.abs(rawStart - snappedTime) < 0.05) {
-          setSnapGuideX(snappedTime * PIXELS_PER_SECOND * zoom);
+          newSnapX = snappedTime * PIXELS_PER_SECOND * zoom;
+        }
+      }
+      // Update snap guide via DOM ref (no React re-render during drag)
+      snapGuideXRef.current = newSnapX;
+      if (snapGuideElementRef.current) {
+        if (newSnapX !== null) {
+          snapGuideElementRef.current.style.left = `${LABEL_WIDTH + newSnapX}px`;
+          snapGuideElementRef.current.style.display = '';
         } else {
-          setSnapGuideX(null);
+          snapGuideElementRef.current.style.display = 'none';
         }
       }
 
@@ -669,7 +676,8 @@ export const Timeline: React.FC = () => {
       }
 
       setDragState(null);
-      setSnapGuideX(null);
+      snapGuideXRef.current = null;
+      if (snapGuideElementRef.current) snapGuideElementRef.current.style.display = 'none';
       endBatch();
     };
 
@@ -1019,25 +1027,39 @@ export const Timeline: React.FC = () => {
           // Start marquee if clicking on empty space (not on a clip or playhead)
           if (e.target === e.currentTarget || (e.target as HTMLElement).closest('.track-row')?.querySelector('.clip-item') === null) {
             const rect = e.currentTarget.getBoundingClientRect();
-            marqueeRef.current = { startX: e.clientX - rect.left + e.currentTarget.scrollLeft, startY: e.clientY - rect.top + e.currentTarget.scrollTop };
-            setMarqueeState({ startX: marqueeRef.current.startX, startY: marqueeRef.current.startY, currentX: marqueeRef.current.startX, currentY: marqueeRef.current.startY });
+            const startX = e.clientX - rect.left + e.currentTarget.scrollLeft;
+            const startY = e.clientY - rect.top + e.currentTarget.scrollTop;
+            marqueeRef.current = { startX, startY, currentX: startX, currentY: startY };
+            setMarqueeActive(true);
           }
         }}
         onMouseMove={(e) => {
           if (marqueeRef.current) {
             const rect = e.currentTarget.getBoundingClientRect();
-            const currentX = e.clientX - rect.left + e.currentTarget.scrollLeft;
-            const currentY = e.clientY - rect.top + e.currentTarget.scrollTop;
-            setMarqueeState((prev) => prev ? { ...prev, currentX, currentY } : null);
+            marqueeRef.current.currentX = e.clientX - rect.left + e.currentTarget.scrollLeft;
+            marqueeRef.current.currentY = e.clientY - rect.top + e.currentTarget.scrollTop;
+            // Update overlay directly via DOM (no React re-render during drag)
+            const overlay = marqueeOverlayRef.current;
+            if (overlay) {
+              const m = marqueeRef.current;
+              const minX = Math.min(m.startX, m.currentX);
+              const minY = Math.min(m.startY, m.currentY);
+              const w = Math.abs(m.currentX - m.startX);
+              const h = Math.abs(m.currentY - m.startY);
+              overlay.style.left = `${minX}px`;
+              overlay.style.top = `${minY}px`;
+              overlay.style.width = `${w}px`;
+              overlay.style.height = `${h}px`;
+            }
           }
         }}
         onMouseUp={() => {
-          if (marqueeRef.current && marqueeState) {
-            // Calculate which clips are inside the marquee
-            const minX = Math.min(marqueeState.startX, marqueeState.currentX);
-            const maxX = Math.max(marqueeState.startX, marqueeState.currentX);
-            const minY = Math.min(marqueeState.startY, marqueeState.currentY);
-            const maxY = Math.max(marqueeState.startY, marqueeState.currentY);
+          if (marqueeRef.current) {
+            const m = marqueeRef.current;
+            const minX = Math.min(m.startX, m.currentX);
+            const maxX = Math.max(m.startX, m.currentX);
+            const minY = Math.min(m.startY, m.currentY);
+            const maxY = Math.max(m.startY, m.currentY);
 
             // Only process if marquee is large enough (not just a click)
             if (maxX - minX > 5 || maxY - minY > 5) {
@@ -1063,7 +1085,7 @@ export const Timeline: React.FC = () => {
             }
           }
           marqueeRef.current = null;
-          setMarqueeState(null);
+          setMarqueeActive(false);
         }}
         style={dragState ? { userSelect: 'none', WebkitUserSelect: 'none' } : undefined}
       >
@@ -1202,14 +1224,15 @@ export const Timeline: React.FC = () => {
             </div>
 
             {/* Marquee selection overlay */}
-            {marqueeState && (
+            {marqueeActive && marqueeRef.current && (
               <div
+                ref={marqueeOverlayRef}
                 className="absolute border border-df-accent/60 bg-df-accent/10 pointer-events-none z-40"
                 style={{
-                  left: Math.min(marqueeState.startX, marqueeState.currentX),
-                  top: Math.min(marqueeState.startY, marqueeState.currentY),
-                  width: Math.abs(marqueeState.currentX - marqueeState.startX),
-                  height: Math.abs(marqueeState.currentY - marqueeState.startY),
+                  left: Math.min(marqueeRef.current.startX, marqueeRef.current.currentX),
+                  top: Math.min(marqueeRef.current.startY, marqueeRef.current.currentY),
+                  width: Math.abs(marqueeRef.current.currentX - marqueeRef.current.startX),
+                  height: Math.abs(marqueeRef.current.currentY - marqueeRef.current.startY),
                 }}
               />
             )}
@@ -1225,12 +1248,11 @@ export const Timeline: React.FC = () => {
             </div>
 
             {/* Snap guide line */}
-            {snapGuideX !== null && (
-              <div
-                className="absolute top-0 bottom-0 w-px bg-df-accent z-30 pointer-events-none"
-                style={{ left: LABEL_WIDTH + snapGuideX }}
-              />
-            )}
+            <div
+              ref={snapGuideElementRef}
+              className="absolute top-0 bottom-0 w-px bg-df-accent z-30 pointer-events-none"
+              style={{ display: 'none' }}
+            />
           </div>
         </div>
       </div>

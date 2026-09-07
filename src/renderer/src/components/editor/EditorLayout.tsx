@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useEffect } from 'react';
+import React, { useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import { AssetLibrary } from '../assets/AssetLibrary';
 import { AssetPreview } from '../preview/AssetPreview';
 import { VideoPreview } from '../preview/VideoPreview';
@@ -48,39 +48,107 @@ export const EditorLayout: React.FC = () => {
     }
   }, [selectedCommandId, panelVisibility.inspector, setPanelVisibility]);
 
+  // Refs for drag state — avoid store updates during drag
   const assetsDragRef = useRef(false);
   const splitDragRef = useRef(false);
   const rightPanelDragRef = useRef(false);
   const timelineDragRef = useRef(false);
 
+  // Refs to panel DOM elements for direct style manipulation during drag
+  const assetsPanelRef = useRef<HTMLDivElement>(null);
+  const rightPanelRef = useRef<HTMLDivElement>(null);
+  const timelinePanelRef = useRef<HTMLDivElement>(null);
+  const previewSplitLeftRef = useRef<HTMLDivElement>(null);
+  const previewSplitRightRef = useRef<HTMLDivElement>(null);
+
+  // Visual-only width overrides during drag (not in React state = no re-renders)
+  const visualOverridesRef = useRef<{
+    assetsWidth?: number;
+    rightPanelWidth?: number;
+    timelineHeight?: number;
+    previewSplit?: number;
+  }>({});
+
+  // Apply visual overrides directly to DOM (bypasses React rendering)
+  useLayoutEffect(() => {
+    const v = visualOverridesRef.current;
+    if (assetsPanelRef.current && v.assetsWidth !== undefined) {
+      assetsPanelRef.current.style.width = `${v.assetsWidth}px`;
+    }
+    if (rightPanelRef.current && v.rightPanelWidth !== undefined) {
+      rightPanelRef.current.style.width = `${v.rightPanelWidth}px`;
+    }
+    if (timelinePanelRef.current && v.timelineHeight !== undefined) {
+      timelinePanelRef.current.style.height = `${v.timelineHeight}px`;
+    }
+    if (previewSplitLeftRef.current && v.previewSplit !== undefined) {
+      previewSplitLeftRef.current.style.width = `${v.previewSplit}%`;
+    }
+    if (previewSplitRightRef.current && v.previewSplit !== undefined) {
+      previewSplitRightRef.current.style.width = `${100 - v.previewSplit}%`;
+    }
+  });
+
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (assetsDragRef.current) {
         const newWidth = Math.max(160, Math.min(400, e.clientX));
-        setAssetsWidth(newWidth);
+        visualOverridesRef.current.assetsWidth = newWidth;
+        if (assetsPanelRef.current) {
+          assetsPanelRef.current.style.width = `${newWidth}px`;
+        }
       }
       if (splitDragRef.current) {
         const container = document.getElementById('center-area');
         if (!container) return;
         const rect = container.getBoundingClientRect();
         const relX = e.clientX - rect.left;
-        const pct = (relX / rect.width) * 100;
-        setPreviewTimelineSplit(Math.max(15, Math.min(85, pct)));
+        const pct = Math.max(15, Math.min(85, (relX / rect.width) * 100));
+        visualOverridesRef.current.previewSplit = pct;
+        if (previewSplitLeftRef.current) {
+          previewSplitLeftRef.current.style.width = `${pct}%`;
+        }
+        if (previewSplitRightRef.current) {
+          previewSplitRightRef.current.style.width = `${100 - pct}%`;
+        }
       }
       if (rightPanelDragRef.current) {
         const newWidth = Math.max(RIGHT_PANEL_MIN_WIDTH, Math.min(RIGHT_PANEL_MAX_WIDTH, window.innerWidth - e.clientX));
-        setRightPanelWidth(newWidth);
+        visualOverridesRef.current.rightPanelWidth = newWidth;
+        if (rightPanelRef.current) {
+          rightPanelRef.current.style.width = `${newWidth}px`;
+        }
       }
       if (timelineDragRef.current) {
         const container = document.getElementById('center-area');
         if (!container) return;
         const rect = container.getBoundingClientRect();
         const newHeight = rect.bottom - e.clientY;
-        setTimelineHeight(newHeight);
+        visualOverridesRef.current.timelineHeight = newHeight;
+        if (timelinePanelRef.current) {
+          timelinePanelRef.current.style.height = `${newHeight}px`;
+        }
       }
     };
 
     const handleMouseUp = () => {
+      const overrides = visualOverridesRef.current;
+      visualOverridesRef.current = {};
+
+      // Commit final values to store (one state update per drag, not per mousemove)
+      if (assetsDragRef.current && overrides.assetsWidth !== undefined) {
+        setAssetsWidth(overrides.assetsWidth);
+      }
+      if (splitDragRef.current && overrides.previewSplit !== undefined) {
+        setPreviewTimelineSplit(overrides.previewSplit);
+      }
+      if (rightPanelDragRef.current && overrides.rightPanelWidth !== undefined) {
+        setRightPanelWidth(overrides.rightPanelWidth);
+      }
+      if (timelineDragRef.current && overrides.timelineHeight !== undefined) {
+        setTimelineHeight(overrides.timelineHeight);
+      }
+
       assetsDragRef.current = false;
       splitDragRef.current = false;
       rightPanelDragRef.current = false;
@@ -132,7 +200,8 @@ export const EditorLayout: React.FC = () => {
       <div className="flex-1 w-full h-full flex flex-row overflow-hidden">
         {/* Assets Panel */}
         <div
-          className="bg-df-surface-1 flex flex-col overflow-hidden shrink-0 border-r border-df-border transition-all duration-df-normal"
+          ref={assetsPanelRef}
+          className="bg-df-surface-1 flex flex-col overflow-hidden shrink-0 border-r border-df-border"
           style={{ width: panelVisibility.assets ? workspaceLayout.assetsWidth : 0 }}
         >
           <AssetLibrary />
@@ -162,6 +231,7 @@ export const EditorLayout: React.FC = () => {
                 {panelVisibility.assetPreview && panelVisibility.timelinePreview ? (
                   <>
                     <div
+                      ref={previewSplitLeftRef}
                       style={{ width: `${workspaceLayout.previewTimelineSplit}%` }}
                       className="overflow-hidden min-w-0 flex flex-col"
                     >
@@ -173,6 +243,7 @@ export const EditorLayout: React.FC = () => {
                       aria-label="Resize preview panels"
                     />
                     <div
+                      ref={previewSplitRightRef}
                       style={{ width: `${100 - workspaceLayout.previewTimelineSplit}%` }}
                       className="overflow-hidden min-w-0 flex flex-col"
                     >
@@ -202,6 +273,7 @@ export const EditorLayout: React.FC = () => {
                 <div className="absolute inset-x-0 top-1/2 h-px bg-df-border" />
               </div>
               <div
+                ref={timelinePanelRef}
                 className="shrink-0 flex flex-col relative bg-df-surface-1 overflow-hidden"
                 style={{ height: workspaceLayout.timelineHeight }}
               >
@@ -224,7 +296,8 @@ export const EditorLayout: React.FC = () => {
 
         {/* Right Panel */}
         <div
-          className="bg-df-surface-1 border-l border-df-border flex flex-col overflow-hidden shrink-0 transition-all duration-df-normal relative"
+          ref={rightPanelRef}
+          className="bg-df-surface-1 border-l border-df-border flex flex-col overflow-hidden shrink-0 relative"
           style={{ width: rightPanelVisible ? rightPanelWidth : 0 }}
         >
           {rightPanelVisible && (

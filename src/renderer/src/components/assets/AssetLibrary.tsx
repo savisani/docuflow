@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useRef } from 'react';
+import React, { useCallback, useState, useRef, useMemo } from 'react';
 import { useDocuFlowStore } from '../../app/store';
 import { Asset, AudioRole } from '../../types/assets';
 import { loadAssetMetadata, importNativeAssets } from '../../engine/media/loader';
@@ -144,7 +144,7 @@ export const AssetLibrary: React.FC = () => {
     e.dataTransfer.effectAllowed = 'copy';
   }, []);
 
-  const filteredAssets = assets.filter((asset) => {
+  const filteredAssets = useMemo(() => assets.filter((asset) => {
     if (filterType !== 'all' && asset.type !== filterType) return false;
     if (filterRole !== 'all') {
       if (filterRole === 'unassigned') {
@@ -157,17 +157,20 @@ export const AssetLibrary: React.FC = () => {
           !asset.filename.toLowerCase().includes(query)) return false;
     }
     return true;
-  });
+  }), [assets, filterType, filterRole, searchQuery]);
 
-  const images = filteredAssets.filter((a) => a.type === 'image' || a.type === 'video');
-  const audioFiles = filteredAssets.filter((a) => a.type === 'audio');
+  const images = useMemo(() => filteredAssets.filter((a) => a.type === 'image' || a.type === 'video'), [filteredAssets]);
+  const audioFiles = useMemo(() => filteredAssets.filter((a) => a.type === 'audio'), [filteredAssets]);
 
-  const roleGroups: { role: string; assets: Asset[] }[] = [];
-  const roleOrder: AudioRole[] = ['voiceover', 'music', 'sfx', 'ambient', 'unassigned'];
-  for (const role of roleOrder) {
-    const roleAssets = audioFiles.filter((a) => a.audioRole === role || (!a.audioRole && role === 'unassigned'));
-    if (roleAssets.length > 0) roleGroups.push({ role, assets: roleAssets });
-  }
+  const roleGroups = useMemo(() => {
+    const groups: { role: string; assets: Asset[] }[] = [];
+    const roleOrder: AudioRole[] = ['voiceover', 'music', 'sfx', 'ambient', 'unassigned'];
+    for (const role of roleOrder) {
+      const roleAssets = audioFiles.filter((a) => a.audioRole === role || (!a.audioRole && role === 'unassigned'));
+      if (roleAssets.length > 0) groups.push({ role, assets: roleAssets });
+    }
+    return groups;
+  }, [audioFiles]);
 
   return (
     <Panel title="Assets" icon={<PanelLeft size={10} />} className="h-full">
@@ -377,7 +380,7 @@ interface AssetGroupProps {
   roleConfig?: { label: string; icon: React.ComponentType<{ size?: number }>; color: string };
 }
 
-const AssetGroup: React.FC<AssetGroupProps> = ({
+const AssetGroup: React.FC<AssetGroupProps> = React.memo(({
   title,
   count,
   assets,
@@ -410,7 +413,9 @@ const AssetGroup: React.FC<AssetGroupProps> = ({
       ))}
     </div>
   </Section>
-);
+));
+
+AssetGroup.displayName = 'AssetGroup';
 
 interface AssetItemProps {
   asset: Asset;
@@ -422,7 +427,7 @@ interface AssetItemProps {
   roleConfig?: { label: string; icon: React.ComponentType<{ size?: number }>; color: string };
 }
 
-const AssetItem: React.FC<AssetItemProps> = ({
+const AssetItem: React.FC<AssetItemProps> = React.memo(({
   asset,
   selected,
   hidden,
@@ -488,6 +493,8 @@ const AssetItem: React.FC<AssetItemProps> = ({
       </Tooltip>
     </div>
   );
-};
+});
+
+AssetItem.displayName = 'AssetItem';
 
 
