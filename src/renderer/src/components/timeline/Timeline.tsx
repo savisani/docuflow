@@ -736,36 +736,6 @@ export const Timeline: React.FC = () => {
     return Math.max(0, x / (PIXELS_PER_SECOND * zoom));
   }, [zoom]);
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
-    const time = getDropTimeFromEvent(e);
-    setDropTime(time);
-
-    // Determine target track from Y position
-    const trackRowsEl = (e.currentTarget as HTMLElement).querySelector('[data-track-rows]') as HTMLElement;
-    if (trackRowsEl) {
-      const rect = trackRowsEl.getBoundingClientRect();
-      const y = e.clientY - rect.top;
-      const trackIdx = Math.floor(y / TRACK_HEIGHT);
-      let currentIdx = 0;
-      let foundTrackId: string | null = null;
-      for (const group of trackGroups) {
-        if (trackIdx <= currentIdx) break;
-        currentIdx++;
-        if (trackIdx <= currentIdx + group.tracks.length - 1) {
-          const localIdx = trackIdx - currentIdx;
-          if (group.tracks[localIdx]) {
-            foundTrackId = group.tracks[localIdx].id;
-          }
-          break;
-        }
-        currentIdx += group.tracks.length;
-      }
-      setDragOverTrackId(foundTrackId);
-    }
-  }, [getDropTimeFromEvent, trackGroups]);
-
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     // Only clear if actually leaving the scroll container (not entering a child)
     const related = e.relatedTarget as HTMLElement;
@@ -1004,6 +974,36 @@ export const Timeline: React.FC = () => {
       return g.tracks.length > 0;
     });
   }, [tracks, trackVisibility, voiceoverTrack, hasTextCommands, hasAudioCommands]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    const time = getDropTimeFromEvent(e);
+    setDropTime(time);
+
+    // Determine target track from Y position
+    const trackRowsEl = (e.currentTarget as HTMLElement).querySelector('[data-track-rows]') as HTMLElement;
+    if (trackRowsEl) {
+      const rect = trackRowsEl.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const trackIdx = Math.floor(y / TRACK_HEIGHT);
+      let currentIdx = 0;
+      let foundTrackId: string | null = null;
+      for (const group of trackGroups) {
+        if (trackIdx <= currentIdx) break;
+        currentIdx++;
+        if (trackIdx <= currentIdx + group.tracks.length - 1) {
+          const localIdx = trackIdx - currentIdx;
+          if (group.tracks[localIdx]) {
+            foundTrackId = group.tracks[localIdx].id;
+          }
+          break;
+        }
+        currentIdx += group.tracks.length;
+      }
+      setDragOverTrackId(foundTrackId);
+    }
+  }, [getDropTimeFromEvent, trackGroups]);
 
   const timeMarks = useMemo(() => {
     const marks: number[] = [];
