@@ -909,6 +909,8 @@ export const Timeline: React.FC = () => {
   const tracks = useMemo(() => {
     if (!effectiveTimeline) return [];
 
+    const cmdMap = new Map(commands.map(c => [c.id, c]));
+
     const videoTracks: { id: string; label: string; color: string; clips: any[]; type: string; zIndex: number }[] = [];
 
     Object.values(effectiveTimeline.layers).forEach((layer) => {
@@ -921,9 +923,13 @@ export const Timeline: React.FC = () => {
         const seg = segments[i];
         const nextSeg = segments[i + 1];
         const startSec = seg.startFrame / fps;
-        const endSec = nextSeg
-          ? nextSeg.startFrame / fps
-          : layer.endFrame / fps;
+        const cmd = cmdMap.get(seg.commandId || layer.id);
+        const cmdDuration = cmd && 'duration' in cmd ? (cmd as any).duration : undefined;
+        const endSec = cmdDuration
+          ? (cmd as any).start + cmdDuration
+          : nextSeg
+            ? nextSeg.startFrame / fps
+            : layer.endFrame / fps;
 
         clips.push({
           id: seg.commandId || `${layer.id}-seg${i}`,
@@ -939,7 +945,11 @@ export const Timeline: React.FC = () => {
 
       if (clips.length === 0) {
         const startSec = layer.startFrame / fps;
-        const endSec = layer.endFrame / fps;
+        const cmd = cmdMap.get(layer.id);
+        const cmdDuration = cmd && 'duration' in cmd ? (cmd as any).duration : undefined;
+        const endSec = cmdDuration
+          ? (cmd as any).start + cmdDuration
+          : layer.endFrame / fps;
         clips.push({
           id: layer.id,
           start: startSec,
@@ -1000,7 +1010,11 @@ export const Timeline: React.FC = () => {
     const textTracks: { id: string; label: string; color: string; clips: any[]; type: string; zIndex: number }[] = [];
     for (const text of effectiveTimeline.textLayers) {
       const startSec = text.startFrame / fps;
-      const endSec = text.endFrame / fps;
+      const cmd = cmdMap.get(text.id);
+      const cmdDuration = cmd && 'duration' in cmd ? (cmd as any).duration : undefined;
+      const endSec = cmdDuration
+        ? (cmd as any).start + cmdDuration
+        : text.endFrame / fps;
       textTracks.push({
         id: text.id,
         label: text.content.substring(0, 20),
@@ -1025,7 +1039,7 @@ export const Timeline: React.FC = () => {
     textTracks.sort((a, b) => b.zIndex - a.zIndex);
 
     return [...videoTracks, ...audioTracks, ...textTracks];
-  }, [effectiveTimeline, fps, hiddenAssetIds]);
+  }, [effectiveTimeline, fps, hiddenAssetIds, commands]);
 
   const voiceoverTrack = useMemo(() => {
     if (!voiceover) return null;
