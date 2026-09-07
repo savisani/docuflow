@@ -25,6 +25,7 @@ export interface AssetSegment {
   assetUrl: string;
   assetType: 'image' | 'video';
   startFrame: number;
+  commandId?: string;
 }
 
 export interface LayerState {

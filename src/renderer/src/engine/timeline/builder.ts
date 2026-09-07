@@ -24,7 +24,8 @@ function makeLayer(
   assetType: 'image' | 'video',
   startFrame: number,
   endFrame: number,
-  zIndex: number
+  zIndex: number,
+  commandId?: string
 ): LayerState {
   return {
     id,
@@ -53,7 +54,7 @@ function makeLayer(
     animations: [],
     keyframeTracks: [],
     assetSegments: [
-      { assetId, assetUrl, assetType, startFrame },
+      { assetId, assetUrl, assetType, startFrame, commandId },
     ],
   };
 }
@@ -100,7 +101,7 @@ export function buildTimeline(
     const firstStart = Math.round(first.start * fps);
     const firstDur = first.duration ? Math.round(first.duration * fps) : 0;
     const firstEnd = firstDur > 0 ? firstStart + firstDur : firstStart + Math.round(DEFAULT_IMAGE_DURATION_SEC * fps);
-    const layer = makeLayer(first.id, first.asset, url, type, firstStart, firstEnd, z);
+    const layer = makeLayer(first.id, first.asset, url, type, firstStart, firstEnd, z, first.id);
 
     for (let i = 1; i < cmds.length; i++) {
       const segCmd = cmds[i];
@@ -113,6 +114,7 @@ export function buildTimeline(
         assetUrl: segInfo.url,
         assetType: segInfo.type,
         startFrame: segStart,
+        commandId: segCmd.id,
       });
       if (segEnd > layer.endFrame) layer.endFrame = segEnd;
       if (type === 'video') {
@@ -185,6 +187,7 @@ export function buildTimeline(
             assetUrl: url,
             assetType: type,
             startFrame,
+            commandId: cmd.target,
           });
           if (durationFrames > 0) {
             layer.endFrame = startFrame + durationFrames;
@@ -495,7 +498,8 @@ export function buildTimeline(
             type,
             startFrame,
             startFrame + durationFrames,
-            newLayerZIndex
+            newLayerZIndex,
+            cmd.id
           );
           newLayer.opacity = 0;
           newLayer.animations.push({
@@ -546,7 +550,8 @@ export function buildTimeline(
           type,
           startFrame,
           startFrame + durationFrames,
-          newLayerZIndex
+          newLayerZIndex,
+          cmd.id
         );
         newLayer.x = fromX;
         newLayer.y = fromY;
@@ -613,7 +618,8 @@ export function buildTimeline(
           type,
           startFrame,
           startFrame + durationFrames,
-          newLayerZIndex
+          newLayerZIndex,
+          cmd.id
         );
         layers[cmd.id] = newLayer;
 

@@ -530,7 +530,7 @@ export const Timeline: React.FC = () => {
     (e: React.MouseEvent, clip: any, trackType: string, mode: 'move' | 'resize-left' | 'resize-right') => {
       e.stopPropagation();
       e.preventDefault();
-      const cmdId = clip.layerId || clip.id;
+      const cmdId = clip.commandId || clip.layerId || clip.id;
 
       // Multi-selection support: Ctrl+click toggles, plain click selects single
       if (e.ctrlKey || e.metaKey) {
@@ -886,11 +886,12 @@ export const Timeline: React.FC = () => {
           : layer.endFrame / fps;
 
         clips.push({
-          id: `${layer.id}-seg${i}`,
+          id: seg.commandId || `${layer.id}-seg${i}`,
           start: startSec,
           end: endSec,
           label: seg.assetId,
           layerId: layer.id,
+          commandId: seg.commandId || layer.id,
         });
       }
 
@@ -903,6 +904,7 @@ export const Timeline: React.FC = () => {
           end: endSec,
           label: layer.assetId,
           layerId: layer.id,
+          commandId: layer.id,
         });
       }
 
@@ -1183,7 +1185,7 @@ export const Timeline: React.FC = () => {
                       const clipLeft = clip.start * PIXELS_PER_SECOND * zoom;
                       const clipRight = clip.end * PIXELS_PER_SECOND * zoom;
                       if (clipRight >= minX && clipLeft <= maxX) {
-                        selectedIds.push(clip.layerId || clip.id);
+                        selectedIds.push(clip.commandId || clip.layerId || clip.id);
                       }
                     });
                   }
@@ -1303,8 +1305,8 @@ export const Timeline: React.FC = () => {
                             trackType={track.type}
                             trackColor={track.color}
                             zoom={zoom}
-                            isSelected={(clip.layerId || clip.id) === selectedCommandId}
-                            isMultiSelected={selectedCommandIds.includes(clip.layerId || clip.id)}
+                            isSelected={(clip.commandId || clip.layerId || clip.id) === selectedCommandId}
+                            isMultiSelected={selectedCommandIds.includes(clip.commandId || clip.layerId || clip.id)}
                             asset={clipAsset}
                             dragVisualOffset={dragVisualOffset}
                             dragState={dragState}
