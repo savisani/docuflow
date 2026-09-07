@@ -30,6 +30,7 @@ export const EditorLayout: React.FC = () => {
   const workspaceLayout = useDocuFlowStore((s) => s.workspaceLayout);
   const setAssetsWidth = useDocuFlowStore((s) => s.setAssetsWidth);
   const setPreviewTimelineSplit = useDocuFlowStore((s) => s.setPreviewTimelineSplit);
+  const setTimelineHeight = useDocuFlowStore((s) => s.setTimelineHeight);
   const selectedCommandId = useDocuFlowStore((s) => s.selectedCommandId);
   const rightPanel = useDocuFlowStore((s) => s.rightPanel);
   const setRightPanel = useDocuFlowStore((s) => s.setRightPanel);
@@ -50,6 +51,7 @@ export const EditorLayout: React.FC = () => {
   const assetsDragRef = useRef(false);
   const splitDragRef = useRef(false);
   const rightPanelDragRef = useRef(false);
+  const timelineDragRef = useRef(false);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -69,12 +71,20 @@ export const EditorLayout: React.FC = () => {
         const newWidth = Math.max(RIGHT_PANEL_MIN_WIDTH, Math.min(RIGHT_PANEL_MAX_WIDTH, window.innerWidth - e.clientX));
         setRightPanelWidth(newWidth);
       }
+      if (timelineDragRef.current) {
+        const container = document.getElementById('center-area');
+        if (!container) return;
+        const rect = container.getBoundingClientRect();
+        const newHeight = rect.bottom - e.clientY;
+        setTimelineHeight(newHeight);
+      }
     };
 
     const handleMouseUp = () => {
       assetsDragRef.current = false;
       splitDragRef.current = false;
       rightPanelDragRef.current = false;
+      timelineDragRef.current = false;
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
@@ -85,7 +95,7 @@ export const EditorLayout: React.FC = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [setAssetsWidth, setPreviewTimelineSplit, setRightPanelWidth]);
+  }, [setAssetsWidth, setPreviewTimelineSplit, setRightPanelWidth, setTimelineHeight]);
 
   const handleAssetsMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -105,6 +115,13 @@ export const EditorLayout: React.FC = () => {
     e.preventDefault();
     rightPanelDragRef.current = true;
     document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  const handleTimelineMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    timelineDragRef.current = true;
+    document.body.style.cursor = 'ns-resize';
     document.body.style.userSelect = 'none';
   }, []);
 
@@ -176,9 +193,21 @@ export const EditorLayout: React.FC = () => {
           )}
 
           {panelVisibility.timeline && (
-            <div className="h-72 shrink-0 flex flex-col relative border-t border-df-border bg-df-surface-1 overflow-hidden">
-              <Timeline />
-            </div>
+            <>
+              <div
+                className="h-1 w-full cursor-ns-resize hover:bg-df-accent/30 transition-colors shrink-0 relative"
+                onMouseDown={handleTimelineMouseDown}
+                aria-label="Resize timeline panel"
+              >
+                <div className="absolute inset-x-0 top-1/2 h-px bg-df-border" />
+              </div>
+              <div
+                className="shrink-0 flex flex-col relative bg-df-surface-1 overflow-hidden"
+                style={{ height: workspaceLayout.timelineHeight }}
+              >
+                <Timeline />
+              </div>
+            </>
           )}
         </div>
 

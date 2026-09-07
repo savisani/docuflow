@@ -54,6 +54,7 @@ interface PanelVisibility {
 interface WorkspaceLayout {
   assetsWidth: number;
   previewTimelineSplit: number;
+  timelineHeight: number;
 }
 
 function loadPanelVisibility(): PanelVisibility {
@@ -87,10 +88,11 @@ function loadWorkspaceLayout(): WorkspaceLayout {
       return {
         assetsWidth: parsed.assetsWidth ?? 224,
         previewTimelineSplit: parsed.previewTimelineSplit ?? 50,
+        timelineHeight: parsed.timelineHeight ?? 288,
       };
     }
   } catch {}
-  return { assetsWidth: 224, previewTimelineSplit: 50 };
+  return { assetsWidth: 224, previewTimelineSplit: 50, timelineHeight: 288 };
 }
 
 function saveWorkspaceLayout(l: WorkspaceLayout) {
@@ -214,6 +216,7 @@ interface DocuFlowState {
   setPanelVisibility: (panel: keyof PanelVisibility, visible: boolean) => void;
   setAssetsWidth: (width: number) => void;
   setPreviewTimelineSplit: (split: number) => void;
+  setTimelineHeight: (height: number) => void;
   setSnapEnabled: (enabled: boolean) => void;
   setRightPanel: (panel: RightPanel) => void;
   setRightPanelWidth: (width: number) => void;
@@ -628,6 +631,15 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
   setPreviewTimelineSplit: (split) =>
     set((state) => {
       const next = { ...state.workspaceLayout, previewTimelineSplit: Math.max(10, Math.min(90, split)) };
+      saveWorkspaceLayout(next);
+      return { workspaceLayout: next };
+    }),
+  setTimelineHeight: (height) =>
+    set((state) => {
+      const titlebarHeight = 32;
+      const availableHeight = window.innerHeight - titlebarHeight;
+      const maxHeight = Math.floor(availableHeight * 0.7);
+      const next = { ...state.workspaceLayout, timelineHeight: Math.max(180, Math.min(maxHeight, height)) };
       saveWorkspaceLayout(next);
       return { workspaceLayout: next };
     }),
