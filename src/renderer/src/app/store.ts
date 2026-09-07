@@ -13,7 +13,7 @@ import type { SerializedDocuFlowError, ErrorCode } from '../../../core/errors';
 
 export type PreviewMode = 'timeline' | 'asset';
 export type ActiveTab = 'studio' | 'generator' | 'scenes';
-export type RightPanel = 'inspector' | 'commands' | 'console' | 'voiceover' | 'animation';
+export type RightPanel = 'inspector' | 'commands' | 'animation';
 
 export interface GeneratedImage {
   id: string;

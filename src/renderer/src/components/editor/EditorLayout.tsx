@@ -5,11 +5,9 @@ import { VideoPreview } from '../preview/VideoPreview';
 import { Timeline } from '../timeline/Timeline';
 import { Inspector } from '../inspector/Inspector';
 import { CommandEditor } from './CommandEditor';
-import { CommandConsole } from '../commands/CommandConsole';
-import { VoiceoverPanel } from '../voiceover/VoiceoverPanel';
 import { AnimationPanel } from '../animation/AnimationPanel';
 import { useDocuFlowStore } from '../../app/store';
-import { ChevronLeft, ChevronRight, Settings, FileText, Terminal, Mic, Sparkles } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Settings, FileText, Sparkles } from 'lucide-react';
 import { Tooltip } from '../ui';
 
 const RIGHT_PANEL_MIN_WIDTH = 220;
@@ -19,8 +17,6 @@ const RIGHT_TABS = [
   { id: 'inspector' as const, label: 'Inspector', icon: Settings },
   { id: 'animation' as const, label: 'Animation', icon: Sparkles },
   { id: 'commands' as const, label: 'Commands', icon: FileText },
-  { id: 'console' as const, label: 'Console', icon: Terminal },
-  { id: 'voiceover' as const, label: 'Voiceover', icon: Mic },
 ] as const;
 
 export const EditorLayout: React.FC = () => {
@@ -347,12 +343,6 @@ export const EditorLayout: React.FC = () => {
                 </div>
                 <div style={{ display: rightPanel === 'commands' ? 'contents' : 'none' }} className="w-full h-full">
                   <CommandEditor />
-                </div>
-                <div style={{ display: rightPanel === 'voiceover' ? 'contents' : 'none' }} className="w-full h-full">
-                  <VoiceoverPanel />
-                </div>
-                <div style={{ display: rightPanel === 'console' ? 'contents' : 'none' }} className="w-full h-full">
-                  <CommandConsole />
                 </div>
               </div>
             </>

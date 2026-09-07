@@ -3,8 +3,11 @@ import { useDocuFlowStore } from '../../app/store';
 import { validateCommands, normalizeCommands } from '../../engine/commands/validator';
 import { buildTimeline } from '../../engine/timeline/builder';
 import { Command } from '../../engine/commands/types';
-import { Play, CheckCircle, AlertTriangle, Trash2, Copy, FileText, Minimize2, Terminal, RefreshCw } from 'lucide-react';
+import { Play, CheckCircle, AlertTriangle, Trash2, Copy, FileText, Minimize2, Terminal, RefreshCw, Code, Sparkles } from 'lucide-react';
 import { Panel, Button, IconButton, Tooltip, Section } from '../ui';
+import { CommandConsole } from '../commands/CommandConsole';
+
+type CommandMode = 'structured' | 'console';
 
 interface ParsedData {
   commands?: Command[];
@@ -57,6 +60,7 @@ function mapValidationToLineErrors(content: string, errors: { commandId: string;
 
 export const CommandEditor: React.FC = () => {
   const { commands, assets, settings, setCommands, setTimeline, setSettings } = useDocuFlowStore();
+  const [mode, setMode] = useState<CommandMode>('structured');
   const [editorContent, setEditorContent] = useState('');
   const [errors, setErrors] = useState<LineError[]>([]);
   const [parseSuccess, setParseSuccess] = useState(false);
@@ -191,93 +195,128 @@ export const CommandEditor: React.FC = () => {
   }, [commands]);
 
   return (
-    <Panel title="Command Editor" icon={<Terminal size={10} />} className="h-full flex flex-col">
-      <div className="flex items-center justify-between gap-2 p-3 border-b border-df-border mb-3 shrink-0">
-        <div className="flex items-center gap-2">
-          <Tooltip content="Parse & Apply (Ctrl+Enter)">
-            <Button size="sm" variant="primary" onClick={handleParseAndApply}>
-              <Play size={10} />
-              <span>Parse & Apply</span>
-            </Button>
-          </Tooltip>
-          <Tooltip content="Validate">
-            <Button size="sm" variant="secondary" onClick={handleValidate}>
-              <CheckCircle size={10} />
-              <span>Validate</span>
-            </Button>
-          </Tooltip>
-          <Tooltip content="Sync from Store">
-            <Button size="sm" variant="ghost" onClick={handleSyncFromStore}>
-              <RefreshCw size={10} />
-              <span>Sync</span>
-            </Button>
-          </Tooltip>
-          <Tooltip content="Clear">
-            <Button size="sm" variant="ghost" onClick={handleClear}>
-              <Trash2 size={10} />
-              <span>Clear</span>
-            </Button>
-          </Tooltip>
-          <Tooltip content="Copy to Clipboard">
-            <Button size="sm" variant="ghost" onClick={handleCopy}>
-              <Copy size={10} />
-              <span>Copy</span>
-            </Button>
-          </Tooltip>
-          <Tooltip content="Load from Project">
-            <Button size="sm" variant="ghost" onClick={handleLoadFromProject}>
-              <FileText size={10} />
-              <span>Load</span>
-            </Button>
-          </Tooltip>
+    <Panel title="Commands" icon={<Terminal size={10} />} className="h-full flex flex-col">
+      {/* Sub-tab bar */}
+      <div className="flex items-center border-b border-df-border shrink-0">
+        <div className="flex items-center bg-df-surface-2/60 rounded-df-md p-0.5 border border-slate-700/40 m-2">
+          <button
+            onClick={() => setMode('structured')}
+            className={`flex items-center gap-1 px-2.5 py-1 text-df-xs font-medium rounded transition-all duration-150 ${
+              mode === 'structured'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-df-text-muted hover:text-df-text-primary'
+            }`}
+          >
+            <FileText size={9} />
+            Structured
+          </button>
+          <button
+            onClick={() => setMode('console')}
+            className={`flex items-center gap-1 px-2.5 py-1 text-df-xs font-medium rounded transition-all duration-150 ${
+              mode === 'console'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-df-text-muted hover:text-df-text-primary'
+            }`}
+          >
+            <Code size={9} />
+            Console
+          </button>
         </div>
+        <div className="flex-1" />
         <Tooltip content="Minimize">
-          <IconButton size="sm" variant="ghost" aria-label="Minimize" onClick={() => useDocuFlowStore.getState().setPanelVisibility('assets', false)}>
+          <IconButton size="sm" variant="ghost" aria-label="Minimize" onClick={() => useDocuFlowStore.getState().setPanelVisibility('assets', false)} className="mr-2">
             <Minimize2 size={10} />
           </IconButton>
         </Tooltip>
       </div>
 
-      <div className="flex-1 overflow-hidden relative">
-        <textarea
-          ref={textareaRef}
-          value={editorContent}
-          onChange={(e) => {
-            setEditorContent(e.target.value);
-            setIsUserEditing(true);
-          }}
-          onFocus={handleFocus}
-          onBlur={handleBlur}
-          onKeyDown={(e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-              e.preventDefault();
-              handleParseAndApply();
-            }
-          }}
-          placeholder={`Paste commands here...\n\nExample:\n{\n  "commands": [\n    {\n      "type": "show",\n      "asset": "image1.jpg",\n      "start": 0,\n      "duration": 5\n    }\n  ]\n}`}
-          className="w-full h-full bg-[var(--color-bg)] text-[var(--color-text-primary)] font-mono text-df-sm p-3 resize-none outline-none placeholder:text-[var(--color-text-muted)]"
-          spellCheck={false}
-        />
-      </div>
+      {mode === 'structured' ? (
+        <>
+          <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-df-border shrink-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <Tooltip content="Parse & Apply (Ctrl+Enter)">
+                <Button size="sm" variant="primary" onClick={handleParseAndApply}>
+                  <Play size={10} />
+                  <span>Parse & Apply</span>
+                </Button>
+              </Tooltip>
+              <Tooltip content="Validate">
+                <Button size="sm" variant="secondary" onClick={handleValidate}>
+                  <CheckCircle size={10} />
+                  <span>Validate</span>
+                </Button>
+              </Tooltip>
+              <Tooltip content="Sync from Store">
+                <Button size="sm" variant="ghost" onClick={handleSyncFromStore}>
+                  <RefreshCw size={10} />
+                  <span>Sync</span>
+                </Button>
+              </Tooltip>
+              <Tooltip content="Clear">
+                <Button size="sm" variant="ghost" onClick={handleClear}>
+                  <Trash2 size={10} />
+                  <span>Clear</span>
+                </Button>
+              </Tooltip>
+              <Tooltip content="Copy to Clipboard">
+                <Button size="sm" variant="ghost" onClick={handleCopy}>
+                  <Copy size={10} />
+                  <span>Copy</span>
+                </Button>
+              </Tooltip>
+              <Tooltip content="Load from Project">
+                <Button size="sm" variant="ghost" onClick={handleLoadFromProject}>
+                  <FileText size={10} />
+                  <span>Load</span>
+                </Button>
+              </Tooltip>
+            </div>
+          </div>
 
-      {(errors.length > 0 || parseSuccess) && (
-        <div className="border-t border-[var(--color-divider)] shrink-0 max-h-24 overflow-y-auto">
-          {parseSuccess && (
-            <div className="px-3 py-1.5 text-df-sm text-[var(--color-success)] bg-[var(--color-success-muted)] flex items-center gap-1">
-              <CheckCircle size={10} />
-              Commands applied successfully
+          <div className="flex-1 overflow-hidden relative">
+            <textarea
+              ref={textareaRef}
+              value={editorContent}
+              onChange={(e) => {
+                setEditorContent(e.target.value);
+                setIsUserEditing(true);
+              }}
+              onFocus={handleFocus}
+              onBlur={handleBlur}
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                  e.preventDefault();
+                  handleParseAndApply();
+                }
+              }}
+              placeholder={`Paste commands here...\n\nExample:\n{\n  "commands": [\n    {\n      "type": "show",\n      "asset": "image1.jpg",\n      "start": 0,\n      "duration": 5\n    }\n  ]\n}`}
+              className="w-full h-full bg-[var(--color-bg)] text-[var(--color-text-primary)] font-mono text-df-sm p-3 resize-none outline-none placeholder:text-[var(--color-text-muted)]"
+              spellCheck={false}
+            />
+          </div>
+
+          {(errors.length > 0 || parseSuccess) && (
+            <div className="border-t border-[var(--color-divider)] shrink-0 max-h-24 overflow-y-auto">
+              {parseSuccess && (
+                <div className="px-3 py-1.5 text-df-sm text-[var(--color-success)] bg-[var(--color-success-muted)] flex items-center gap-1">
+                  <CheckCircle size={10} />
+                  Commands applied successfully
+                </div>
+              )}
+              {errors.map((error, i) => (
+                <div key={i} className="px-3 py-1 text-df-sm text-[var(--color-error)] bg-[var(--color-error-muted)] flex items-start gap-1">
+                  <AlertTriangle size={10} className="mt-0.5 shrink-0" />
+                  <span>
+                    {error.line > 0 && <span className="font-mono opacity-70">L{error.line}: </span>}
+                    {error.message}
+                  </span>
+                </div>
+              ))}
             </div>
           )}
-          {errors.map((error, i) => (
-            <div key={i} className="px-3 py-1 text-df-sm text-[var(--color-error)] bg-[var(--color-error-muted)] flex items-start gap-1">
-              <AlertTriangle size={10} className="mt-0.5 shrink-0" />
-              <span>
-                {error.line > 0 && <span className="font-mono opacity-70">L{error.line}: </span>}
-                {error.message}
-              </span>
-            </div>
-          ))}
-        </div>
+        </>
+      ) : (
+        <CommandConsole />
       )}
     </Panel>
   );
