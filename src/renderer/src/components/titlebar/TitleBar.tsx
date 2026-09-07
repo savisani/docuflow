@@ -1,12 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Minus, Square, X, Maximize2, Play, RotateCcw, Undo2, Redo2, PanelLeft, Image, SlidersHorizontal, Sparkles, Film, Clapperboard, Cpu, Zap, FileText, FolderOpen, Save, FilePlus } from 'lucide-react';
+import { Minus, Square, X, Maximize2, Undo2, Redo2, PanelLeft, Image, SlidersHorizontal, Sparkles, Film, Clapperboard, Cpu, Zap, FileText, FolderOpen, Save, FilePlus } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
-import { buildTimeline } from '../../engine/timeline/builder';
-import { validateCommands } from '../../engine/commands/validator';
-import { loadAssetMetadata } from '../../engine/media/loader';
-import { generateId } from '../../utils/format';
 import { fetchOllamaPs } from '../../services/aiService';
-import { Tooltip } from '../ui';
+import { Tooltip, Dropdown } from '../ui';
 import { listLocalModels } from '../../services/localImageProvider';
 
 const TABS = [
@@ -18,13 +14,13 @@ const TABS = [
 export const TitleBar: React.FC = () => {
   const [isMaximized, setIsMaximized] = useState(false);
   const {
-    settings, assets, commands, historyIndex, history,
+    settings, historyIndex, history,
     panelVisibility, setPanelVisibility,
-    setTimeline, setSettings, setCommands, setAssets, undo, redo,
+    undo, redo,
     activeTab, setActiveTab,
     ollamaModelStatus, ollamaModelName, setOllamaModelStatus,
-    gpuStatus, setGpuStatus, setGpuStatusLoading,
-    localModelCount, localModelNames, setLocalModelInfo,
+    gpuStatus, setGpuStatus,
+    localModelCount, setLocalModelInfo,
     loadedModelName, modelLoadState, setLoadedModel,
     saveStatus, projectPath,
     newProject, openProjectFromDialog, saveProject, saveAsProject,
@@ -130,63 +126,6 @@ export const TitleBar: React.FC = () => {
     } catch {}
   }, [setGpuStatus, setLoadedModel]);
 
-  const handleBuild = useCallback(() => {
-    const state = useDocuFlowStore.getState();
-    const validation = validateCommands(state.commands, state.assets);
-    if (!validation.valid) {
-      console.info('Building timeline with warnings:', validation.errors.map((e) => e.message).join('; '));
-    }
-    const voiceoverAsset = state.voiceover ? state.assets.find(a => a.id === state.voiceover!.assetId) : undefined;
-    const timeline = buildTimeline(state.commands, state.assets, state.settings, voiceoverAsset?.duration);
-    setTimeline(timeline);
-  }, [setTimeline]);
-
-  const handleLoadDemo = useCallback(async () => {
-    try {
-      const response = await fetch('/demo-commands.docuflow.json');
-      const project = await response.json();
-
-      if (project.settings) setSettings(project.settings);
-      if (project.commands) setCommands(project.commands);
-
-      const demoAssets = [
-        { filename: 'image1.jpg', type: 'image' as const, mimeType: 'image/jpeg' },
-        { filename: 'image2.jpg', type: 'image' as const, mimeType: 'image/jpeg' },
-        { filename: 'image3.jpg', type: 'image' as const, mimeType: 'image/jpeg' },
-        { filename: 'whoosh.wav', type: 'audio' as const, mimeType: 'audio/wav' },
-      ];
-
-      const loadedAssets: any[] = [];
-      for (const assetInfo of demoAssets) {
-        try {
-          const res = await fetch(`/${assetInfo.filename}`);
-          if (res.ok) {
-            const blob = await res.blob();
-            const file = new File([blob], assetInfo.filename, { type: assetInfo.mimeType });
-            const metadata = await loadAssetMetadata(file, loadedAssets);
-            const newAsset = { id: generateId(), ...metadata };
-            loadedAssets.push(newAsset);
-          }
-        } catch (err) {
-          console.warn(`Failed to load demo asset ${assetInfo.filename}:`, err);
-        }
-      }
-
-      if (loadedAssets.length > 0) {
-        setAssets(loadedAssets);
-        const currentState = useDocuFlowStore.getState();
-        if (currentState.commands.length > 0) {
-          const voiceoverAsset = currentState.voiceover ? currentState.assets.find(a => a.id === currentState.voiceover!.assetId) : undefined;
-          const tl = buildTimeline(currentState.commands, loadedAssets, currentState.settings, voiceoverAsset?.duration);
-          setTimeline(tl);
-        }
-      }
-      useDocuFlowStore.getState().resetHistory();
-    } catch (err) {
-      console.error('Failed to load demo:', err);
-    }
-  }, [setSettings, setCommands, setAssets, setTimeline]);
-
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1;
 
@@ -232,45 +171,51 @@ export const TitleBar: React.FC = () => {
 
       {/* File Menu */}
       <div
-        className="flex items-center gap-0.5"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
-        <Tooltip content="New Project" position="bottom">
-          <button
-            onClick={handleNewProject}
-            className="flex items-center gap-1.5 px-2 py-1 rounded-df-sm text-df-xs font-medium bg-df-surface-2 hover:bg-df-surface-3 border border-df-border text-df-text-secondary hover:text-df-text-primary transition-all duration-df-fast active:scale-[0.97]"
-          >
-            <FilePlus size={11} />
-            <span>New</span>
-          </button>
-        </Tooltip>
-        <Tooltip content="Open Project" position="bottom">
-          <button
-            onClick={handleOpenProject}
-            className="flex items-center gap-1.5 px-2 py-1 rounded-df-sm text-df-xs font-medium bg-df-surface-2 hover:bg-df-surface-3 border border-df-border text-df-text-secondary hover:text-df-text-primary transition-all duration-df-fast active:scale-[0.97]"
-          >
-            <FolderOpen size={11} />
-            <span>Open</span>
-          </button>
-        </Tooltip>
-        <Tooltip content="Save Project (Ctrl+S)" position="bottom">
-          <button
-            onClick={handleSave}
-            className="flex items-center gap-1.5 px-2 py-1 rounded-df-sm text-df-xs font-medium bg-df-surface-2 hover:bg-df-surface-3 border border-df-border text-df-text-secondary hover:text-df-text-primary transition-all duration-df-fast active:scale-[0.97]"
-          >
-            <Save size={11} />
-            <span>Save</span>
-          </button>
-        </Tooltip>
-        <Tooltip content="Save As..." position="bottom">
-          <button
-            onClick={handleSaveAs}
-            className="flex items-center gap-1.5 px-2 py-1 rounded-df-sm text-df-xs font-medium bg-df-surface-2 hover:bg-df-surface-3 border border-df-border text-df-text-secondary hover:text-df-text-primary transition-all duration-df-fast active:scale-[0.97]"
-          >
-            <FileText size={11} />
-            <span>Save As</span>
-          </button>
-        </Tooltip>
+        <Dropdown
+          trigger={
+            <button className="flex items-center gap-1.5 px-2.5 py-1 rounded-df-sm text-df-xs font-semibold bg-df-surface-2 hover:bg-df-surface-3 border border-df-border text-df-text-primary transition-all duration-df-fast active:scale-[0.97]">
+              <span>File</span>
+            </button>
+          }
+          content={
+            <div className="py-1">
+              <button
+                onClick={handleNewProject}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-df-xs text-df-text-primary hover:bg-df-surface-3 transition-colors"
+              >
+                <FilePlus size={11} />
+                <span>New</span>
+                <span className="ml-auto text-df-text-dim text-[10px]">Ctrl+N</span>
+              </button>
+              <button
+                onClick={handleOpenProject}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-df-xs text-df-text-primary hover:bg-df-surface-3 transition-colors"
+              >
+                <FolderOpen size={11} />
+                <span>Open</span>
+                <span className="ml-auto text-df-text-dim text-[10px]">Ctrl+O</span>
+              </button>
+              <div className="h-px bg-df-border mx-2 my-1" />
+              <button
+                onClick={handleSave}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-df-xs text-df-text-primary hover:bg-df-surface-3 transition-colors"
+              >
+                <Save size={11} />
+                <span>Save</span>
+                <span className="ml-auto text-df-text-dim text-[10px]">Ctrl+S</span>
+              </button>
+              <button
+                onClick={handleSaveAs}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-df-xs text-df-text-primary hover:bg-df-surface-3 transition-colors"
+              >
+                <FileText size={11} />
+                <span>Save As</span>
+              </button>
+            </div>
+          }
+        />
       </div>
 
       {/* Save Status Indicator */}
@@ -303,27 +248,6 @@ export const TitleBar: React.FC = () => {
         className="flex items-center gap-0.5"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
-        <Tooltip content="Build Timeline (Ctrl+B)" position="bottom">
-          <button
-            onClick={handleBuild}
-            className="flex items-center gap-1.5 px-2 py-1 rounded-df-sm text-df-xs font-medium bg-df-surface-2 hover:bg-df-surface-3 border border-df-border text-df-text-primary transition-all duration-df-fast active:scale-[0.97]"
-          >
-            <Play size={11} />
-            <span>Build</span>
-          </button>
-        </Tooltip>
-        <Tooltip content="Load Demo Project" position="bottom">
-          <button
-            onClick={handleLoadDemo}
-            className="flex items-center gap-1.5 px-2 py-1 rounded-df-sm text-df-xs font-medium bg-df-surface-2 hover:bg-df-surface-3 border border-df-border text-df-text-secondary hover:text-df-text-primary transition-all duration-df-fast active:scale-[0.97]"
-          >
-            <RotateCcw size={11} />
-            <span>Demo</span>
-          </button>
-        </Tooltip>
-
-        <div className="w-px h-4 bg-df-divider mx-1" />
-
         <Tooltip content="Undo (Ctrl+Z)" position="bottom">
           <button
             onClick={undo}
@@ -343,45 +267,49 @@ export const TitleBar: React.FC = () => {
           </button>
         </Tooltip>
 
-        <div className="w-px h-4 bg-df-divider mx-1" />
+        {/* Studio-only panel toggles */}
+        {activeTab === 'studio' && (
+          <>
+            <div className="w-px h-4 bg-df-divider mx-1" />
 
-        {/* Panel toggles */}
-        <Tooltip content="Assets Panel" position="bottom">
-          <button
-            onClick={() => setPanelVisibility('assets', !panelVisibility.assets)}
-            className={`w-[26px] h-[26px] flex items-center justify-center rounded-df-sm transition-all duration-df-fast ${
-              panelVisibility.assets
-                ? 'bg-df-accent-muted text-df-accent'
-                : 'text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-3'
-            }`}
-          >
-            <PanelLeft size={12} />
-          </button>
-        </Tooltip>
-        <Tooltip content="Asset Preview" position="bottom">
-          <button
-            onClick={() => setPanelVisibility('assetPreview', !panelVisibility.assetPreview)}
-            className={`w-[26px] h-[26px] flex items-center justify-center rounded-df-sm transition-all duration-df-fast ${
-              panelVisibility.assetPreview
-                ? 'bg-df-accent-muted text-df-accent'
-                : 'text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-3'
-            }`}
-          >
-            <Image size={12} />
-          </button>
-        </Tooltip>
-        <Tooltip content="Inspector" position="bottom">
-          <button
-            onClick={() => setPanelVisibility('inspector', !panelVisibility.inspector)}
-            className={`w-[26px] h-[26px] flex items-center justify-center rounded-df-sm transition-all duration-df-fast ${
-              panelVisibility.inspector
-                ? 'bg-df-accent-muted text-df-accent'
-                : 'text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-3'
-            }`}
-          >
-            <SlidersHorizontal size={12} />
-          </button>
-        </Tooltip>
+            <Tooltip content="Assets Panel" position="bottom">
+              <button
+                onClick={() => setPanelVisibility('assets', !panelVisibility.assets)}
+                className={`w-[26px] h-[26px] flex items-center justify-center rounded-df-sm transition-all duration-df-fast ${
+                  panelVisibility.assets
+                    ? 'bg-df-accent-muted text-df-accent'
+                    : 'text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-3'
+                }`}
+              >
+                <PanelLeft size={12} />
+              </button>
+            </Tooltip>
+            <Tooltip content="Asset Preview" position="bottom">
+              <button
+                onClick={() => setPanelVisibility('assetPreview', !panelVisibility.assetPreview)}
+                className={`w-[26px] h-[26px] flex items-center justify-center rounded-df-sm transition-all duration-df-fast ${
+                  panelVisibility.assetPreview
+                    ? 'bg-df-accent-muted text-df-accent'
+                    : 'text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-3'
+                }`}
+              >
+                <Image size={12} />
+              </button>
+            </Tooltip>
+            <Tooltip content="Inspector" position="bottom">
+              <button
+                onClick={() => setPanelVisibility('inspector', !panelVisibility.inspector)}
+                className={`w-[26px] h-[26px] flex items-center justify-center rounded-df-sm transition-all duration-df-fast ${
+                  panelVisibility.inspector
+                    ? 'bg-df-accent-muted text-df-accent'
+                    : 'text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-3'
+                }`}
+              >
+                <SlidersHorizontal size={12} />
+              </button>
+            </Tooltip>
+          </>
+        )}
       </div>
 
       {/* Spacer */}
