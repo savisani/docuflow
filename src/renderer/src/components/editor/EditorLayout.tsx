@@ -238,10 +238,13 @@ export const EditorLayout: React.FC = () => {
                 <AssetLibrary />
               </div>
               <div
-                className="w-px bg-df-border hover:bg-df-accent cursor-col-resize shrink-0 transition-colors"
+                className="relative shrink-0 flex items-center justify-center group/resize cursor-col-resize"
+                style={{ width: 12 }}
                 onMouseDown={handleAssetsMouseDown}
                 aria-label="Resize assets panel"
-              />
+              >
+                <div className="w-px h-full bg-df-border group-hover/resize:bg-df-accent transition-colors" />
+              </div>
             </>
           )}
 
@@ -258,10 +261,13 @@ export const EditorLayout: React.FC = () => {
                     <AssetPreview />
                   </div>
                   <div
-                    className="w-px bg-df-border hover:bg-df-accent cursor-col-resize shrink-0 transition-colors"
+                    className="relative shrink-0 flex items-center justify-center group/resize cursor-col-resize"
+                    style={{ width: 12 }}
                     onMouseDown={handleSplitMouseDown}
                     aria-label="Resize preview panels"
-                  />
+                  >
+                    <div className="w-px h-full bg-df-border group-hover/resize:bg-df-accent transition-colors" />
+                  </div>
                   <div
                     ref={previewSplitRightRef}
                     style={{ width: `${100 - workspaceLayout.previewTimelineSplit}%` }}
@@ -286,10 +292,13 @@ export const EditorLayout: React.FC = () => {
           {rightPanelVisible && (
             <>
               <div
-                className="w-px bg-df-border hover:bg-df-accent cursor-col-resize shrink-0 transition-colors"
+                className="relative shrink-0 flex items-center justify-center group/resize cursor-col-resize"
+                style={{ width: 12 }}
                 onMouseDown={handleRightPanelMouseDown}
                 aria-label="Resize right panel"
-              />
+              >
+                <div className="w-px h-full bg-df-border group-hover/resize:bg-df-accent transition-colors" />
+              </div>
               <div
                 ref={rightPanelRef}
                 className="bg-df-surface-1 border-l border-df-border flex flex-col overflow-hidden shrink-0"

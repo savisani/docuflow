@@ -33,6 +33,7 @@ export const AssetLibrary: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'image' | 'video' | 'audio'>('all');
   const [filterRole, setFilterRole] = useState<string>('all');
@@ -47,6 +48,7 @@ export const AssetLibrary: React.FC = () => {
 
     if (validFiles.length === 0) return;
 
+    setIsImporting(true);
     const currentAssets = useDocuFlowStore.getState().assets;
     let existingAssets = [...currentAssets];
 
@@ -72,6 +74,7 @@ export const AssetLibrary: React.FC = () => {
         console.warn(`Failed to process ${file.name}:`, err);
       }
     }
+    setIsImporting(false);
   }, [addAsset]);
 
   const handleImportClick = useCallback(async () => {
@@ -183,16 +186,20 @@ export const AssetLibrary: React.FC = () => {
         className="hidden"
       />
       <div
-        className="p-2 space-y-3 h-full flex flex-col"
+        className={`p-2 space-y-3 h-full flex flex-col transition-all duration-200 ${isDragOver ? 'ring-1 ring-inset ring-df-accent/40 bg-df-accent/[0.03]' : ''}`}
         onDragOver={handlePanelDragOver}
         onDragLeave={handlePanelDragLeave}
         onDrop={handlePanelDrop}
       >
         {/* Import Button */}
-        <Button size="sm" variant="primary" onClick={handleImportClick} className="w-full">
+        <Button size="sm" variant="primary" onClick={handleImportClick} className="w-full" disabled={isImporting}>
           <span className="inline-flex items-center gap-1.5">
-            <Upload size={12} className="shrink-0" />
-            <span>Import Assets</span>
+            {isImporting ? (
+              <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0" />
+            ) : (
+              <Upload size={12} className="shrink-0" />
+            )}
+            <span>{isImporting ? 'Importing...' : 'Import Assets'}</span>
           </span>
         </Button>
 
@@ -262,7 +269,15 @@ export const AssetLibrary: React.FC = () => {
         <Divider className="my-1" />
 
         {/* Asset List */}
-        <div className="flex-1 overflow-y-auto scrollbar-thin space-y-3">
+        <div className="flex-1 overflow-y-auto scrollbar-thin space-y-3 relative">
+          {isDragOver && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-df-surface-1/80 backdrop-blur-[1px] pointer-events-none">
+              <div className="text-center">
+                <Upload size={20} className="mx-auto mb-1.5 text-df-accent animate-bounce" />
+                <p className="text-df-xs font-medium text-df-accent">Release to import</p>
+              </div>
+            </div>
+          )}
           {images.length > 0 && (
             <AssetGroup
               title="Images & Video"
@@ -340,30 +355,9 @@ export const AssetLibrary: React.FC = () => {
             <div className="text-center py-8 px-2">
               <Film size={32} className="mx-auto mb-3 text-slate-600" />
               <p className="text-sm text-df-text-muted mb-1">No assets imported yet</p>
-              <p className="text-df-xs text-df-text-muted">Click Import or drag files here</p>
+              <p className="text-df-xs text-df-text-muted">Click Import to get started</p>
             </div>
           )}
-        </div>
-
-        {/* Dropzone */}
-        <div
-          className={`
-            shrink-0 rounded-df-lg border-2 border-dashed transition-all duration-200 p-3
-            ${isDragOver
-              ? 'border-indigo-500/60 bg-indigo-500/10'
-              : 'border-df-border bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]'}
-          `}
-          onDragOver={handlePanelDragOver}
-          onDragLeave={handlePanelDragLeave}
-          onDrop={handlePanelDrop}
-        >
-          <div className="flex flex-col items-center gap-1.5 text-center">
-            <Upload size={16} className={isDragOver ? 'text-df-accent' : 'text-df-text-muted'} />
-            <p className={`text-df-sm font-medium ${isDragOver ? 'text-df-accent' : 'text-df-text-muted'}`}>
-              {isDragOver ? 'Drop to import' : 'Drag files here to import'}
-            </p>
-            <p className="text-[9px] text-slate-600">Images, video, and audio</p>
-          </div>
         </div>
       </div>
     </Panel>
