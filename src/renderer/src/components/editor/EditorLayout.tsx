@@ -360,7 +360,7 @@ export const EditorLayout: React.FC = () => {
         <div
           ref={timelinePanelRef}
           className="min-h-0 flex flex-col relative bg-df-surface-1 overflow-hidden w-full"
-          style={{ height: workspaceLayout.timelineHeight, flex: 'none' }}
+          style={{ height: Math.max(180, workspaceLayout.timelineHeight || 288), flex: 'none' }}
         >
           <Timeline />
         </div>

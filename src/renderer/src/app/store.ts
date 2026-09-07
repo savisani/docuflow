@@ -88,7 +88,7 @@ function loadWorkspaceLayout(): WorkspaceLayout {
       return {
         assetsWidth: parsed.assetsWidth ?? 224,
         previewTimelineSplit: parsed.previewTimelineSplit ?? 50,
-        timelineHeight: parsed.timelineHeight ?? 288,
+        timelineHeight: parsed.timelineHeight || 288,
       };
     }
   } catch {}
