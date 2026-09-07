@@ -799,7 +799,7 @@ export const Timeline: React.FC = () => {
 
       const cmdDuration = asset.duration && asset.duration > 0 ? Math.min(asset.duration, 30) : 5;
 
-      // Handle overlaps on target layer
+      // Handle overlaps on target layer (only when actually overlapping)
       const newEnd = snapped + cmdDuration;
       const overlappingCmds = state.commands.filter(
         (c) => c.layer === nextZIndex && c.start < newEnd && (c.start + (c.duration ?? 5)) > snapped

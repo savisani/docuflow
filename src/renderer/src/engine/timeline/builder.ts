@@ -85,45 +85,86 @@ export function buildTimeline(
   let textIndex = 0;
   let subtitleIndex = 0;
 
+  // Group show commands by zIndex so multiple sequential clips share one layer/track
+  const showByZIndex = new Map<number, typeof sorted>();
+  for (const cmd of sorted) {
+    if (cmd.type === 'show') {
+      const z = (cmd as any).layer ?? zIndex++;
+      if (!showByZIndex.has(z)) showByZIndex.set(z, []);
+      showByZIndex.get(z)!.push(cmd);
+    }
+  }
+  for (const [z, cmds] of showByZIndex) {
+    const first = cmds[0];
+    const { url, type } = resolveAssetInfo(assets, first.asset);
+    const firstStart = Math.round(first.start * fps);
+    const firstDur = first.duration ? Math.round(first.duration * fps) : 0;
+    const firstEnd = firstDur > 0 ? firstStart + firstDur : firstStart + Math.round(DEFAULT_IMAGE_DURATION_SEC * fps);
+    const layer = makeLayer(first.id, first.asset, url, type, firstStart, firstEnd, z);
+
+    for (let i = 1; i < cmds.length; i++) {
+      const segCmd = cmds[i];
+      const segStart = Math.round(segCmd.start * fps);
+      const segDur = segCmd.duration ? Math.round(segCmd.duration * fps) : 0;
+      const segEnd = segDur > 0 ? segStart + segDur : segStart + Math.round(DEFAULT_IMAGE_DURATION_SEC * fps);
+      const segInfo = resolveAssetInfo(assets, segCmd.asset);
+      layer.assetSegments.push({
+        assetId: segCmd.asset,
+        assetUrl: segInfo.url,
+        assetType: segInfo.type,
+        startFrame: segStart,
+      });
+      if (segEnd > layer.endFrame) layer.endFrame = segEnd;
+      if (type === 'video') {
+        const asset = findAsset(assets, segCmd.asset);
+        if (asset?.duration && !segCmd.duration) {
+          const videoEnd = segStart + Math.round(asset.duration * fps);
+          if (videoEnd > layer.endFrame) layer.endFrame = videoEnd;
+        }
+      }
+    }
+
+    if (type === 'video') {
+      const asset = findAsset(assets, first.asset);
+      if (asset?.duration && !first.duration) {
+        layer.endFrame = firstStart + Math.round(asset.duration * fps);
+      }
+    }
+    for (let i = 1; i < cmds.length; i++) {
+      const segCmd = cmds[i];
+      if (type === 'video') {
+        const asset = findAsset(assets, segCmd.asset);
+        if (asset?.duration && !segCmd.duration) {
+          const segStart = Math.round(segCmd.start * fps);
+          const videoEnd = segStart + Math.round(asset.duration * fps);
+          if (videoEnd > layer.endFrame) layer.endFrame = videoEnd;
+        }
+      }
+    }
+
+    layers[first.id] = layer;
+    const cmdAny = first as any;
+    if (typeof cmdAny.x === 'number') layer.x = cmdAny.x;
+    if (typeof cmdAny.y === 'number') layer.y = cmdAny.y;
+    if (typeof cmdAny.scale === 'number') layer.scale = cmdAny.scale;
+    if (typeof cmdAny.rotationZ === 'number') layer.rotationZ = cmdAny.rotationZ;
+    if (typeof cmdAny.rotationX === 'number') layer.rotationX = cmdAny.rotationX;
+    if (typeof cmdAny.rotationY === 'number') layer.rotationY = cmdAny.rotationY;
+    if (typeof cmdAny.opacity === 'number') layer.opacity = cmdAny.opacity;
+    if (typeof cmdAny.blur === 'number') layer.blur = cmdAny.blur;
+    if (typeof cmdAny.z === 'number') layer.z = cmdAny.z;
+    if (typeof cmdAny.flipH === 'boolean') layer.flipH = cmdAny.flipH;
+    if (typeof cmdAny.flipV === 'boolean') layer.flipV = cmdAny.flipV;
+    if (layer.endFrame > maxFrame) maxFrame = layer.endFrame;
+  }
+
   for (const cmd of sorted) {
     const startFrame = Math.round(cmd.start * fps);
     const durationFrames = cmd.duration ? Math.round(cmd.duration * fps) : 0;
 
     switch (cmd.type) {
       case 'show': {
-        const { url, type } = resolveAssetInfo(assets, cmd.asset);
-        const defaultEnd = startFrame + Math.round(DEFAULT_IMAGE_DURATION_SEC * fps);
-        const layerZIndex = cmd.layer ?? zIndex;
-        zIndex++;
-        const layer = makeLayer(
-          cmd.id,
-          cmd.asset,
-          url,
-          type,
-          startFrame,
-          durationFrames > 0 ? startFrame + durationFrames : defaultEnd,
-          layerZIndex
-        );
-        if (type === 'video') {
-          const asset = findAsset(assets, cmd.asset);
-          if (asset?.duration && !cmd.duration) {
-            layer.endFrame = startFrame + Math.round(asset.duration * fps);
-          }
-        }
-        layers[cmd.id] = layer;
-        const cmdAny = cmd as any;
-        if (typeof cmdAny.x === 'number') layer.x = cmdAny.x;
-        if (typeof cmdAny.y === 'number') layer.y = cmdAny.y;
-        if (typeof cmdAny.scale === 'number') layer.scale = cmdAny.scale;
-        if (typeof cmdAny.rotationZ === 'number') layer.rotationZ = cmdAny.rotationZ;
-        if (typeof cmdAny.rotationX === 'number') layer.rotationX = cmdAny.rotationX;
-        if (typeof cmdAny.rotationY === 'number') layer.rotationY = cmdAny.rotationY;
-        if (typeof cmdAny.opacity === 'number') layer.opacity = cmdAny.opacity;
-        if (typeof cmdAny.blur === 'number') layer.blur = cmdAny.blur;
-        if (typeof cmdAny.z === 'number') layer.z = cmdAny.z;
-        if (typeof cmdAny.flipH === 'boolean') layer.flipH = cmdAny.flipH;
-        if (typeof cmdAny.flipV === 'boolean') layer.flipV = cmdAny.flipV;
-        if (layer.endFrame > maxFrame) maxFrame = layer.endFrame;
+        // Already handled above via zIndex grouping
         break;
       }
 
