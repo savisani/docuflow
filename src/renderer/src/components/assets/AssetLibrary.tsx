@@ -55,6 +55,17 @@ export const AssetLibrary: React.FC = () => {
     for (const file of validFiles) {
       try {
         const filePath = (file as any).path as string | undefined;
+
+        // Deduplication: skip if asset with same normalized filePath already exists
+        if (filePath) {
+          const normalizedIncoming = filePath.replace(/\\/g, '/').toLowerCase();
+          const duplicate = existingAssets.find((a) => {
+            if (!a.filePath) return false;
+            return a.filePath.replace(/\\/g, '/').toLowerCase() === normalizedIncoming;
+          });
+          if (duplicate) continue;
+        }
+
         const metadata = await loadAssetMetadata(file, existingAssets, filePath);
         const asset: Asset = {
           id: uuidv4(),
@@ -90,6 +101,15 @@ export const AssetLibrary: React.FC = () => {
     const newAssets = await importNativeAssets(projectName, currentAssets);
 
     for (const asset of newAssets) {
+      // Deduplication: skip if asset with same normalized filePath already exists
+      if (asset.filePath) {
+        const normalizedIncoming = asset.filePath.replace(/\\/g, '/').toLowerCase();
+        const duplicate = currentAssets.find((a) => {
+          if (!a.filePath) return false;
+          return a.filePath.replace(/\\/g, '/').toLowerCase() === normalizedIncoming;
+        });
+        if (duplicate) continue;
+      }
       addAsset(asset);
     }
   }, [addAsset]);

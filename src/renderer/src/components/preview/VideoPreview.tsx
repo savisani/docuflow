@@ -203,7 +203,14 @@ export const VideoPreview: React.FC = () => {
     const onFrame = (e: any) => {
       const frame = e.detail?.frame ?? e.detail;
       if (typeof frame === 'number') {
-        setCurrentTime(frame / settings.fps);
+        const time = frame / settings.fps;
+        // Lightweight: dispatch event for Timeline to update playhead DOM directly
+        // Avoids calling setCurrentTime which triggers expensive Timeline re-renders
+        window.dispatchEvent(new CustomEvent('docuflow:playback-frame', { detail: { time, frame } }));
+        // Sync to store at reduced frequency (every 10 frames ≈ 3x/sec at 30fps)
+        if (frame % 10 === 0) {
+          setCurrentTime(time);
+        }
       }
     };
 
@@ -211,7 +218,14 @@ export const VideoPreview: React.FC = () => {
     const onPause = () => setPlaying(false);
     const onEnded = () => {
       setPlaying(false);
-      setCurrentTime(0);
+      // Sync final time to store
+      const player = playerRef.current;
+      if (player) {
+        const frame = player.getCurrentFrame();
+        setCurrentTime(frame / settings.fps);
+      } else {
+        setCurrentTime(0);
+      }
     };
 
     player.addEventListener('frameupdate', onFrame);

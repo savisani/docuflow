@@ -4,7 +4,7 @@ import { buildTimeline } from '../../engine/timeline/builder';
 import { formatTime } from '../../utils/format';
 import { Play, Pause, Eye, EyeOff, Volume2, Type, Film, Magnet, Undo2, Redo2, Copy, Maximize2, ZoomIn, ZoomOut, Scissors, Trash2, Clipboard, ClipboardCopy, ClipboardX } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
-import { Panel, IconButton, Tooltip, Divider, Badge, LabelValue } from '../ui';
+import { Panel, IconButton, Tooltip, Divider, Badge } from '../ui';
 import { TimelineClip } from './TimelineClip';
 
 const PIXELS_PER_SECOND = 80;
@@ -134,7 +134,7 @@ export const Timeline: React.FC = () => {
     const fromTimeline = effectiveTimeline
       ? effectiveTimeline.totalFrames / settings.fps
       : 0;
-    return Math.max(fromTimeline, maxEndTime, voiceoverDuration, 10);
+    return Math.max(fromTimeline, maxEndTime, voiceoverDuration);
   }, [effectiveTimeline, maxEndTime, voiceoverDuration, settings.fps]);
 
   const maxFrames = useMemo(() => {
@@ -143,6 +143,8 @@ export const Timeline: React.FC = () => {
   }, [maxEndTime, fps, commands.length]);
 
   const hardStopRef = useRef(false);
+  const playheadRef = useRef<HTMLDivElement>(null);
+  const playbackTimeRef = useRef(0);
 
   const scrollInnerWidth = useMemo(() => {
     const durationPixels = maxEndTime * PIXELS_PER_SECOND * zoom;
@@ -440,20 +442,55 @@ export const Timeline: React.FC = () => {
     }
   }, [currentTime, playing, zoom]);
 
+  // Lightweight playhead update during playback: update DOM directly, avoid store updates
+  useEffect(() => {
+    const onPlaybackFrame = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail || typeof detail.time !== 'number') return;
+      playbackTimeRef.current = detail.time;
+      // Update playhead DOM directly (no React re-render)
+      if (playheadRef.current) {
+        const x = detail.time * PIXELS_PER_SECOND * zoom;
+        playheadRef.current.style.left = `${x}px`;
+      }
+      // Update time display via DOM (avoid store update)
+      const timeEl = document.querySelector('[data-timeline-time]');
+      if (timeEl) timeEl.textContent = formatTime(detail.time);
+      // Scroll into view if playhead goes offscreen
+      const container = scrollContainerRef.current;
+      if (container) {
+        const playheadX = LABEL_WIDTH + detail.time * PIXELS_PER_SECOND * zoom;
+        const scrollLeft = container.scrollLeft;
+        const containerWidth = container.clientWidth;
+        if (playheadX < scrollLeft + 100 || playheadX > scrollLeft + containerWidth - 100) {
+          const target = Math.max(0, playheadX - containerWidth / 2);
+          container.scrollTo({ left: target, behavior: 'smooth' });
+        }
+      }
+    };
+    window.addEventListener('docuflow:playback-frame', onPlaybackFrame);
+    return () => window.removeEventListener('docuflow:playback-frame', onPlaybackFrame);
+  }, [zoom]);
+
   useEffect(() => {
     if (!playing) {
       hardStopRef.current = false;
       return;
     }
     if (hardStopRef.current) return;
+    if (commands.length === 0) return;
+
+    const effectiveEnd = Math.max(maxEndTime, voiceoverDuration);
+    if (effectiveEnd <= 0) return;
 
     const currentFrame = Math.round(currentTime * fps);
-    if (currentFrame >= maxFrames) {
+    const endFrame = Math.ceil(effectiveEnd * fps);
+    if (currentFrame >= endFrame) {
       hardStopRef.current = true;
-      setCurrentTime(maxEndTime);
+      setCurrentTime(effectiveEnd);
       window.dispatchEvent(new CustomEvent('docuflow:toggle-play'));
     }
-  }, [currentTime, playing, fps, maxFrames, maxEndTime, setCurrentTime]);
+  }, [currentTime, playing, fps, commands.length, maxEndTime, voiceoverDuration, setCurrentTime]);
 
   const handleWheel = useCallback(
     (e: React.WheelEvent<HTMLDivElement>) => {
@@ -699,15 +736,40 @@ export const Timeline: React.FC = () => {
     return Math.max(0, x / (PIXELS_PER_SECOND * zoom));
   }, [zoom]);
 
-  const handleDragOver = useCallback((e: React.DragEvent, trackId?: string) => {
+  const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
     const time = getDropTimeFromEvent(e);
     setDropTime(time);
-    if (trackId) setDragOverTrackId(trackId);
-  }, [getDropTimeFromEvent]);
 
-  const handleDragLeave = useCallback(() => {
+    // Determine target track from Y position
+    const trackRowsEl = (e.currentTarget as HTMLElement).querySelector('[data-track-rows]') as HTMLElement;
+    if (trackRowsEl) {
+      const rect = trackRowsEl.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const trackIdx = Math.floor(y / TRACK_HEIGHT);
+      let currentIdx = 0;
+      let foundTrackId: string | null = null;
+      for (const group of trackGroups) {
+        if (trackIdx <= currentIdx) break;
+        currentIdx++;
+        if (trackIdx <= currentIdx + group.tracks.length - 1) {
+          const localIdx = trackIdx - currentIdx;
+          if (group.tracks[localIdx]) {
+            foundTrackId = group.tracks[localIdx].id;
+          }
+          break;
+        }
+        currentIdx += group.tracks.length;
+      }
+      setDragOverTrackId(foundTrackId);
+    }
+  }, [getDropTimeFromEvent, trackGroups]);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    // Only clear if actually leaving the scroll container (not entering a child)
+    const related = e.relatedTarget as HTMLElement;
+    if (related && e.currentTarget.contains(related)) return;
     setDropTime(null);
     setDragOverTrackId(null);
   }, []);
@@ -963,7 +1025,10 @@ export const Timeline: React.FC = () => {
             {playing ? <Pause size={13} /> : <Play size={13} />}
           </IconButton>
         </Tooltip>
-        <LabelValue label="Time" value={formatTime(currentTime)} labelWidth="36px" />
+        <div className="flex items-center gap-2">
+          <label className="text-df-xs text-df-text-muted shrink-0" style={{ width: '36px' }}>Time</label>
+          <span data-timeline-time className="flex-1 text-df-xs text-df-text-primary font-mono">{formatTime(currentTime)}</span>
+        </div>
         <Divider vertical className="h-4 mx-0.5" />
         <Tooltip content={snapEnabled ? 'Snap ON (S)' : 'Snap OFF (S)'}>
           <IconButton size="sm" variant={snapEnabled ? 'primary' : 'ghost'} aria-label={snapEnabled ? 'Disable Snap' : 'Enable Snap'} onClick={() => setSnapEnabled(!snapEnabled)}>
@@ -1017,6 +1082,9 @@ export const Timeline: React.FC = () => {
         onClick={handleTimelineBodyClick}
         onWheel={handleWheel}
         onScroll={handleScroll}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         onMouseDown={(e) => {
           // Start marquee if clicking on empty space (not on a clip or playhead)
           if (e.target === e.currentTarget || (e.target as HTMLElement).closest('.track-row')?.querySelector('.clip-item') === null) {
@@ -1158,21 +1226,14 @@ export const Timeline: React.FC = () => {
             </div>
 
             {/* Track rows */}
-            <div className="relative">
+            <div className="relative" data-track-rows>
               {trackGroups.map((group, groupIdx) => (
                 <React.Fragment key={group.id}>
                   {/* Group header body */}
                   <div
                     className="border-b border-df-divider bg-df-surface-1/40"
                     style={{ height: TRACK_HEIGHT }}
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                  >
-                    {dropTime !== null && (
-                      <div className="absolute top-0 bottom-0 w-0.5 bg-df-accent pointer-events-none z-10" style={{ left: dropTime * PIXELS_PER_SECOND * zoom }} />
-                    )}
-                  </div>
+                  />
 
                   {/* Track bodies with clips */}
                   {group.tracks.map((track, trackIdx) => (
@@ -1183,9 +1244,6 @@ export const Timeline: React.FC = () => {
                         height: TRACK_HEIGHT,
                         backgroundColor: dragOverTrackId === track.id ? undefined : (groupIdx % 2 === 0 ? 'rgba(17, 17, 17, 0.2)' : 'rgba(24, 24, 24, 0.2)'),
                       }}
-                      onDragOver={(e) => handleDragOver(e, track.id)}
-                      onDragLeave={handleDragLeave}
-                      onDrop={handleDrop}
                     >
                       {track.clips.map((clip) => {
                         const clipAsset = assets.find((a) => a.logicalId === clip.label || a.id === clip.label);
@@ -1217,6 +1275,11 @@ export const Timeline: React.FC = () => {
               ))}
             </div>
 
+            {/* Drop indicator - full height of right content area */}
+            {dropTime !== null && (
+              <div className="absolute top-0 bottom-0 w-0.5 bg-df-accent pointer-events-none z-20" style={{ left: dropTime * PIXELS_PER_SECOND * zoom }} />
+            )}
+
             {/* Marquee selection overlay */}
             {marqueeActive && marqueeRef.current && (
               <div
@@ -1233,6 +1296,7 @@ export const Timeline: React.FC = () => {
 
             {/* Playhead */}
             <div
+              ref={playheadRef}
               className={`absolute top-0 bottom-0 w-0.5 bg-df-error z-30 ${isDraggingPlayhead ? 'shadow-[0_0_12px_rgba(239,83,80,0.8)]' : 'shadow-[0_0_8px_rgba(239,83,80,0.6)] pointer-events-auto cursor-ew-resize'}`}
               style={{ left: playheadX }}
               onMouseDown={handlePlayheadMouseDown}

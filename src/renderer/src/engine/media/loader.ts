@@ -128,6 +128,14 @@ export async function importNativeAssets(
   const assets: Asset[] = [];
 
   for (const filePath of filePaths) {
+    // Deduplication: skip if asset with same normalized filePath already exists
+    const normalizedIncoming = filePath.replace(/\\/g, '/').toLowerCase();
+    const duplicate = existingAssets.find((a) => {
+      if (!a.filePath) return false;
+      return a.filePath.replace(/\\/g, '/').toLowerCase() === normalizedIncoming;
+    });
+    if (duplicate) continue;
+
     const assetType = assetTypeFromPath(filePath);
     const mimeType = mimeTypeFromPath(filePath);
     const filename = filePath.split(/[/\\]/).pop() || filePath;
