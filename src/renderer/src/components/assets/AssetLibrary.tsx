@@ -190,8 +190,10 @@ export const AssetLibrary: React.FC = () => {
       >
         {/* Import Button */}
         <Button size="sm" variant="primary" onClick={handleImportClick} className="w-full">
-          <Upload size={12} />
-          <span>Import Assets</span>
+          <span className="inline-flex items-center gap-1.5">
+            <Upload size={12} className="shrink-0" />
+            <span>Import Assets</span>
+          </span>
         </Button>
 
         {/* Search + Filter */}

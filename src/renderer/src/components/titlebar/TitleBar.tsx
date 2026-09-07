@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Minus, Square, X, Maximize2, Undo2, Redo2, PanelLeft, Image, SlidersHorizontal, Sparkles, Film, Clapperboard, Cpu, Zap, FileText, FolderOpen, Save, FilePlus } from 'lucide-react';
+import { Minus, Square, X, Maximize2, Undo2, Redo2, PanelLeft, Image, SlidersHorizontal, Sparkles, Film, Clapperboard, FileText, FolderOpen, Save, FilePlus } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
-import { fetchOllamaPs } from '../../services/aiService';
 import { Tooltip, Dropdown } from '../ui';
-import { listLocalModels } from '../../services/localImageProvider';
 
 const TABS = [
   { id: 'studio' as const, label: 'Studio', icon: Film },
@@ -14,81 +12,19 @@ const TABS = [
 export const TitleBar: React.FC = () => {
   const [isMaximized, setIsMaximized] = useState(false);
   const {
-    settings, historyIndex, history,
+    historyIndex, history,
     panelVisibility, setPanelVisibility,
     undo, redo,
     activeTab, setActiveTab,
-    ollamaModelStatus, ollamaModelName, setOllamaModelStatus,
-    gpuStatus, setGpuStatus,
-    localModelCount, setLocalModelInfo,
-    loadedModelName, modelLoadState, setLoadedModel,
     saveStatus, projectPath,
     newProject, openProjectFromDialog, saveProject, saveAsProject,
   } = useDocuFlowStore();
-
-  const [gpuPolling, setGpuPolling] = useState(false);
 
   useEffect(() => {
     window.docuflow?.isMaximized()?.then(setIsMaximized);
     const unsubscribe = window.docuflow?.onMaximizedChange(setIsMaximized);
     return () => { unsubscribe?.(); };
   }, []);
-
-  // Poll GPU status
-  useEffect(() => {
-    let cancelled = false;
-    const pollGpu = async () => {
-      if (gpuPolling) return;
-      setGpuPolling(true);
-      try {
-        const status = await window.docuflow.getGpuStatus();
-        if (!cancelled) setGpuStatus(status);
-      } catch {
-        if (!cancelled) setGpuStatus(null);
-      } finally {
-        if (!cancelled) setGpuPolling(false);
-      }
-    };
-    pollGpu();
-    const interval = setInterval(pollGpu, 10000); // Poll every 10s
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [setGpuStatus]);
-
-  // Load local model info
-  useEffect(() => {
-    let cancelled = false;
-    const loadModels = async () => {
-      try {
-        const models = await listLocalModels();
-        if (!cancelled) {
-          setLocalModelInfo(models.length, models.map(m => m.name));
-        }
-      } catch {}
-    };
-    loadModels();
-    const interval = setInterval(loadModels, 30000); // Refresh every 30s
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [setLocalModelInfo]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const ps = await fetchOllamaPs();
-        if (cancelled) return;
-        if (ps.models.length > 0) {
-          setOllamaModelStatus('loaded', ps.models[0].name);
-        } else {
-          setOllamaModelStatus('unknown');
-        }
-      } catch {
-        if (!cancelled) setOllamaModelStatus('error');
-      }
-    };
-    poll();
-    const interval = setInterval(poll, 5000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [setOllamaModelStatus]);
 
   const handleMinimize = useCallback(() => { window.docuflow?.minimize(); }, []);
   const handleMaximize = useCallback(() => { window.docuflow?.maximize(); }, []);
@@ -109,22 +45,6 @@ export const TitleBar: React.FC = () => {
   const handleSaveAs = useCallback(async () => {
     await saveAsProject();
   }, [saveAsProject]);
-
-  const handleOffload = useCallback(async () => {
-    try {
-      setLoadedModel(null, 'unloading');
-      // Cancel any running generation
-      await window.docuflow.cancelLocalGeneration();
-      // Force GPU status refresh after a delay
-      setTimeout(async () => {
-        try {
-          const status = await window.docuflow.getGpuStatus();
-          setGpuStatus(status);
-          setLoadedModel(null, 'unloaded');
-        } catch {}
-      }, 2000);
-    } catch {}
-  }, [setGpuStatus, setLoadedModel]);
 
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1;
@@ -315,130 +235,32 @@ export const TitleBar: React.FC = () => {
       {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Right: Status + Window Controls */}
-      <div className="flex items-center gap-2 shrink-0">
-        <div
-          className="flex items-center gap-1.5 text-df-xs text-df-text-muted font-mono mr-1"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      {/* Right: Window Controls Only */}
+      <div
+        className="flex items-center h-full shrink-0"
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      >
+        <button
+          onClick={handleMinimize}
+          className="h-full w-[36px] flex items-center justify-center text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-2 transition-colors"
+          aria-label="Minimize"
         >
-          <span>{settings.width}x{settings.height}</span>
-          <span className="text-df-text-dim">@</span>
-          <span>{settings.fps}fps</span>
-        </div>
-
-        {/* GPU Status */}
-        <div
-          className="flex items-center gap-1.5 px-2 py-0.5 rounded-df-sm text-df-xs font-mono"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-          title={
-            gpuStatus
-              ? `GPU: ${gpuStatus.device_name}\nVRAM: ${gpuStatus.allocated_vram_gb?.toFixed(1) || 0} / ${gpuStatus.total_vram_gb?.toFixed(1) || 0} GB\nFree: ${gpuStatus.free_vram_gb?.toFixed(1) || 0} GB\nLocal models: ${localModelCount}${loadedModelName ? `\nLoaded: ${loadedModelName} (${modelLoadState})` : ''}`
-              : 'GPU status unavailable'
-          }
+          <Minus size={13} strokeWidth={1.5} />
+        </button>
+        <button
+          onClick={handleMaximize}
+          className="h-full w-[36px] flex items-center justify-center text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-2 transition-colors"
+          aria-label={isMaximized ? 'Restore' : 'Maximize'}
         >
-          <Cpu size={10} className={gpuStatus?.cuda ? 'text-df-success' : 'text-df-text-dim'} />
-          <span className="text-df-text-muted">
-            {gpuStatus?.cuda
-              ? `${gpuStatus.allocated_vram_gb?.toFixed(1) || '?'} / ${gpuStatus.total_vram_gb?.toFixed(1) || '?'} GB`
-              : 'No GPU'}
-          </span>
-          {localModelCount > 0 && (
-            <>
-              <span className="text-df-text-dim">|</span>
-              <span className="text-df-text-muted">{localModelCount} model{localModelCount !== 1 ? 's' : ''}</span>
-            </>
-          )}
-          {loadedModelName && (
-            <>
-              <span className="text-df-text-dim">|</span>
-              <span className={`text-df-xs ${
-                modelLoadState === 'generating' ? 'text-df-accent animate-pulse' :
-                modelLoadState === 'loading' ? 'text-df-warning animate-pulse' :
-                modelLoadState === 'loaded' ? 'text-df-success' :
-                'text-df-text-muted'
-              }`}>
-                {modelLoadState === 'generating' ? '⚡' : modelLoadState === 'loading' ? '⏳' : modelLoadState === 'loaded' ? '●' : '○'}
-                {' '}{loadedModelName}
-              </span>
-            </>
-          )}
-        </div>
-
-        {/* Offload Button */}
-        <Tooltip content={loadedModelName ? `Offload ${loadedModelName} from GPU` : "Offload AI models from GPU"} position="bottom">
-          <button
-            onClick={handleOffload}
-            disabled={!gpuStatus?.cuda || (!loadedModelName && (gpuStatus?.allocated_vram_gb || 0) < 0.1)}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded-df-sm text-df-xs font-medium bg-df-surface-2 hover:bg-df-surface-3 border border-df-border text-df-text-secondary hover:text-df-text-primary transition-all duration-df-fast disabled:opacity-30 disabled:cursor-not-allowed"
-            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-          >
-            <Zap size={9} />
-            <span>Offload</span>
-          </button>
-        </Tooltip>
-
-        {/* Model status */}
-        <div
-          className="flex items-center gap-1.5 px-2 py-0.5 rounded-df-sm text-df-xs font-mono"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-          title={
-            ollamaModelStatus === 'loaded'
-              ? `Model loaded: ${ollamaModelName}`
-              : ollamaModelStatus === 'loading'
-                ? 'Model loading...'
-                : ollamaModelStatus === 'error'
-                  ? 'Ollama connection error'
-                  : 'No model loaded'
-          }
+          {isMaximized ? <Square size={10} strokeWidth={1.5} /> : <Maximize2 size={11} strokeWidth={1.5} />}
+        </button>
+        <button
+          onClick={handleClose}
+          className="h-full w-[36px] flex items-center justify-center text-df-text-muted hover:text-white hover:bg-df-error transition-colors"
+          aria-label="Close"
         >
-          <span
-            className={`w-1.5 h-1.5 rounded-full ${
-              ollamaModelStatus === 'loaded'
-                ? 'bg-df-success'
-                : ollamaModelStatus === 'loading'
-                  ? 'bg-df-warning animate-pulse'
-                  : ollamaModelStatus === 'error'
-                    ? 'bg-df-error'
-                    : 'bg-df-text-dim'
-            }`}
-          />
-          <span className="text-df-text-muted">
-            {ollamaModelStatus === 'loaded'
-              ? ollamaModelName || 'Loaded'
-              : ollamaModelStatus === 'loading'
-                ? 'Loading'
-                : ollamaModelStatus === 'error'
-                  ? 'Error'
-                  : 'No model'}
-          </span>
-        </div>
-
-        <div
-          className="flex items-center h-full"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        >
-          <button
-            onClick={handleMinimize}
-            className="h-full w-[36px] flex items-center justify-center text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-2 transition-colors"
-            aria-label="Minimize"
-          >
-            <Minus size={13} strokeWidth={1.5} />
-          </button>
-          <button
-            onClick={handleMaximize}
-            className="h-full w-[36px] flex items-center justify-center text-df-text-muted hover:text-df-text-primary hover:bg-df-surface-2 transition-colors"
-            aria-label={isMaximized ? 'Restore' : 'Maximize'}
-          >
-            {isMaximized ? <Square size={10} strokeWidth={1.5} /> : <Maximize2 size={11} strokeWidth={1.5} />}
-          </button>
-          <button
-            onClick={handleClose}
-            className="h-full w-[36px] flex items-center justify-center text-df-text-muted hover:text-white hover:bg-df-error transition-colors"
-            aria-label="Close"
-          >
-            <X size={13} strokeWidth={1.5} />
-          </button>
-        </div>
+          <X size={13} strokeWidth={1.5} />
+        </button>
       </div>
     </div>
   );
