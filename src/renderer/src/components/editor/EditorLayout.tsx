@@ -222,14 +222,14 @@ export const EditorLayout: React.FC = () => {
           )}
 
           {(panelVisibility.assetPreview || panelVisibility.timelinePreview) && (
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-              <div className="flex flex-row overflow-hidden" style={{ flex: '1 1 auto', minHeight: 0 }}>
+            <div className="h-[300px] flex-shrink-0 flex flex-col overflow-hidden">
+              <div className="flex flex-row overflow-hidden h-full" style={{ minHeight: 0 }}>
                 {panelVisibility.assetPreview && panelVisibility.timelinePreview ? (
                   <>
                     <div
                       ref={previewSplitLeftRef}
                       style={{ width: `${workspaceLayout.previewTimelineSplit}%` }}
-                      className="overflow-hidden min-w-0 flex flex-col"
+                      className="overflow-hidden min-w-0 flex flex-col h-full"
                     >
                       <AssetPreview />
                     </div>
@@ -241,17 +241,17 @@ export const EditorLayout: React.FC = () => {
                     <div
                       ref={previewSplitRightRef}
                       style={{ width: `${100 - workspaceLayout.previewTimelineSplit}%` }}
-                      className="overflow-hidden min-w-0 flex flex-col"
+                      className="overflow-hidden min-w-0 flex flex-col h-full"
                     >
                       <VideoPreview />
                     </div>
                   </>
                 ) : panelVisibility.assetPreview ? (
-                  <div className="flex-1 overflow-hidden flex flex-col">
+                  <div className="flex-1 overflow-hidden flex flex-col h-full">
                     <AssetPreview />
                   </div>
                 ) : (
-                  <div className="flex-1 overflow-hidden flex flex-col">
+                  <div className="flex-1 overflow-hidden flex flex-col h-full">
                     <VideoPreview />
                   </div>
                 )}
@@ -270,8 +270,7 @@ export const EditorLayout: React.FC = () => {
               </div>
               <div
                 ref={timelinePanelRef}
-                className="shrink-0 flex flex-col relative bg-df-surface-1 overflow-hidden"
-                style={{ height: workspaceLayout.timelineHeight }}
+                className="flex-1 min-h-0 flex flex-col relative bg-df-surface-1 overflow-hidden"
               >
                 <Timeline />
               </div>
