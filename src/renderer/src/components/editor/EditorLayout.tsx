@@ -57,8 +57,9 @@ export const EditorLayout: React.FC = () => {
   const previewSplitRightRef = useRef<HTMLDivElement>(null);
   const upperRowRef = useRef<HTMLDivElement>(null);
 
-  // Initial timeline height from store (read once, used to seed drag start)
-  const initialTimelineHeightRef = useRef(workspaceLayout.timelineHeight);
+  // Initial pointer Y and timeline height captured on mousedown for delta-based resize
+  const initialPointerYRef = useRef(0);
+  const initialTimelineHeightForDragRef = useRef(workspaceLayout.timelineHeight);
 
   // Visual-only overrides during drag (no React re-renders)
   const visualOverridesRef = useRef<{
@@ -77,14 +78,9 @@ export const EditorLayout: React.FC = () => {
       rightPanelRef.current.style.width = `${v.rightPanelWidth}px`;
     }
     if (timelinePanelRef.current) {
-      if (timelineDragRef.current) {
-        // During drag: lock to explicit height, disable flex-1
-        timelinePanelRef.current.style.height = `${v.timelineHeight ?? initialTimelineHeightRef.current}px`;
+      if (timelineDragRef.current && v.timelineHeight !== undefined) {
+        timelinePanelRef.current.style.height = `${v.timelineHeight}px`;
         timelinePanelRef.current.style.flex = 'none';
-      } else {
-        // Idle: restore flex-1 (CSS class will be applied on next render)
-        timelinePanelRef.current.style.height = '';
-        timelinePanelRef.current.style.flex = '';
       }
     }
     if (previewSplitLeftRef.current && v.previewSplit !== undefined) {
@@ -125,13 +121,13 @@ export const EditorLayout: React.FC = () => {
         }
       }
       if (timelineDragRef.current) {
-        const upperEl = upperRowRef.current;
         const timelineEl = timelinePanelRef.current;
         if (!timelineEl) return;
-        const topOfTimeline = upperEl ? upperEl.getBoundingClientRect().bottom : 0;
-        const bottomOfContainer = timelineEl.parentElement?.getBoundingClientRect().bottom ?? window.innerHeight;
-        const newHeight = bottomOfContainer - e.clientY;
-        const clamped = Math.max(180, Math.min(newHeight, bottomOfContainer - topOfTimeline - 4));
+        const deltaY = e.clientY - initialPointerYRef.current;
+        const newHeight = initialTimelineHeightForDragRef.current - deltaY;
+        const parentEl = timelineEl.parentElement;
+        const maxHeight = parentEl ? Math.floor(parentEl.getBoundingClientRect().height * 0.7) : window.innerHeight * 0.7;
+        const clamped = Math.max(180, Math.min(maxHeight, newHeight));
         visualOverridesRef.current.timelineHeight = clamped;
         timelineEl.style.height = `${clamped}px`;
         timelineEl.style.flex = 'none';
@@ -201,9 +197,11 @@ export const EditorLayout: React.FC = () => {
   const handleTimelineMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     timelineDragRef.current = true;
+    initialPointerYRef.current = e.clientY;
     const el = timelinePanelRef.current;
     if (el) {
       const currentHeight = el.getBoundingClientRect().height;
+      initialTimelineHeightForDragRef.current = currentHeight;
       visualOverridesRef.current.timelineHeight = currentHeight;
       el.style.height = `${currentHeight}px`;
       el.style.flex = 'none';
@@ -219,7 +217,7 @@ export const EditorLayout: React.FC = () => {
 
       {/* ── UPPER WORKSPACE: Assets | Preview | Inspector ── */}
       {hasUpperContent && (
-        <div ref={upperRowRef} className="w-full flex flex-row shrink-0 overflow-hidden" style={{ flex: '0 1 auto' }}>
+        <div ref={upperRowRef} className="w-full flex flex-row min-h-0 overflow-hidden" style={{ flex: '1 1 0%' }}>
 
           {/* Assets Panel */}
           {panelVisibility.assets && (
@@ -361,7 +359,8 @@ export const EditorLayout: React.FC = () => {
       {panelVisibility.timeline && (
         <div
           ref={timelinePanelRef}
-          className="flex-1 min-h-0 flex flex-col relative bg-df-surface-1 overflow-hidden w-full"
+          className="min-h-0 flex flex-col relative bg-df-surface-1 overflow-hidden w-full"
+          style={{ height: workspaceLayout.timelineHeight, flex: 'none' }}
         >
           <Timeline />
         </div>

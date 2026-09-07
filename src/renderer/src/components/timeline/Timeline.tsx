@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react'
 import { useDocuFlowStore } from '../../app/store';
 import { buildTimeline } from '../../engine/timeline/builder';
 import { formatTime } from '../../utils/format';
-import { Play, Pause, Eye, EyeOff, Volume2, Type, Film, Magnet, Undo2, Redo2, Copy, Minimize2, Maximize2, ZoomIn, ZoomOut, Scissors, Trash2, Clipboard, ClipboardCopy, ClipboardX } from 'lucide-react';
+import { Play, Pause, Eye, EyeOff, Volume2, Type, Film, Magnet, Undo2, Redo2, Copy, Maximize2, ZoomIn, ZoomOut, Scissors, Trash2, Clipboard, ClipboardCopy, ClipboardX } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { Panel, IconButton, Tooltip, Divider, Badge, LabelValue } from '../ui';
 import { TimelineClip } from './TimelineClip';
@@ -1006,12 +1006,6 @@ export const Timeline: React.FC = () => {
         <Tooltip content="Reset Zoom (Ctrl+0)">
           <IconButton size="sm" variant="ghost" aria-label="Reset Zoom" onClick={() => setZoom(1)}>
             <Maximize2 size={13} />
-          </IconButton>
-        </Tooltip>
-        <div className="flex-1" />
-        <Tooltip content="Minimize Timeline">
-          <IconButton size="sm" variant="ghost" aria-label="Minimize Timeline" onClick={() => useDocuFlowStore.getState().setPanelVisibility('timeline', false)}>
-            <Minimize2 size={13} />
           </IconButton>
         </Tooltip>
       </div>
