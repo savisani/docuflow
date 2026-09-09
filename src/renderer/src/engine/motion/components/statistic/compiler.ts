@@ -4,14 +4,29 @@ import type { ComponentCompiler } from '../compiler';
 import type { MotionComponent, MotionStatisticData } from '../../types';
 
 /**
+ * Supported animation motions for Statistic components.
+ * Each maps to a deterministic sequence of existing DocuFlow commands.
+ */
+type StatisticMotion = 'zoom' | 'slideUp' | 'slideLeft' | 'slideRight' | 'fade' | 'pop';
+
+const VALID_MOTIONS: readonly StatisticMotion[] = [
+  'zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop',
+];
+
+const MOTION_LOOKUP: Record<string, StatisticMotion> = Object.fromEntries(
+  VALID_MOTIONS.map(m => [m.toLowerCase(), m])
+);
+
+/**
  * StatisticCompiler — compiles a Statistic component into DocuFlow commands.
  *
- * Produces:
- * - text command for the value
- * - text command for the label
- * - opacity command for fade-in
- * - scale command for entrance animation
- * - opacity command for fade-out
+ * Supports deterministic motion vocabulary via component.style.motion:
+ * - zoom:      scale entrance (default)
+ * - slideUp:   enters from below
+ * - slideLeft: enters from left
+ * - slideRight: enters from right
+ * - fade:      opacity-only entrance
+ * - pop:       overshoot scale via keyframes
  */
 export class StatisticCompiler implements ComponentCompiler {
   readonly componentType = 'statistic';
@@ -41,10 +56,14 @@ export class StatisticCompiler implements ComponentCompiler {
   ): Command[] {
     const data = component.data as MotionStatisticData;
     const { start, duration } = component.timing;
-    const commands: Command[] = [];
+    const motion = this.resolveMotion(component);
+    const centerX = canvasWidth / 2;
+    const centerY = canvasHeight / 2;
 
     const fadeInDuration = Math.min(0.5, duration * 0.15);
     const fadeOutStart = start + duration - fadeInDuration;
+
+    const commands: Command[] = [];
 
     // Value text — large, centered
     const valueId = uuidv4();
@@ -52,8 +71,8 @@ export class StatisticCompiler implements ComponentCompiler {
       id: valueId,
       type: 'text',
       content: data.value,
-      x: canvasWidth / 2,
-      y: canvasHeight / 2 - 30,
+      x: centerX,
+      y: centerY - 30,
       fontSize: 72,
       fontFamily: 'Arial',
       color: '#FFFFFF',
@@ -67,8 +86,8 @@ export class StatisticCompiler implements ComponentCompiler {
       id: labelId,
       type: 'text',
       content: data.label,
-      x: canvasWidth / 2,
-      y: canvasHeight / 2 + 40,
+      x: centerX,
+      y: centerY + 40,
       fontSize: 28,
       fontFamily: 'Arial',
       color: '#CCCCCC',
@@ -76,37 +95,227 @@ export class StatisticCompiler implements ComponentCompiler {
       duration,
     });
 
-    // Fade in for value
-    commands.push({
-      id: uuidv4(),
-      type: 'fadeIn',
-      target: valueId,
-      start,
-      duration: fadeInDuration,
-    });
+    // ── Entrance animation (varies by motion) ───────────────────
+    switch (motion) {
+      case 'slideUp': {
+        const slideOffset = 200;
+        // Value: move from below + fade in
+        commands.push({
+          id: uuidv4(),
+          type: 'move',
+          target: valueId,
+          from: { x: centerX, y: centerY - 30 + slideOffset },
+          to: { x: centerX, y: centerY - 30 },
+          start,
+          duration: fadeInDuration,
+          easing: 'easeOut',
+        });
+        commands.push({
+          id: uuidv4(),
+          type: 'fadeIn',
+          target: valueId,
+          start,
+          duration: fadeInDuration,
+        });
+        // Label: move from below + fade in
+        commands.push({
+          id: uuidv4(),
+          type: 'move',
+          target: labelId,
+          from: { x: centerX, y: centerY + 40 + slideOffset },
+          to: { x: centerX, y: centerY + 40 },
+          start,
+          duration: fadeInDuration,
+          easing: 'easeOut',
+        });
+        commands.push({
+          id: uuidv4(),
+          type: 'fadeIn',
+          target: labelId,
+          start,
+          duration: fadeInDuration,
+        });
+        break;
+      }
 
-    // Fade in for label
-    commands.push({
-      id: uuidv4(),
-      type: 'fadeIn',
-      target: labelId,
-      start,
-      duration: fadeInDuration,
-    });
+      case 'slideLeft': {
+        const slideOffset = 300;
+        // Value: move from left + fade in
+        commands.push({
+          id: uuidv4(),
+          type: 'move',
+          target: valueId,
+          from: { x: centerX - slideOffset, y: centerY - 30 },
+          to: { x: centerX, y: centerY - 30 },
+          start,
+          duration: fadeInDuration,
+          easing: 'easeOut',
+        });
+        commands.push({
+          id: uuidv4(),
+          type: 'fadeIn',
+          target: valueId,
+          start,
+          duration: fadeInDuration,
+        });
+        // Label: move from left + fade in
+        commands.push({
+          id: uuidv4(),
+          type: 'move',
+          target: labelId,
+          from: { x: centerX - slideOffset, y: centerY + 40 },
+          to: { x: centerX, y: centerY + 40 },
+          start,
+          duration: fadeInDuration,
+          easing: 'easeOut',
+        });
+        commands.push({
+          id: uuidv4(),
+          type: 'fadeIn',
+          target: labelId,
+          start,
+          duration: fadeInDuration,
+        });
+        break;
+      }
 
-    // Scale entrance for value
-    commands.push({
-      id: uuidv4(),
-      type: 'scale',
-      target: valueId,
-      from: 0.8,
-      to: 1,
-      start,
-      duration: fadeInDuration,
-      easing: 'easeOut',
-    });
+      case 'slideRight': {
+        const slideOffset = 300;
+        // Value: move from right + fade in
+        commands.push({
+          id: uuidv4(),
+          type: 'move',
+          target: valueId,
+          from: { x: centerX + slideOffset, y: centerY - 30 },
+          to: { x: centerX, y: centerY - 30 },
+          start,
+          duration: fadeInDuration,
+          easing: 'easeOut',
+        });
+        commands.push({
+          id: uuidv4(),
+          type: 'fadeIn',
+          target: valueId,
+          start,
+          duration: fadeInDuration,
+        });
+        // Label: move from right + fade in
+        commands.push({
+          id: uuidv4(),
+          type: 'move',
+          target: labelId,
+          from: { x: centerX + slideOffset, y: centerY + 40 },
+          to: { x: centerX, y: centerY + 40 },
+          start,
+          duration: fadeInDuration,
+          easing: 'easeOut',
+        });
+        commands.push({
+          id: uuidv4(),
+          type: 'fadeIn',
+          target: labelId,
+          start,
+          duration: fadeInDuration,
+        });
+        break;
+      }
 
-    // Fade out for value
+      case 'fade': {
+        // Opacity-only entrance, no scale, no position change
+        commands.push({
+          id: uuidv4(),
+          type: 'fadeIn',
+          target: valueId,
+          start,
+          duration: fadeInDuration,
+        });
+        commands.push({
+          id: uuidv4(),
+          type: 'fadeIn',
+          target: labelId,
+          start,
+          duration: fadeInDuration,
+        });
+        break;
+      }
+
+      case 'pop': {
+        // Overshoot scale via keyframes: 0 → 1.15 → 1.0
+        const overshootTime = fadeInDuration * 0.6;
+        const settleTime = fadeInDuration;
+        commands.push({
+          id: uuidv4(),
+          type: 'setKeyframes',
+          target: valueId,
+          property: 'scale',
+          keyframes: [
+            { time: start, value: 0, easing: 'easeOut' },
+            { time: start + overshootTime, value: 1.15, easing: 'easeIn' },
+            { time: start + settleTime, value: 1.0, easing: 'easeOut' },
+          ],
+        });
+        commands.push({
+          id: uuidv4(),
+          type: 'fadeIn',
+          target: valueId,
+          start,
+          duration: fadeInDuration,
+        });
+        // Label: same pop but slightly delayed
+        const labelDelay = fadeInDuration * 0.15;
+        commands.push({
+          id: uuidv4(),
+          type: 'setKeyframes',
+          target: labelId,
+          property: 'scale',
+          keyframes: [
+            { time: start + labelDelay, value: 0, easing: 'easeOut' },
+            { time: start + overshootTime + labelDelay, value: 1.15, easing: 'easeIn' },
+            { time: start + settleTime + labelDelay, value: 1.0, easing: 'easeOut' },
+          ],
+        });
+        commands.push({
+          id: uuidv4(),
+          type: 'fadeIn',
+          target: labelId,
+          start: start + labelDelay,
+          duration: fadeInDuration,
+        });
+        break;
+      }
+
+      case 'zoom':
+      default: {
+        // Default: scale entrance (original behavior)
+        commands.push({
+          id: uuidv4(),
+          type: 'fadeIn',
+          target: valueId,
+          start,
+          duration: fadeInDuration,
+        });
+        commands.push({
+          id: uuidv4(),
+          type: 'fadeIn',
+          target: labelId,
+          start,
+          duration: fadeInDuration,
+        });
+        commands.push({
+          id: uuidv4(),
+          type: 'scale',
+          target: valueId,
+          from: 0.8,
+          to: 1,
+          start,
+          duration: fadeInDuration,
+          easing: 'easeOut',
+        });
+        break;
+      }
+    }
+
+    // ── Exit animation (same for all motions) ────────────────────
     commands.push({
       id: uuidv4(),
       type: 'fadeOut',
@@ -114,8 +323,6 @@ export class StatisticCompiler implements ComponentCompiler {
       start: fadeOutStart,
       duration: fadeInDuration,
     });
-
-    // Fade out for label
     commands.push({
       id: uuidv4(),
       type: 'fadeOut',
@@ -125,5 +332,14 @@ export class StatisticCompiler implements ComponentCompiler {
     });
 
     return commands;
+  }
+
+  private resolveMotion(component: MotionComponent): StatisticMotion {
+    const raw = component.style?.motion;
+    if (typeof raw === 'string') {
+      const match = MOTION_LOOKUP[raw.toLowerCase()];
+      if (match) return match;
+    }
+    return 'zoom';
   }
 }

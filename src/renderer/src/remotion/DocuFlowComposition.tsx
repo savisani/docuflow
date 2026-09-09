@@ -7,7 +7,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from 'remotion';
-import { TimelineState, LayerState, AudioTrack, TextLayer, AnimatedProperty } from '../types/timeline';
+import { TimelineState, LayerState, AudioTrack, TextLayer, AnimatedProperty, KeyframeTrack } from '../types/timeline';
 import { resolveLayerState, resolveAudioVolume, isAudioActive, isTextActive, resolveCameraState } from '../engine/timeline/resolver';
 import { interpolate } from '../engine/animation/interpolation';
 
@@ -184,6 +184,26 @@ function resolveTextAnimation(animations: AnimatedProperty[], property: string, 
   return value;
 }
 
+function resolveKeyframeTrack(tracks: KeyframeTrack[], property: string, frame: number): number | undefined {
+  const track = tracks.find(t => t.property === property);
+  if (!track || track.keyframes.length === 0) return undefined;
+
+  // Before first keyframe
+  if (frame < track.keyframes[0].time) return track.keyframes[0].value;
+
+  // Find surrounding keyframes
+  for (let i = 0; i < track.keyframes.length - 1; i++) {
+    const kf = track.keyframes[i];
+    const nextKf = track.keyframes[i + 1];
+    if (frame >= kf.time && frame < nextKf.time) {
+      return interpolate(frame, kf.time, nextKf.time, kf.value, nextKf.value, kf.easing);
+    }
+  }
+
+  // After last keyframe
+  return track.keyframes[track.keyframes.length - 1].value;
+}
+
 const RenderText: React.FC<{
   text: TextLayer;
   frame: number;
@@ -192,13 +212,20 @@ const RenderText: React.FC<{
   if (!isTextActive(text, frame)) return null;
 
   const hasAnimations = text.animations.length > 0;
+  const hasKeyframes = text.keyframeTracks.length > 0;
 
   let opacity: number;
   let scale: number;
+  let posX: number;
+  let posY: number;
 
-  if (hasAnimations) {
+  if (hasAnimations || hasKeyframes) {
     opacity = resolveTextAnimation(text.animations, 'opacity', frame, 1);
-    scale = resolveTextAnimation(text.animations, 'scale', frame, 1);
+    // Keyframes override animations for the same property
+    const kfScale = resolveKeyframeTrack(text.keyframeTracks, 'scale', frame);
+    scale = kfScale !== undefined ? kfScale : resolveTextAnimation(text.animations, 'scale', frame, 1);
+    posX = resolveTextAnimation(text.animations, 'x', frame, text.x);
+    posY = resolveTextAnimation(text.animations, 'y', frame, text.y);
   } else {
     const fadeInEnd = text.startFrame + Math.round(0.3 * fps);
     const fadeOutStart = text.endFrame - Math.round(0.3 * fps);
@@ -209,6 +236,8 @@ const RenderText: React.FC<{
       opacity = interpolate(frame, fadeOutStart, text.endFrame, 1, 0, 'easeIn');
     }
     scale = 1;
+    posX = text.x;
+    posY = text.y;
   }
 
   if (opacity <= 0) return null;
@@ -221,8 +250,8 @@ const RenderText: React.FC<{
         transform: 'translateX(-50%)',
       }
     : {
-        left: text.x,
-        top: text.y,
+        left: posX,
+        top: posY,
       };
 
   const scaleTransform = scale !== 1 ? ` scale(${scale})` : '';

@@ -24,7 +24,7 @@ export type KnownComponentType = (typeof KNOWN_COMPONENT_TYPES)[number];
 // ── Known Fields Per Component ──────────────────────────────────
 
 export const COMPONENT_FIELDS: Record<KnownComponentType, readonly string[]> = {
-  statistic: ['text', 'label', 'unit', 'source', 'position', 'duration', 'style', 'start'],
+  statistic: ['text', 'label', 'unit', 'source', 'position', 'duration', 'style', 'motion', 'start'],
 } as const;
 
 export const REQUIRED_FIELDS: Record<KnownComponentType, readonly string[]> = {
@@ -48,6 +48,13 @@ export type KnownPosition = (typeof KNOWN_POSITIONS)[number];
 
 export const KNOWN_VISUAL_STYLES = ['documentary', 'minimal', 'bold'] as const;
 export const KNOWN_MOTION_STYLES = ['subtle', 'moderate', 'energetic'] as const;
+
+// ── Known Animation Motion Entries ─────────────────────────────
+// Semantic motion styles for component animation.
+// The compiler maps these to deterministic command sequences.
+
+export const KNOWN_ANIMATION_MOTIONS = ['zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop'] as const;
+export type KnownAnimationMotion = (typeof KNOWN_ANIMATION_MOTIONS)[number];
 
 // ── Style Aliases (weak model normalization) ────────────────────
 // Only explicitly approved aliases. The parser normalizes these

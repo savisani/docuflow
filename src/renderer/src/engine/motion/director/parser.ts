@@ -9,6 +9,7 @@ import {
   KNOWN_POSITIONS,
   KNOWN_VISUAL_STYLES,
   KNOWN_MOTION_STYLES,
+  KNOWN_ANIMATION_MOTIONS,
   STYLE_ALIASES,
   OPERATION_METADATA_FIELDS,
   type ParsedComponentBlock,
@@ -300,6 +301,17 @@ function validateComponent(
     });
   }
 
+  // Validate motion if provided
+  const motion = block.fields.motion;
+  if (motion && !KNOWN_ANIMATION_MOTIONS.includes(motion.toLowerCase() as any)) {
+    errors.push({
+      line: block.lineStart,
+      field: 'motion',
+      message: `Unknown motion: "${motion}". Known motions: ${KNOWN_ANIMATION_MOTIONS.join(', ')}`,
+      code: 'UNKNOWN_MOTION',
+    });
+  }
+
   return errors;
 }
 
@@ -341,7 +353,12 @@ function blockToComponent(
   const coords = positionToCoordinates(position, canvasWidth, canvasHeight);
 
   // Map style to MotionStyle (normalize aliases)
-  const visualStyle = normalizeStyle(block.fields.style) || 'documentary';
+  const rawStyle = normalizeStyle(block.fields.style) || 'documentary';
+  // The style field may contain an animation motion value (e.g., "slideUp")
+  // If so, use it as the motion; otherwise check the dedicated motion field
+  const isAnimationMotion = KNOWN_ANIMATION_MOTIONS.includes(rawStyle as any);
+  const visualStyle = isAnimationMotion ? 'documentary' : rawStyle;
+  const motionStyle = block.fields.motion?.toLowerCase() || (isAnimationMotion ? rawStyle : undefined);
 
   switch (block.type) {
     case 'statistic': {
@@ -360,6 +377,7 @@ function blockToComponent(
           x: coords.x,
           y: coords.y,
           visual: visualStyle,
+          ...(motionStyle ? { motion: motionStyle } : {}),
         },
       };
     }

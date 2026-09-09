@@ -83,6 +83,7 @@ export interface TextLayer {
   isSubtitle: boolean;
   zIndex: number;
   animations: AnimatedProperty[];
+  keyframeTracks: KeyframeTrack[];
 }
 
 export interface CameraState {

@@ -760,3 +760,214 @@ describe('Statistic Compiler — Animation Commands', () => {
     expect(isTextActive(valueLayer, afterEnd)).toBe(false);
   });
 });
+
+// ═════════════════════════════════════════════════════════════════
+// STATISTIC MOTION VOCABULARY
+// ═════════════════════════════════════════════════════════════════
+
+describe('Statistic Compiler — Motion Vocabulary', () => {
+  const compiler = new StatisticCompiler();
+  const settings: ProjectSettings = { width: 1920, height: 1080, fps: 30 };
+
+  function compileWithMotion(motion: string | undefined) {
+    return compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '73%', label: 'of global traffic' },
+        timing: { start: 0, duration: 4 },
+        ...(motion ? { style: { motion } } : {}),
+      },
+      1920,
+      1080
+    );
+  }
+
+  function getCommandTypes(commands: ReturnType<typeof compileWithMotion>) {
+    return commands.map(c => c.type);
+  }
+
+  it('zoom produces scale entrance (default behavior)', () => {
+    const commands = compileWithMotion('zoom');
+    const types = getCommandTypes(commands);
+    expect(types).toContain('scale');
+    expect(types).toContain('fadeIn');
+    expect(types).toContain('fadeOut');
+    // No move commands for zoom
+    expect(types).not.toContain('move');
+    expect(types).not.toContain('setKeyframes');
+  });
+
+  it('slideUp produces move commands with Y offset', () => {
+    const commands = compileWithMotion('slideUp');
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBe(2); // value + label
+    for (const cmd of moveCmds) {
+      const move = cmd as any;
+      expect(move.from.y).toBeGreaterThan(move.to.y);
+      expect(move.from.x).toBe(move.to.x);
+    }
+    expect(getCommandTypes(commands)).toContain('fadeIn');
+    expect(getCommandTypes(commands)).not.toContain('scale');
+  });
+
+  it('slideLeft produces move commands with X offset', () => {
+    const commands = compileWithMotion('slideLeft');
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBe(2);
+    for (const cmd of moveCmds) {
+      const move = cmd as any;
+      expect(move.from.x).toBeLessThan(move.to.x);
+      expect(move.from.y).toBe(move.to.y);
+    }
+    expect(getCommandTypes(commands)).toContain('fadeIn');
+    expect(getCommandTypes(commands)).not.toContain('scale');
+  });
+
+  it('slideRight produces move commands with X offset', () => {
+    const commands = compileWithMotion('slideRight');
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBe(2);
+    for (const cmd of moveCmds) {
+      const move = cmd as any;
+      expect(move.from.x).toBeGreaterThan(move.to.x);
+      expect(move.from.y).toBe(move.to.y);
+    }
+    expect(getCommandTypes(commands)).toContain('fadeIn');
+    expect(getCommandTypes(commands)).not.toContain('scale');
+  });
+
+  it('fade produces only fadeIn/fadeOut (no scale, no move)', () => {
+    const commands = compileWithMotion('fade');
+    const types = getCommandTypes(commands);
+    expect(types).toContain('fadeIn');
+    expect(types).toContain('fadeOut');
+    expect(types).not.toContain('scale');
+    expect(types).not.toContain('move');
+    expect(types).not.toContain('setKeyframes');
+  });
+
+  it('pop produces setKeyframes for overshoot scale', () => {
+    const commands = compileWithMotion('pop');
+    const types = getCommandTypes(commands);
+    expect(types).toContain('setKeyframes');
+    expect(types).toContain('fadeIn');
+    expect(types).toContain('fadeOut');
+    expect(types).not.toContain('scale');
+    expect(types).not.toContain('move');
+    // Verify keyframe overshoot
+    const kfCmds = commands.filter(c => c.type === 'setKeyframes');
+    expect(kfCmds.length).toBe(2); // value + label
+    for (const cmd of kfCmds) {
+      const kf = cmd as any;
+      expect(kf.property).toBe('scale');
+      expect(kf.keyframes.length).toBe(3);
+      expect(kf.keyframes[0].value).toBe(0);
+      expect(kf.keyframes[1].value).toBeGreaterThan(1); // overshoot
+      expect(kf.keyframes[2].value).toBe(1.0);
+    }
+  });
+
+  it('default (no motion) produces zoom behavior', () => {
+    const commands = compileWithMotion(undefined);
+    const types = getCommandTypes(commands);
+    expect(types).toContain('scale');
+    expect(types).toContain('fadeIn');
+    expect(types).toContain('fadeOut');
+    expect(types).not.toContain('move');
+    expect(types).not.toContain('setKeyframes');
+  });
+
+  it('unsupported motion falls back to zoom', () => {
+    const commands = compileWithMotion('nonexistent');
+    const types = getCommandTypes(commands);
+    expect(types).toContain('scale');
+    expect(types).not.toContain('move');
+  });
+
+  it('each motion produces a different command set', () => {
+    const zoom = compileWithMotion('zoom');
+    const slideUp = compileWithMotion('slideUp');
+    const slideLeft = compileWithMotion('slideLeft');
+    const slideRight = compileWithMotion('slideRight');
+    const fade = compileWithMotion('fade');
+    const pop = compileWithMotion('pop');
+
+    function commandSignature(cmds: ReturnType<typeof compileWithMotion>) {
+      return cmds.map(c => {
+        const any = c as any;
+        if (any.type === 'move') return `move(${any.from.x},${any.from.y})`;
+        if (any.type === 'setKeyframes') return `kf(${any.keyframes.map((k: any) => k.value).join(',')})`;
+        if (any.type === 'scale') return `scale(${any.from},${any.to})`;
+        return any.type;
+      }).join(',');
+    }
+
+    const sigs = [zoom, slideUp, slideLeft, slideRight, fade, pop].map(commandSignature);
+    const unique = new Set(sigs);
+    expect(unique.size).toBe(6);
+  });
+
+  it('all motions produce text commands for value and label', () => {
+    const motions = ['zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop'];
+    for (const motion of motions) {
+      const commands = compileWithMotion(motion);
+      const textCmds = commands.filter(c => c.type === 'text');
+      expect(textCmds.length).toBe(2);
+      expect(textCmds[0].content).toBe('73%');
+      expect(textCmds[1].content).toBe('of global traffic');
+    }
+  });
+
+  it('all motions produce fadeOut commands', () => {
+    const motions = ['zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop'];
+    for (const motion of motions) {
+      const commands = compileWithMotion(motion);
+      const fadeOuts = commands.filter(c => c.type === 'fadeOut');
+      expect(fadeOuts.length).toBe(2);
+    }
+  });
+
+  it('all motions produce animation commands targeting text IDs', () => {
+    const motions = ['zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop'];
+    for (const motion of motions) {
+      const commands = compileWithMotion(motion);
+      const textIds = commands.filter(c => c.type === 'text').map(c => c.id);
+      const animCmds = commands.filter(c =>
+        c.type === 'fadeIn' || c.type === 'fadeOut' || c.type === 'scale' || c.type === 'move' || c.type === 'setKeyframes'
+      );
+      for (const cmd of animCmds) {
+        expect(textIds).toContain((cmd as any).target);
+      }
+    }
+  });
+
+  it('compiled plan can reach Add to Timeline via gateway', () => {
+    const motions = ['zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop'];
+    for (const motion of motions) {
+      const plan: MotionPlanV1 = {
+        version: 1,
+        metadata: { name: 'Test' },
+        canvas: { width: 1920, height: 1080 },
+        duration: 5,
+        style: { visual: 'documentary', motion: 'subtle' },
+        components: [
+          {
+            type: 'statistic',
+            data: { value: '73%', label: 'of global traffic' },
+            timing: { start: 0, duration: 4 },
+            style: { motion },
+          },
+        ],
+      };
+      const result = processMotionRequest({
+        version: 1,
+        operation: 'compilePlan',
+        requestId: `test-${motion}`,
+        plan,
+      });
+      expect(result.status).toBe('success');
+      const data = result.data as { commands: any[]; commandCount: number };
+      expect(data.commandCount).toBeGreaterThan(0);
+    }
+  });
+});

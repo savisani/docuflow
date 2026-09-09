@@ -251,6 +251,7 @@ export function buildTimeline(
 
       case 'move': {
         const layer = layers[cmd.target];
+        const textLayer = layer ? undefined : findTextLayer(cmd.target);
         if (layer) {
           layer.animations.push({
             property: 'x',
@@ -261,6 +262,24 @@ export function buildTimeline(
             easing: cmd.easing || 'linear',
           });
           layer.animations.push({
+            property: 'y',
+            startFrame,
+            endFrame: startFrame + durationFrames,
+            from: cmd.from.y,
+            to: cmd.to.y,
+            easing: cmd.easing || 'linear',
+          });
+          if (startFrame + durationFrames > maxFrame) maxFrame = startFrame + durationFrames;
+        } else if (textLayer) {
+          textLayer.animations.push({
+            property: 'x',
+            startFrame,
+            endFrame: startFrame + durationFrames,
+            from: cmd.from.x,
+            to: cmd.to.x,
+            easing: cmd.easing || 'linear',
+          });
+          textLayer.animations.push({
             property: 'y',
             startFrame,
             endFrame: startFrame + durationFrames,
@@ -749,6 +768,7 @@ export function buildTimeline(
           isSubtitle: isSub,
           zIndex: textZIndex,
           animations: [],
+          keyframeTracks: [],
         });
         if (endFrame > maxFrame) maxFrame = endFrame;
         break;
@@ -764,6 +784,7 @@ export function buildTimeline(
 
       case 'setKeyframes': {
         const layer = layers[cmd.target];
+        const textLayer = layer ? undefined : findTextLayer(cmd.target);
         if (layer) {
           const property = (cmd as Extract<Command, { type: 'setKeyframes' }>).property;
           const rawKeyframes = (cmd as Extract<Command, { type: 'setKeyframes' }>).keyframes;
@@ -778,6 +799,25 @@ export function buildTimeline(
             existing.keyframes = keyframes;
           } else {
             layer.keyframeTracks.push({ property, keyframes });
+          }
+          if (keyframes.length > 0) {
+            const lastKf = keyframes[keyframes.length - 1];
+            if (lastKf.time > maxFrame) maxFrame = lastKf.time;
+          }
+        } else if (textLayer) {
+          const property = (cmd as Extract<Command, { type: 'setKeyframes' }>).property;
+          const rawKeyframes = (cmd as Extract<Command, { type: 'setKeyframes' }>).keyframes;
+          const fps = settings.fps;
+          const keyframes = rawKeyframes.map(kf => ({
+            time: Math.round(kf.time * fps),
+            value: kf.value,
+            easing: kf.easing || 'linear' as const,
+          }));
+          const existing = textLayer.keyframeTracks.find(t => t.property === property);
+          if (existing) {
+            existing.keyframes = keyframes;
+          } else {
+            textLayer.keyframeTracks.push({ property, keyframes });
           }
           if (keyframes.length > 0) {
             const lastKf = keyframes[keyframes.length - 1];
