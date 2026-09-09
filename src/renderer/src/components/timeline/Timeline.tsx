@@ -830,6 +830,42 @@ export const Timeline: React.FC = () => {
 
       const cmdDuration = asset.duration && asset.duration > 0 ? Math.min(asset.duration, 30) : 5;
 
+      // Check for time conflicts and find appropriate upper track
+      const newClipStart = snapped;
+      const newClipEnd = snapped + cmdDuration;
+      const existingZIndices = Object.values(tl.layers).map(l => l.zIndex).sort((a, b) => a - b);
+
+      // Check if target track has a time conflict
+      const hasConflict = state.commands.some(cmd => {
+        if (cmd.layer !== nextZIndex) return false;
+        const cmdStart = cmd.start;
+        const cmdEnd = cmd.start + (cmd.duration || 0);
+        return cmdStart < newClipEnd && cmdEnd > newClipStart;
+      });
+
+      if (hasConflict) {
+        // Search upward for an available track without conflict
+        let foundTrack = false;
+        for (const zIndex of existingZIndices) {
+          if (zIndex <= nextZIndex) continue;
+          const conflictOnTrack = state.commands.some(cmd => {
+            if (cmd.layer !== zIndex) return false;
+            const cmdStart = cmd.start;
+            const cmdEnd = cmd.start + (cmd.duration || 0);
+            return cmdStart < newClipEnd && cmdEnd > newClipStart;
+          });
+          if (!conflictOnTrack) {
+            nextZIndex = zIndex;
+            foundTrack = true;
+            break;
+          }
+        }
+        if (!foundTrack) {
+          // Create a new track above the highest existing track
+          nextZIndex = existingZIndices.length > 0 ? Math.max(...existingZIndices) + 1 : 0;
+        }
+      }
+
       const cmd = {
         id: uuidv4(),
         type: 'show' as const,
