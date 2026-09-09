@@ -343,6 +343,6 @@ export class StatisticCompiler implements ComponentCompiler {
       const match = MOTION_LOOKUP[raw.toLowerCase()];
       if (match) return match;
     }
-    return 'zoom';
+    return 'fade';
   }
 }

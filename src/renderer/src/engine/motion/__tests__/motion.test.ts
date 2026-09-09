@@ -680,8 +680,12 @@ describe('Statistic Compiler — Animation Commands', () => {
     }
   });
 
-  it('produces a scale command for the value', () => {
-    const commands = compileStatistic('42%', 'sample rate', 4);
+  it('produces a scale command for the value when motion is zoom', () => {
+    const commands = compiler.compile(
+      { type: 'statistic', data: { value: '42%', label: 'sample rate' }, timing: { start: 0, duration: 4 }, style: { motion: 'zoom' } },
+      1920,
+      1080
+    );
     const scales = commands.filter(c => c.type === 'scale');
     expect(scales).toHaveLength(1);
     expect(scales[0].from).toBe(0.8);
@@ -708,7 +712,7 @@ describe('Statistic Compiler — Animation Commands', () => {
   });
 
   it('no new command types are introduced', () => {
-    const allowedTypes = ['text', 'fadeIn', 'fadeOut', 'scale'];
+    const allowedTypes = ['text', 'fadeIn', 'fadeOut', 'scale', 'move', 'setKeyframes'];
     const commands = compileStatistic('42%', 'sample rate', 4);
     for (const cmd of commands) {
       expect(allowedTypes).toContain(cmd.type);
@@ -733,9 +737,6 @@ describe('Statistic Compiler — Animation Commands', () => {
 
     const opacityAnims = valueLayer.animations.filter(a => a.property === 'opacity');
     expect(opacityAnims.length).toBeGreaterThanOrEqual(2);
-
-    const scaleAnims = valueLayer.animations.filter(a => a.property === 'scale');
-    expect(scaleAnims.length).toBe(1);
   });
 
   it('text layer resolves correct opacity at frame 0 (before fade-in completes)', () => {
@@ -787,7 +788,7 @@ describe('Statistic Compiler — Motion Vocabulary', () => {
     return commands.map(c => c.type);
   }
 
-  it('zoom produces scale entrance (default behavior)', () => {
+  it('zoom produces scale entrance', () => {
     const commands = compileWithMotion('zoom');
     const types = getCommandTypes(commands);
     expect(types).toContain('scale');
@@ -868,20 +869,21 @@ describe('Statistic Compiler — Motion Vocabulary', () => {
     }
   });
 
-  it('default (no motion) produces zoom behavior', () => {
+  it('default (no motion) produces fade behavior', () => {
     const commands = compileWithMotion(undefined);
     const types = getCommandTypes(commands);
-    expect(types).toContain('scale');
     expect(types).toContain('fadeIn');
     expect(types).toContain('fadeOut');
+    expect(types).not.toContain('scale');
     expect(types).not.toContain('move');
     expect(types).not.toContain('setKeyframes');
   });
 
-  it('unsupported motion falls back to zoom', () => {
+  it('unsupported motion falls back to fade', () => {
     const commands = compileWithMotion('nonexistent');
     const types = getCommandTypes(commands);
-    expect(types).toContain('scale');
+    expect(types).toContain('fadeIn');
+    expect(types).not.toContain('scale');
     expect(types).not.toContain('move');
   });
 
@@ -1262,5 +1264,167 @@ END`;
     expect(commandTypes).not.toContain('slideUp');
     expect(commandTypes).not.toContain('slideLeft');
     expect(commandTypes).not.toContain('slideRight');
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// Natural-language motion intent inference
+// ═════════════════════════════════════════════════════════════════
+describe('Natural-language motion intent inference', () => {
+  function parseAndCompile(aiResponse: string) {
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+    });
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.plan).toBeDefined();
+
+    const result = processMotionRequest({
+      version: 1,
+      operation: 'compilePlan',
+      requestId: 'test-nl-motion',
+      plan: parseResult.plan!,
+    });
+    expect(result.status).toBe('success');
+    return result.data as { commands: any[]; commandCount: number };
+  }
+
+  it('"from below" intent → slideUp motion', () => {
+    const data = parseAndCompile(`COMPONENT: statistic
+TEXT: 73%
+MOTION: slideUp
+POSITION: center
+DURATION: 4
+END`);
+    const types = data.commands.map((c: any) => c.type);
+    expect(types).toContain('move');
+    expect(types).not.toContain('scale');
+  });
+
+  it('"from the left" intent → slideLeft motion', () => {
+    const data = parseAndCompile(`COMPONENT: statistic
+TEXT: 42%
+MOTION: slideLeft
+POSITION: center
+DURATION: 4
+END`);
+    const types = data.commands.map((c: any) => c.type);
+    expect(types).toContain('move');
+    const moveCmds = data.commands.filter((c: any) => c.type === 'move');
+    for (const cmd of moveCmds) {
+      expect((cmd as any).from.x).toBeLessThan((cmd as any).to.x);
+    }
+  });
+
+  it('"from the right" intent → slideRight motion', () => {
+    const data = parseAndCompile(`COMPONENT: statistic
+TEXT: 42%
+MOTION: slideRight
+POSITION: center
+DURATION: 4
+END`);
+    const types = data.commands.map((c: any) => c.type);
+    expect(types).toContain('move');
+    const moveCmds = data.commands.filter((c: any) => c.type === 'move');
+    for (const cmd of moveCmds) {
+      expect((cmd as any).from.x).toBeGreaterThan((cmd as any).to.x);
+    }
+  });
+
+  it('"fade in" intent → fade motion', () => {
+    const data = parseAndCompile(`COMPONENT: statistic
+TEXT: 1.2M
+MOTION: fade
+POSITION: center
+DURATION: 4
+END`);
+    const types = data.commands.map((c: any) => c.type);
+    expect(types).toContain('fadeIn');
+    expect(types).not.toContain('scale');
+    expect(types).not.toContain('move');
+  });
+
+  it('"pop" intent → pop motion', () => {
+    const data = parseAndCompile(`COMPONENT: statistic
+TEXT: 99%
+MOTION: pop
+POSITION: center
+DURATION: 4
+END`);
+    const types = data.commands.map((c: any) => c.type);
+    expect(types).toContain('setKeyframes');
+    expect(types).not.toContain('scale');
+    expect(types).not.toContain('move');
+  });
+
+  it('"zoom in" intent → zoom motion', () => {
+    const data = parseAndCompile(`COMPONENT: statistic
+TEXT: 500
+MOTION: zoom
+POSITION: center
+DURATION: 4
+END`);
+    const types = data.commands.map((c: any) => c.type);
+    expect(types).toContain('scale');
+    expect(types).toContain('fadeIn');
+    expect(types).not.toContain('move');
+  });
+
+  it('no motion specified → defaults to fade (conservative)', () => {
+    const data = parseAndCompile(`COMPONENT: statistic
+TEXT: 42%
+POSITION: center
+DURATION: 4
+END`);
+    const types = data.commands.map((c: any) => c.type);
+    expect(types).toContain('fadeIn');
+    expect(types).not.toContain('scale');
+    expect(types).not.toContain('move');
+    expect(types).not.toContain('setKeyframes');
+  });
+
+  it('case-insensitive MOTION: SLIDEUP → slideUp', () => {
+    const data = parseAndCompile(`COMPONENT: statistic
+TEXT: 42%
+MOTION: SLIDEUP
+POSITION: center
+DURATION: 4
+END`);
+    const types = data.commands.map((c: any) => c.type);
+    expect(types).toContain('move');
+    expect(types).not.toContain('scale');
+  });
+
+  it('case-insensitive MOTION: SlideUp → slideUp', () => {
+    const data = parseAndCompile(`COMPONENT: statistic
+TEXT: 42%
+MOTION: SlideUp
+POSITION: center
+DURATION: 4
+END`);
+    const types = data.commands.map((c: any) => c.type);
+    expect(types).toContain('move');
+    expect(types).not.toContain('scale');
+  });
+
+  it('each natural-language intent produces distinct command signatures', () => {
+    const responses = {
+      slideUp: `COMPONENT: statistic\nTEXT: 1\nMOTION: slideUp\nPOSITION: center\nDURATION: 4\nEND`,
+      slideLeft: `COMPONENT: statistic\nTEXT: 2\nMOTION: slideLeft\nPOSITION: center\nDURATION: 4\nEND`,
+      slideRight: `COMPONENT: statistic\nTEXT: 3\nMOTION: slideRight\nPOSITION: center\nDURATION: 4\nEND`,
+      fade: `COMPONENT: statistic\nTEXT: 4\nMOTION: fade\nPOSITION: center\nDURATION: 4\nEND`,
+      pop: `COMPONENT: statistic\nTEXT: 5\nMOTION: pop\nPOSITION: center\nDURATION: 4\nEND`,
+      zoom: `COMPONENT: statistic\nTEXT: 6\nMOTION: zoom\nPOSITION: center\nDURATION: 4\nEND`,
+    };
+
+    const signatures = Object.entries(responses).map(([motion, resp]) => {
+      const data = parseAndCompile(resp);
+      const types = data.commands.map((c: any) => c.type);
+      return `${motion}:${types.sort().join(',')}`;
+    });
+
+    const unique = new Set(signatures);
+    expect(unique.size).toBe(6);
   });
 });

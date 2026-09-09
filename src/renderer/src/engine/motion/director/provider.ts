@@ -72,7 +72,7 @@ RULES:
 - Each component block starts with COMPONENT: <type> and ends with END.
 - COMPONENT FIELDS are: text, label, unit, source, position, duration, style, motion, start.
 - LABEL is optional. Only include it if the user explicitly requests a label or subtitle.
-- MOTION controls the entrance animation style. If the user specifies a motion (e.g., "slide up", "fade in", "pop"), use the corresponding MOTION value. If no motion is specified, omit the MOTION field (defaults to zoom).
+- MOTION controls the entrance animation style.
 - OPERATION, TARGET, and REASON are NOT component fields. Do NOT include them inside a component block unless you are modifying an existing component.
 - For NEW components (most requests): output only the component fields. The system defaults to ADD automatically.
 - For UPDATE: include OPERATION: update, TARGET: <existing component ID>, REASON: <why>.
@@ -82,7 +82,18 @@ RULES:
 - Use only canonical style names: documentary, minimal, bold.
 - Use only canonical motion names: zoom, slideUp, slideLeft, slideRight, fade, pop.
 
-EXAMPLE — simple new statistic (no label):
+MOTION INTENT INFERENCE:
+When the user describes HOW the element should appear, map their natural language to the correct MOTION value:
+- "from below", "slides up", "comes up from bottom", "rises" → MOTION: slideUp
+- "from the left", "slides in from left" → MOTION: slideLeft
+- "from the right", "slides in from right" → MOTION: slideRight
+- "fade in", "appears", "fades", "gradually appears" → MOTION: fade
+- "pops", "bounces in", "springs", "pops in" → MOTION: pop
+- "zooms in", "grows", "scales up" → MOTION: zoom
+- "normal", "standard", "default" → omit MOTION field (uses fade)
+When no motion intent is expressed, omit the MOTION field. The default conservative animation is fade.
+
+EXAMPLE — simple new statistic (no label, no motion):
 COMPONENT: statistic
 TEXT: 42%
 POSITION: center
@@ -99,12 +110,29 @@ DURATION: 4
 STYLE: documentary
 END
 
-EXAMPLE — statistic with slideUp motion:
+EXAMPLE — "show a stat sliding up from below":
 COMPONENT: statistic
 TEXT: 42%
 POSITION: center
 DURATION: 4
 MOTION: slideUp
+END
+
+EXAMPLE — "display a number that pops in":
+COMPONENT: statistic
+TEXT: 73%
+LABEL: completion rate
+POSITION: center
+DURATION: 4
+MOTION: pop
+END
+
+EXAMPLE — "fade in a statistic normally":
+COMPONENT: statistic
+TEXT: 1.2M
+POSITION: center
+DURATION: 4
+MOTION: fade
 END
 
 ${request.existingComponentIds?.length ? `EXISTING COMPONENT IDs: ${request.existingComponentIds.join(', ')}` : 'No existing components.'}
