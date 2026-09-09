@@ -126,11 +126,12 @@ export async function importNativeAssets(
   if (!filePaths || filePaths.length === 0) return [];
 
   const assets: Asset[] = [];
+  const allAssets = [...existingAssets];
 
   for (const filePath of filePaths) {
     // Deduplication: skip if asset with same normalized filePath already exists
     const normalizedIncoming = filePath.replace(/\\/g, '/').toLowerCase();
-    const duplicate = existingAssets.find((a) => {
+    const duplicate = allAssets.find((a) => {
       if (!a.filePath) return false;
       return a.filePath.replace(/\\/g, '/').toLowerCase() === normalizedIncoming;
     });
@@ -140,7 +141,7 @@ export async function importNativeAssets(
     const mimeType = mimeTypeFromPath(filePath);
     const filename = filePath.split(/[/\\]/).pop() || filePath;
     const url = (window as any).docuflow.filePathToAssetUrl(filePath);
-    const logicalId = generateLogicalId(assetType, existingAssets);
+    const logicalId = generateLogicalId(assetType, allAssets);
 
     const asset: Asset = {
       id: uuidv4(),
@@ -170,6 +171,7 @@ export async function importNativeAssets(
       console.warn(`Failed to load metadata for ${filename}:`, err);
     }
 
+    allAssets.push(asset);
     assets.push(asset);
   }
 
