@@ -724,29 +724,11 @@ export const Timeline: React.FC = () => {
         const rawStart = state.originalStart + dt;
         const newStart = Math.max(0, currentSnap(rawStart, state.clipId));
         const rawTrackIndex = state.originalLayerIndex + Math.round(dy / TRACK_HEIGHT);
-        const clampedTrackIndex = Math.max(0, rawTrackIndex);
+        const clampedTrackIndex = Math.max(0, Math.min(currentTrackLayerMap.length - 1, rawTrackIndex));
 
         let targetZIndex = state.originalZIndex;
-        if (clampedTrackIndex !== state.originalLayerIndex) {
-          const allZIndices = [...currentTrackLayerMap].sort((a, b) => a - b);
-          const otherZIndices = allZIndices.filter((z) => z !== state.originalZIndex);
-          const minZ = allZIndices.length > 0 ? allZIndices[0] : 0;
-          const maxZ = allZIndices.length > 0 ? allZIndices[allZIndices.length - 1] : 0;
-
-          if (clampedTrackIndex <= 0) {
-            // Move to main track (top track with highest zIndex)
-            targetZIndex = maxZ;
-          } else if (clampedTrackIndex >= currentTrackLayerMap.length - 1) {
-            // Move to bottom track (lowest zIndex)
-            targetZIndex = minZ;
-          } else {
-            const sortedPos = otherZIndices.length - clampedTrackIndex;
-            const above = otherZIndices[sortedPos];
-            const below = otherZIndices[sortedPos - 1];
-            targetZIndex = below !== undefined && above !== undefined
-              ? Math.floor((below + above) / 2)
-              : below !== undefined ? below + 1 : (above !== undefined ? above - 1 : 0);
-          }
+        if (clampedTrackIndex !== state.originalLayerIndex && currentTrackLayerMap.length > 0) {
+          targetZIndex = currentTrackLayerMap[clampedTrackIndex];
         }
         currentUpdateCommand(state.clipId, { start: newStart, layer: targetZIndex });
       } else if (state.mode === 'resize-right') {
