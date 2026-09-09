@@ -734,9 +734,11 @@ export const Timeline: React.FC = () => {
           const maxZ = allZIndices.length > 0 ? allZIndices[allZIndices.length - 1] : 0;
 
           if (clampedTrackIndex <= 0) {
-            targetZIndex = maxZ + 1;
+            // Move to main track (top track with highest zIndex)
+            targetZIndex = maxZ;
           } else if (clampedTrackIndex >= currentTrackLayerMap.length - 1) {
-            targetZIndex = minZ - 1;
+            // Move to bottom track (lowest zIndex)
+            targetZIndex = minZ;
           } else {
             const sortedPos = otherZIndices.length - clampedTrackIndex;
             const above = otherZIndices[sortedPos];
