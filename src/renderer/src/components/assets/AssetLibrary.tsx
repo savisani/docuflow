@@ -20,6 +20,8 @@ const TYPE_CONFIG = {
   audio: { icon: Music, label: 'Audio' },
 };
 
+const AUDIO_ROLE_ORDER: AudioRole[] = ['voiceover', 'music', 'sfx', 'ambient', 'unassigned'];
+
 export const AssetLibrary: React.FC = () => {
   const assets = useDocuFlowStore((s) => s.assets);
   const addAsset = useDocuFlowStore((s) => s.addAsset);
@@ -187,8 +189,7 @@ export const AssetLibrary: React.FC = () => {
 
   const roleGroups = useMemo(() => {
     const groups: { role: string; assets: Asset[] }[] = [];
-    const roleOrder: AudioRole[] = ['voiceover', 'music', 'sfx', 'ambient', 'unassigned'];
-    for (const role of roleOrder) {
+    for (const role of AUDIO_ROLE_ORDER) {
       const roleAssets = audioFiles.filter((a) => a.audioRole === role || (!a.audioRole && role === 'unassigned'));
       if (roleAssets.length > 0) groups.push({ role, assets: roleAssets });
     }
@@ -324,7 +325,7 @@ export const AssetLibrary: React.FC = () => {
                 >
                   All
                 </button>
-                {roleOrder.map((role) => {
+                {AUDIO_ROLE_ORDER.map((role) => {
                   const config = ROLE_CONFIG[role];
                   const count = audioFiles.filter(a => a.audioRole === role || (!a.audioRole && role === 'unassigned')).length;
                   if (count === 0) return null;
