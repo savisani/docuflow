@@ -4,6 +4,7 @@ import { processMotionRequest } from '../gateway';
 import { getCapabilities, isCapabilityAllowed } from '../capabilities';
 import { ComponentRegistry } from '../components/registry';
 import { StatisticCompiler } from '../components/statistic/compiler';
+import { parseAIResponse } from '../director/parser';
 import { buildTimeline } from '../../timeline/builder';
 import { resolveLayerState } from '../../timeline/resolver';
 import { isTextActive } from '../../timeline/resolver';
@@ -1155,5 +1156,111 @@ describe('Regression — duplicate text and motion differentiation', () => {
     const targets = moveCmds.map((c) => c.target);
     expect(targets).toContain(valueId);
     expect(targets).toContain(labelId);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// Full path: AI response → parse → compile → commands
+// ═════════════════════════════════════════════════════════════════
+describe('Full path — AI response to compiled commands', () => {
+  it('slideUp AI response compiles to valid move commands', () => {
+    const aiResponse = `COMPONENT: statistic
+TEXT: 42%
+MOTION: slideUp
+POSITION: center
+DURATION: 4
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.plan).toBeDefined();
+
+    const result = processMotionRequest({
+      version: 1,
+      operation: 'compilePlan',
+      requestId: 'test-full-path-slideUp',
+      plan: parseResult.plan!,
+    });
+
+    expect(result.status).toBe('success');
+    const data = result.data as { commands: any[]; commandCount: number };
+    expect(data.commandCount).toBeGreaterThan(0);
+
+    const commandTypes = data.commands.map((c: any) => c.type);
+    expect(commandTypes).toContain('move');
+    expect(commandTypes).toContain('fadeIn');
+    expect(commandTypes).toContain('text');
+    expect(commandTypes).not.toContain('slideUp');
+    expect(commandTypes).not.toContain('slideLeft');
+    expect(commandTypes).not.toContain('slideRight');
+  });
+
+  it('slideLeft AI response compiles to valid move commands', () => {
+    const aiResponse = `COMPONENT: statistic
+TEXT: 42%
+MOTION: slideLeft
+POSITION: center
+DURATION: 4
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+    });
+
+    expect(parseResult.success).toBe(true);
+
+    const result = processMotionRequest({
+      version: 1,
+      operation: 'compilePlan',
+      requestId: 'test-full-path-slideLeft',
+      plan: parseResult.plan!,
+    });
+
+    expect(result.status).toBe('success');
+    const data = result.data as { commands: any[]; commandCount: number };
+    const commandTypes = data.commands.map((c: any) => c.type);
+    expect(commandTypes).toContain('move');
+    expect(commandTypes).not.toContain('slideUp');
+    expect(commandTypes).not.toContain('slideLeft');
+    expect(commandTypes).not.toContain('slideRight');
+  });
+
+  it('slideRight AI response compiles to valid move commands', () => {
+    const aiResponse = `COMPONENT: statistic
+TEXT: 42%
+MOTION: slideRight
+POSITION: center
+DURATION: 4
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+    });
+
+    expect(parseResult.success).toBe(true);
+
+    const result = processMotionRequest({
+      version: 1,
+      operation: 'compilePlan',
+      requestId: 'test-full-path-slideRight',
+      plan: parseResult.plan!,
+    });
+
+    expect(result.status).toBe('success');
+    const data = result.data as { commands: any[]; commandCount: number };
+    const commandTypes = data.commands.map((c: any) => c.type);
+    expect(commandTypes).toContain('move');
+    expect(commandTypes).not.toContain('slideUp');
+    expect(commandTypes).not.toContain('slideLeft');
+    expect(commandTypes).not.toContain('slideRight');
   });
 });

@@ -303,7 +303,7 @@ function validateComponent(
 
   // Validate motion if provided
   const motion = block.fields.motion;
-  if (motion && !KNOWN_ANIMATION_MOTIONS.includes(motion.toLowerCase() as any)) {
+  if (motion && !KNOWN_ANIMATION_MOTIONS.some(m => m.toLowerCase() === motion.toLowerCase())) {
     errors.push({
       line: block.lineStart,
       field: 'motion',
