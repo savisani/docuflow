@@ -130,6 +130,9 @@ export const TimelineClip: React.FC<TimelineClipProps> = React.memo(({
         borderLeftColor: trackColor,
       };
 
+  // Hide clip in its original position when it's being dragged (rendered in overlay instead)
+  const isBeingDragged = isDragTarget && dragState?.mode === 'move';
+
   return (
     <div
       className={`
@@ -140,6 +143,7 @@ export const TimelineClip: React.FC<TimelineClipProps> = React.memo(({
           : isMultiSelected
           ? 'ring-1 ring-df-accent/40 border-df-accent/30'
           : 'hover:border-df-border-strong hover:brightness-110'}
+        ${isBeingDragged ? 'invisible' : ''}
       `}
       style={clipStyle}
       onMouseDown={(e) => onMouseDown(e, clip, trackType, 'move')}

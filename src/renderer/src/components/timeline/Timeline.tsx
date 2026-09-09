@@ -705,10 +705,14 @@ export const Timeline: React.FC = () => {
       setDragVisualOffset(null);
 
       const state = dragStateRef.current;
-      if (!state || !visualOffset) return;
+      if (!state) return;
 
-      const dx = visualOffset.dx;
-      const dy = visualOffset.dy;
+      // For resize modes, we must always commit the duration change even if visualOffset is null
+      // (user moved mouse less than 3 pixels threshold). For move mode, skip if no visual offset.
+      if (!visualOffset && state.mode === 'move') return;
+
+      const dx = visualOffset?.dx ?? 0;
+      const dy = visualOffset?.dy ?? 0;
       const dt = dx / (PIXELS_PER_SECOND * zoomRef.current);
       const currentSnap = snapRef.current;
       const currentTrackLayerMap = trackLayerMapRef.current;
@@ -1431,6 +1435,70 @@ export const Timeline: React.FC = () => {
               className="absolute top-0 bottom-0 w-px bg-df-accent z-30 pointer-events-none"
               style={{ display: 'none' }}
             />
+
+            {/* Drag overlay - renders dragged clip above all tracks */}
+            {dragState && dragVisualOffset && dragState.mode === 'move' && (
+              <div
+                className="absolute inset-0 pointer-events-none z-50"
+                style={{ overflow: 'visible' }}
+              >
+                {(() => {
+                  const draggedClip = tracks
+                    .flatMap(t => t.clips)
+                    .find(c => c.commandId === dragState.clipId);
+                  if (!draggedClip) return null;
+                  const clipAsset = assets.find((a) => a.logicalId === draggedClip.label || a.id === draggedClip.label);
+                  const track = tracks.find(t => t.clips.some(c => c.commandId === dragState.clipId));
+                  if (!track) return null;
+
+                  const left = draggedClip.start * PIXELS_PER_SECOND * zoom;
+                  const width = Math.max((draggedClip.end - draggedClip.start) * PIXELS_PER_SECOND * zoom, 4);
+                  const displayName = clipAsset?.filename || draggedClip.label || 'Untitled';
+                  const isImage = clipAsset?.type === 'image';
+                  const isAudio = clipAsset?.type === 'audio';
+
+                  // Calculate visual position based on drag offset
+                  const visualLeft = left + dragVisualOffset.dx;
+                  const visualTop = RULER_HEIGHT + (trackLayerMap.indexOf(draggedClip.zIndex) * TRACK_HEIGHT) + dragVisualOffset.dy;
+
+                  return (
+                    <div
+                      className="absolute rounded-df-sm flex items-center overflow-hidden border border-df-accent/60 shadow-lg"
+                      style={{
+                        left: visualLeft,
+                        top: visualTop + 2,
+                        width,
+                        height: TRACK_HEIGHT - 4,
+                        backgroundColor: track.color + 'dd',
+                        color: 'white',
+                        borderLeftWidth: '3px',
+                        borderLeftColor: track.color,
+                        opacity: 0.95,
+                        transform: 'translateZ(0)',
+                      }}
+                    >
+                      {isAudio && showWaveforms && width > 30 && (
+                        <AudioWaveform assetId={clipAsset?.id} width={width} height={TRACK_HEIGHT - 4} />
+                      )}
+                      {(isImage || clipAsset?.type === 'video') && (clipAsset?.thumbnailUrl || clipAsset?.url) && width > 40 && (
+                        <div
+                          className="h-full bg-cover bg-center shrink-0 opacity-60"
+                          style={{ backgroundImage: `url(${clipAsset.thumbnailUrl || clipAsset.url})`, width: Math.min(width * 0.3, 48) }}
+                        />
+                      )}
+                      {isAudio && width > 30 && (
+                        <div className="w-4 h-4 shrink-0 flex items-center justify-center opacity-70">
+                          <Volume2 size={10} />
+                        </div>
+                      )}
+                      <div className="flex-1 px-1 min-w-0 overflow-hidden">
+                        <span className="text-df-xs leading-none truncate block whitespace-nowrap">{displayName}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
           </div>
         </div>
       </div>
