@@ -310,8 +310,12 @@ export const SceneGenerator: React.FC = () => {
   // -----------------------------------------------------------------------
 
   const handleFileSelect = useCallback(async () => {
+    if (!(window as any).docuflow?.selectAudioFile) {
+      console.error('Audio file selection not available');
+      return;
+    }
     try {
-      const result = await window.docuflow.selectAudioFile();
+      const result = await (window as any).docuflow.selectAudioFile();
       if (!result.canceled && result.filePath) {
         setAudioFilePath(result.filePath);
         setAudioFileName(result.filePath.split(/[/\\]/).pop() || 'audio.mp3');
