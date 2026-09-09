@@ -251,6 +251,7 @@ export const MotionGraphicsPanel: React.FC = () => {
       endBatch();
     }
 
+    setCompiledCommands([]);
     setActiveTab('studio');
   }, [compiledCommands, addCommand, beginBatch, endBatch, setActiveTab]);
 

@@ -484,6 +484,7 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
   },
   addCommand: (command) => {
     const state = get();
+    if (state.commands.some((c) => c.id === command.id)) return;
     const newCommands = [...state.commands, command];
     const tl = buildTimelineFromState(newCommands, state.assets, state.settings, state.voiceover);
     if (!state.batchActive) {
