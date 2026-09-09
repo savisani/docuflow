@@ -748,25 +748,6 @@ export const Timeline: React.FC = () => {
               : below !== undefined ? below + 1 : (above !== undefined ? above - 1 : 0);
           }
         }
-        const newEnd = newStart + state.originalDuration;
-        const overlappingCmds = currentCommands.filter(
-          (c) => c.layer === targetZIndex && c.id !== state.clipId && c.start < newEnd && (c.start + (c.duration ?? 5)) > newStart
-        );
-        if (overlappingCmds.length > 0) {
-          for (const other of overlappingCmds) {
-            const otherEnd = other.start + (other.duration ?? 5);
-            if (other.start >= newStart && otherEnd <= newEnd) {
-              currentRemoveCommand(other.id);
-            } else if (other.start < newStart && otherEnd > newEnd) {
-              currentUpdateCommand(other.id, { duration: newStart - other.start });
-            } else if (other.start < newStart) {
-              currentUpdateCommand(other.id, { duration: newStart - other.start });
-            } else {
-              currentUpdateCommand(other.id, { start: newEnd, duration: otherEnd - newEnd });
-            }
-          }
-        }
-
         currentUpdateCommand(state.clipId, { start: newStart, layer: targetZIndex });
       } else if (state.mode === 'resize-right') {
         const rawEnd = state.originalStart + state.originalDuration + dt;
@@ -848,26 +829,6 @@ export const Timeline: React.FC = () => {
       }
 
       const cmdDuration = asset.duration && asset.duration > 0 ? Math.min(asset.duration, 30) : 5;
-
-      // Handle overlaps on target layer (only when actually overlapping)
-      const newEnd = snapped + cmdDuration;
-      const overlappingCmds = state.commands.filter(
-        (c) => c.layer === nextZIndex && c.start < newEnd && (c.start + (c.duration ?? 5)) > snapped
-      );
-      if (overlappingCmds.length > 0) {
-        for (const other of overlappingCmds) {
-          const otherEnd = other.start + (other.duration ?? 5);
-          if (other.start >= snapped && otherEnd <= newEnd) {
-            removeCommand(other.id);
-          } else if (other.start < snapped && otherEnd > newEnd) {
-            updateCommand(other.id, { duration: snapped - other.start });
-          } else if (other.start < snapped) {
-            updateCommand(other.id, { duration: snapped - other.start });
-          } else {
-            updateCommand(other.id, { start: newEnd, duration: otherEnd - newEnd });
-          }
-        }
-      }
 
       const cmd = {
         id: uuidv4(),
