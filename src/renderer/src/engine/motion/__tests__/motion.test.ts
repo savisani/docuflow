@@ -1428,3 +1428,220 @@ END`);
     expect(unique.size).toBe(6);
   });
 });
+
+// ═════════════════════════════════════════════════════════════════
+// Statistic Visual Styling Regression Tests
+// ═════════════════════════════════════════════════════════════════
+describe('Statistic Visual Styling', () => {
+  const compiler = new StatisticCompiler();
+
+  function compileWithStyle(style: Record<string, any>) {
+    return compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '42%', label: 'sample rate', ...style.data },
+        timing: { start: 0, duration: 4 },
+        ...style.component,
+      },
+      1920,
+      1080
+    );
+  }
+
+  function getTextCommands(commands: ReturnType<typeof compileWithStyle>) {
+    return commands.filter(c => c.type === 'text') as any[];
+  }
+
+  it('default styling remains unchanged (fontSize=72, fontWeight=normal, color=#FFFFFF)', () => {
+    const commands = compileWithStyle({});
+    const texts = getTextCommands(commands);
+    expect(texts[0].fontSize).toBe(72);
+    expect(texts[0].fontWeight).toBe('normal');
+    expect(texts[0].color).toBe('#FFFFFF');
+  });
+
+  it('custom fontSize is preserved in text command', () => {
+    const commands = compileWithStyle({ data: { fontSize: 120 } });
+    const texts = getTextCommands(commands);
+    expect(texts[0].fontSize).toBe(120);
+  });
+
+  it('custom fontWeight is preserved in text command', () => {
+    const commands = compileWithStyle({ data: { fontWeight: 'bold' } });
+    const texts = getTextCommands(commands);
+    expect(texts[0].fontWeight).toBe('bold');
+  });
+
+  it('custom color is preserved in text command', () => {
+    const commands = compileWithStyle({ data: { color: '#FF0000' } });
+    const texts = getTextCommands(commands);
+    expect(texts[0].color).toBe('#FF0000');
+  });
+
+  it('position is preserved with styling through parser', () => {
+    const aiResponse = `COMPONENT: statistic
+TEXT: 42%
+FONTSIZE: 100
+COLOR: #00FF00
+POSITION: top
+DURATION: 4
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+    });
+
+    expect(parseResult.success).toBe(true);
+    const comp = parseResult.plan!.components[0];
+    expect((comp.data as any).fontSize).toBe(100);
+    expect((comp.data as any).color).toBe('#00FF00');
+    // Position should be top (15% of 1080 = 162)
+    expect(comp.style).toBeDefined();
+    expect((comp.style as any).position).toBe('top');
+    expect((comp.style as any).y).toBeLessThan(300);
+  });
+
+  it('optional label renders exactly once with styling', () => {
+    const commands = compileWithStyle({ data: { label: 'people affected', fontSize: 100, color: '#FF0000' } });
+    const texts = getTextCommands(commands);
+    expect(texts).toHaveLength(2);
+    expect(texts[0].content).toBe('42%');
+    expect(texts[0].fontSize).toBe(100);
+    expect(texts[0].color).toBe('#FF0000');
+    expect(texts[1].content).toBe('people affected');
+    // Label gets derived smaller fontSize
+    expect(texts[1].fontSize).toBeLessThan(100);
+  });
+
+  it('statistic without label renders only the main text', () => {
+    const commands = compileWithStyle({ data: { fontSize: 96, fontWeight: 'semibold', label: '' } });
+    const texts = getTextCommands(commands);
+    expect(texts).toHaveLength(1);
+    expect(texts[0].content).toBe('42%');
+    expect(texts[0].fontSize).toBe(96);
+    expect(texts[0].fontWeight).toBe('semibold');
+  });
+
+  it('motion still works with styling', () => {
+    const commands = compileWithStyle({
+      data: { fontSize: 100, color: '#0000FF' },
+      component: { style: { motion: 'slideUp' } },
+    });
+    const types = commands.map(c => c.type);
+    expect(types).toContain('move');
+    expect(types).toContain('fadeIn');
+    expect(types).toContain('text');
+    const texts = getTextCommands(commands);
+    expect(texts[0].fontSize).toBe(100);
+    expect(texts[0].color).toBe('#0000FF');
+  });
+
+  it('natural-language prompt can map to styling fields via parser', () => {
+    const aiResponse = `COMPONENT: statistic
+TEXT: 42%
+LABEL: completion rate
+FONTSIZE: 120
+FONTWEIGHT: bold
+COLOR: #FF5500
+POSITION: center
+DURATION: 4
+MOTION: zoom
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+    });
+
+    expect(parseResult.success).toBe(true);
+    const comp = parseResult.plan!.components[0];
+    expect(comp.data.value).toBe('42%');
+    expect((comp.data as any).label).toBe('completion rate');
+    expect((comp.data as any).fontSize).toBe(120);
+    expect((comp.data as any).fontWeight).toBe('bold');
+    expect((comp.data as any).color).toBe('#FF5500');
+  });
+
+  it('invalid fontSize is rejected by parser', () => {
+    const aiResponse = `COMPONENT: statistic
+TEXT: 42%
+FONTSIZE: 500
+DURATION: 4
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+    });
+
+    expect(parseResult.success).toBe(false);
+    expect(parseResult.errors.some(e => e.code === 'INVALID_FONT_SIZE')).toBe(true);
+  });
+
+  it('invalid fontWeight is rejected by parser', () => {
+    const aiResponse = `COMPONENT: statistic
+TEXT: 42%
+FONTWEIGHT: ultrablack
+DURATION: 4
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+    });
+
+    expect(parseResult.success).toBe(false);
+    expect(parseResult.errors.some(e => e.code === 'UNKNOWN_FONT_WEIGHT')).toBe(true);
+  });
+
+  it('invalid color format is rejected by parser', () => {
+    const aiResponse = `COMPONENT: statistic
+TEXT: 42%
+COLOR: not-a-color
+DURATION: 4
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+    });
+
+    expect(parseResult.success).toBe(false);
+    expect(parseResult.errors.some(e => e.code === 'INVALID_COLOR')).toBe(true);
+  });
+
+  it('unknown styling fields are rejected', () => {
+    const aiResponse = `COMPONENT: statistic
+TEXT: 42%
+FONTSTYLE: italic
+DURATION: 4
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+    });
+
+    expect(parseResult.success).toBe(false);
+    expect(parseResult.errors.some(e => e.code === 'UNKNOWN_FIELD')).toBe(true);
+  });
+
+  it('existing motions remain unchanged with styling', () => {
+    const motions = ['zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop'];
+    for (const motion of motions) {
+      const commands = compileWithStyle({
+        data: { fontSize: 80, color: '#AABBCC' },
+        component: { style: { motion } },
+      });
+      const texts = getTextCommands(commands);
+      expect(texts[0].fontSize).toBe(80);
+      expect(texts[0].color).toBe('#AABBCC');
+      // Motion commands still present
+      const animTypes = commands.filter(c => c.type !== 'text').map(c => c.type);
+      expect(animTypes.length).toBeGreaterThan(0);
+    }
+  });
+});

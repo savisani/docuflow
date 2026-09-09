@@ -60,6 +60,11 @@ export class StatisticCompiler implements ComponentCompiler {
     const fadeInDuration = Math.min(0.5, duration * 0.15);
     const fadeOutStart = start + duration - fadeInDuration;
 
+    // Resolve visual properties with safe defaults
+    const fontSize = data.fontSize ?? 72;
+    const fontWeight = data.fontWeight ?? 'normal';
+    const color = data.color ?? '#FFFFFF';
+
     const commands: Command[] = [];
 
     // Value text — large, centered
@@ -70,9 +75,10 @@ export class StatisticCompiler implements ComponentCompiler {
       content: data.value,
       x: centerX,
       y: centerY - 30,
-      fontSize: 72,
+      fontSize,
       fontFamily: 'Arial',
-      color: '#FFFFFF',
+      fontWeight,
+      color,
       start,
       duration,
     });
@@ -86,8 +92,9 @@ export class StatisticCompiler implements ComponentCompiler {
         content: data.label,
         x: centerX,
         y: centerY + 40,
-        fontSize: 28,
+        fontSize: Math.min(28, fontSize * 0.4),
         fontFamily: 'Arial',
+        fontWeight: 'normal',
         color: '#CCCCCC',
         start,
         duration,

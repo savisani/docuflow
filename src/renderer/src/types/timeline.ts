@@ -79,6 +79,7 @@ export interface TextLayer {
   y: number;
   fontSize: number;
   fontFamily: string;
+  fontWeight: string;
   color: string;
   isSubtitle: boolean;
   zIndex: number;

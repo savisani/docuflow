@@ -181,6 +181,7 @@ export interface TextCommand extends BaseCommand {
   y?: number;
   fontSize?: number;
   fontFamily?: string;
+  fontWeight?: string;
   color?: string;
   duration: number;
 }

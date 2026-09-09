@@ -10,6 +10,7 @@ import {
   KNOWN_VISUAL_STYLES,
   KNOWN_MOTION_STYLES,
   KNOWN_ANIMATION_MOTIONS,
+  KNOWN_FONT_WEIGHTS,
   STYLE_ALIASES,
   OPERATION_METADATA_FIELDS,
   type ParsedComponentBlock,
@@ -312,6 +313,42 @@ function validateComponent(
     });
   }
 
+  // Validate fontSize if provided
+  const fontSizeStr = block.fields.fontsize;
+  if (fontSizeStr) {
+    const fontSize = parseFloat(fontSizeStr);
+    if (!Number.isFinite(fontSize) || fontSize < 24 || fontSize > 200) {
+      errors.push({
+        line: block.lineStart,
+        field: 'fontSize',
+        message: `Invalid fontSize: "${fontSizeStr}". Must be a number between 24 and 200.`,
+        code: 'INVALID_FONT_SIZE',
+      });
+    }
+  }
+
+  // Validate fontWeight if provided
+  const fontWeight = block.fields.fontweight;
+  if (fontWeight && !KNOWN_FONT_WEIGHTS.includes(fontWeight as any)) {
+    errors.push({
+      line: block.lineStart,
+      field: 'fontWeight',
+      message: `Unknown fontWeight: "${fontWeight}". Known weights: ${KNOWN_FONT_WEIGHTS.join(', ')}`,
+      code: 'UNKNOWN_FONT_WEIGHT',
+    });
+  }
+
+  // Validate color if provided (hex format: #RGB or #RRGGBB)
+  const color = block.fields.color;
+  if (color && !/^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$/.test(color)) {
+    errors.push({
+      line: block.lineStart,
+      field: 'color',
+      message: `Invalid color: "${color}". Must be a hex color like #FFF or #FFFFFF.`,
+      code: 'INVALID_COLOR',
+    });
+  }
+
   return errors;
 }
 
@@ -370,6 +407,9 @@ function blockToComponent(
           label: block.fields.label || '',
           unit: block.fields.unit || undefined,
           source: block.fields.source || undefined,
+          fontSize: block.fields.fontsize ? parseFloat(block.fields.fontsize) : undefined,
+          fontWeight: block.fields.fontweight || undefined,
+          color: block.fields.color || undefined,
         },
         timing: { start, duration },
         style: {

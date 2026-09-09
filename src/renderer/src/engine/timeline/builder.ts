@@ -764,6 +764,7 @@ export function buildTimeline(
           y: cmd.y ?? (isSub ? 950 : 100),
           fontSize: textCmd?.fontSize ?? (isSub ? 48 : 36),
           fontFamily: textCmd?.fontFamily ?? 'Arial',
+          fontWeight: textCmd?.fontWeight ?? (isSub ? 'bold' : 'normal'),
           color: textCmd?.color ?? '#FFFFFF',
           isSubtitle: isSub,
           zIndex: textZIndex,

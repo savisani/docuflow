@@ -24,7 +24,7 @@ export type KnownComponentType = (typeof KNOWN_COMPONENT_TYPES)[number];
 // ── Known Fields Per Component ──────────────────────────────────
 
 export const COMPONENT_FIELDS: Record<KnownComponentType, readonly string[]> = {
-  statistic: ['text', 'label', 'unit', 'source', 'position', 'duration', 'style', 'motion', 'start'],
+  statistic: ['text', 'label', 'unit', 'source', 'position', 'duration', 'style', 'motion', 'start', 'fontsize', 'fontweight', 'color'],
 } as const;
 
 export const REQUIRED_FIELDS: Record<KnownComponentType, readonly string[]> = {
@@ -48,6 +48,11 @@ export type KnownPosition = (typeof KNOWN_POSITIONS)[number];
 
 export const KNOWN_VISUAL_STYLES = ['documentary', 'minimal', 'bold'] as const;
 export const KNOWN_MOTION_STYLES = ['subtle', 'moderate', 'energetic'] as const;
+
+// ── Known Font Weight Values ────────────────────────────────────
+
+export const KNOWN_FONT_WEIGHTS = ['normal', 'medium', 'semibold', 'bold'] as const;
+export type KnownFontWeight = (typeof KNOWN_FONT_WEIGHTS)[number];
 
 // ── Known Animation Motion Entries ─────────────────────────────
 // Semantic motion styles for component animation.

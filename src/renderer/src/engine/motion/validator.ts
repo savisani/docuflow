@@ -43,6 +43,9 @@ const MotionStatisticDataSchema = z.object({
   label: z.string().max(MOTION_LIMITS.MAX_TEXT_LENGTH).optional(),
   unit: z.string().max(MOTION_LIMITS.MAX_TEXT_LENGTH).optional(),
   source: z.string().max(MOTION_LIMITS.MAX_TEXT_LENGTH).optional(),
+  fontSize: z.number().min(24).max(200).optional(),
+  fontWeight: z.enum(['normal', 'medium', 'semibold', 'bold']).optional(),
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
 });
 
 const MotionComponentDataSchema: z.ZodType<MotionComponentData> = z.lazy(() =>

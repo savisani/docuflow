@@ -29,6 +29,9 @@ export interface MotionStatisticData {
   label: string;
   unit?: string;
   source?: string;
+  fontSize?: number;
+  fontWeight?: string;
+  color?: string;
 }
 
 export type MotionComponentData = MotionStatisticData;

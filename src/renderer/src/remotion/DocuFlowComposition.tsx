@@ -264,7 +264,7 @@ const RenderText: React.FC<{
         color: text.color,
         fontSize: text.fontSize,
         fontFamily: text.fontFamily,
-        fontWeight: text.isSubtitle ? 'bold' : 'normal',
+        fontWeight: text.fontWeight as React.CSSProperties['fontWeight'],
         textShadow: '2px 2px 4px rgba(0,0,0,0.8)',
         opacity,
         transform: scaleTransform || undefined,
