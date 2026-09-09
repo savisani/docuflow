@@ -52,9 +52,10 @@ export interface MotionDirectorProvider {
 
 export function buildMotionDirectorPrompt(request: MotionDirectorRequest): string {
   const componentList = `statistic`;
-  const fieldList = `text, label, unit, source, position, duration, style, start`;
+  const fieldList = `text, label, unit, source, position, duration, style, motion, start`;
   const positionList = `center, top, bottom, left, right, top_left, top_right, bottom_left, bottom_right`;
   const styleList = `documentary, minimal, bold`;
+  const motionList = `zoom, slideUp, slideLeft, slideRight, fade, pop`;
 
   return `You are a motion graphics director. Given a user prompt, create motion graphics components.
 
@@ -62,13 +63,16 @@ AVAILABLE COMPONENT TYPES: ${componentList}
 FIELDS PER COMPONENT: ${fieldList}
 POSITIONS: ${positionList}
 STYLES: ${styleList} (use ONLY these exact style names)
+MOTIONS: ${motionList} (use ONLY these exact motion names for animation style)
 
 CANVAS: ${request.canvasWidth}x${request.canvasHeight}
 DURATION: ${request.duration} seconds
 
 RULES:
 - Each component block starts with COMPONENT: <type> and ends with END.
-- COMPONENT FIELDS are: text, label, unit, source, position, duration, style, start.
+- COMPONENT FIELDS are: text, label, unit, source, position, duration, style, motion, start.
+- LABEL is optional. Only include it if the user explicitly requests a label or subtitle.
+- MOTION controls the entrance animation style. If the user specifies a motion (e.g., "slide up", "fade in", "pop"), use the corresponding MOTION value. If no motion is specified, omit the MOTION field (defaults to zoom).
 - OPERATION, TARGET, and REASON are NOT component fields. Do NOT include them inside a component block unless you are modifying an existing component.
 - For NEW components (most requests): output only the component fields. The system defaults to ADD automatically.
 - For UPDATE: include OPERATION: update, TARGET: <existing component ID>, REASON: <why>.
@@ -76,14 +80,31 @@ RULES:
 - Do NOT invent component IDs. Only use IDs the system provides.
 - Do NOT use array indexes (0, 1, 2) as component IDs.
 - Use only canonical style names: documentary, minimal, bold.
+- Use only canonical motion names: zoom, slideUp, slideLeft, slideRight, fade, pop.
 
-EXAMPLE — simple new statistic:
+EXAMPLE — simple new statistic (no label):
 COMPONENT: statistic
 TEXT: 42%
-LABEL: Percentage
 POSITION: center
 DURATION: 4
 STYLE: documentary
+END
+
+EXAMPLE — statistic with label:
+COMPONENT: statistic
+TEXT: 73%
+LABEL: of global traffic
+POSITION: center
+DURATION: 4
+STYLE: documentary
+END
+
+EXAMPLE — statistic with slideUp motion:
+COMPONENT: statistic
+TEXT: 42%
+POSITION: center
+DURATION: 4
+MOTION: slideUp
 END
 
 ${request.existingComponentIds?.length ? `EXISTING COMPONENT IDs: ${request.existingComponentIds.join(', ')}` : 'No existing components.'}

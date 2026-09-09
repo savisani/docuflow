@@ -40,7 +40,7 @@ const MotionStyleSchema = z.object({
 
 const MotionStatisticDataSchema = z.object({
   value: z.string().min(1).max(MOTION_LIMITS.MAX_TEXT_LENGTH),
-  label: z.string().min(1).max(MOTION_LIMITS.MAX_TEXT_LENGTH),
+  label: z.string().max(MOTION_LIMITS.MAX_TEXT_LENGTH).optional(),
   unit: z.string().max(MOTION_LIMITS.MAX_TEXT_LENGTH).optional(),
   source: z.string().max(MOTION_LIMITS.MAX_TEXT_LENGTH).optional(),
 });

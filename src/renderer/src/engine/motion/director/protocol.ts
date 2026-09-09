@@ -28,7 +28,7 @@ export const COMPONENT_FIELDS: Record<KnownComponentType, readonly string[]> = {
 } as const;
 
 export const REQUIRED_FIELDS: Record<KnownComponentType, readonly string[]> = {
-  statistic: ['text', 'label', 'duration'],
+  statistic: ['text', 'duration'],
 } as const;
 
 // ── Known Operation Types ───────────────────────────────────────

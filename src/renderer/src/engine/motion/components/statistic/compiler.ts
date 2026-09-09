@@ -36,9 +36,6 @@ export class StatisticCompiler implements ComponentCompiler {
     if (!data.value || data.value.trim().length === 0) {
       errors.push('Statistic value is required');
     }
-    if (!data.label || data.label.trim().length === 0) {
-      errors.push('Statistic label is required');
-    }
     if (data.value && data.value.length > 500) {
       errors.push('Statistic value exceeds maximum length of 500 characters');
     }
@@ -80,26 +77,27 @@ export class StatisticCompiler implements ComponentCompiler {
       duration,
     });
 
-    // Label text — smaller, below value
-    const labelId = uuidv4();
-    commands.push({
-      id: labelId,
-      type: 'text',
-      content: data.label,
-      x: centerX,
-      y: centerY + 40,
-      fontSize: 28,
-      fontFamily: 'Arial',
-      color: '#CCCCCC',
-      start,
-      duration,
-    });
+    // Label text — smaller, below value (only if label is provided)
+    const labelId = data.label ? uuidv4() : null;
+    if (labelId) {
+      commands.push({
+        id: labelId,
+        type: 'text',
+        content: data.label,
+        x: centerX,
+        y: centerY + 40,
+        fontSize: 28,
+        fontFamily: 'Arial',
+        color: '#CCCCCC',
+        start,
+        duration,
+      });
+    }
 
     // ── Entrance animation (varies by motion) ───────────────────
     switch (motion) {
       case 'slideUp': {
         const slideOffset = 200;
-        // Value: move from below + fade in
         commands.push({
           id: uuidv4(),
           type: 'move',
@@ -117,30 +115,30 @@ export class StatisticCompiler implements ComponentCompiler {
           start,
           duration: fadeInDuration,
         });
-        // Label: move from below + fade in
-        commands.push({
-          id: uuidv4(),
-          type: 'move',
-          target: labelId,
-          from: { x: centerX, y: centerY + 40 + slideOffset },
-          to: { x: centerX, y: centerY + 40 },
-          start,
-          duration: fadeInDuration,
-          easing: 'easeOut',
-        });
-        commands.push({
-          id: uuidv4(),
-          type: 'fadeIn',
-          target: labelId,
-          start,
-          duration: fadeInDuration,
-        });
+        if (labelId) {
+          commands.push({
+            id: uuidv4(),
+            type: 'move',
+            target: labelId,
+            from: { x: centerX, y: centerY + 40 + slideOffset },
+            to: { x: centerX, y: centerY + 40 },
+            start,
+            duration: fadeInDuration,
+            easing: 'easeOut',
+          });
+          commands.push({
+            id: uuidv4(),
+            type: 'fadeIn',
+            target: labelId,
+            start,
+            duration: fadeInDuration,
+          });
+        }
         break;
       }
 
       case 'slideLeft': {
         const slideOffset = 300;
-        // Value: move from left + fade in
         commands.push({
           id: uuidv4(),
           type: 'move',
@@ -158,30 +156,30 @@ export class StatisticCompiler implements ComponentCompiler {
           start,
           duration: fadeInDuration,
         });
-        // Label: move from left + fade in
-        commands.push({
-          id: uuidv4(),
-          type: 'move',
-          target: labelId,
-          from: { x: centerX - slideOffset, y: centerY + 40 },
-          to: { x: centerX, y: centerY + 40 },
-          start,
-          duration: fadeInDuration,
-          easing: 'easeOut',
-        });
-        commands.push({
-          id: uuidv4(),
-          type: 'fadeIn',
-          target: labelId,
-          start,
-          duration: fadeInDuration,
-        });
+        if (labelId) {
+          commands.push({
+            id: uuidv4(),
+            type: 'move',
+            target: labelId,
+            from: { x: centerX - slideOffset, y: centerY + 40 },
+            to: { x: centerX, y: centerY + 40 },
+            start,
+            duration: fadeInDuration,
+            easing: 'easeOut',
+          });
+          commands.push({
+            id: uuidv4(),
+            type: 'fadeIn',
+            target: labelId,
+            start,
+            duration: fadeInDuration,
+          });
+        }
         break;
       }
 
       case 'slideRight': {
         const slideOffset = 300;
-        // Value: move from right + fade in
         commands.push({
           id: uuidv4(),
           type: 'move',
@@ -199,29 +197,29 @@ export class StatisticCompiler implements ComponentCompiler {
           start,
           duration: fadeInDuration,
         });
-        // Label: move from right + fade in
-        commands.push({
-          id: uuidv4(),
-          type: 'move',
-          target: labelId,
-          from: { x: centerX + slideOffset, y: centerY + 40 },
-          to: { x: centerX, y: centerY + 40 },
-          start,
-          duration: fadeInDuration,
-          easing: 'easeOut',
-        });
-        commands.push({
-          id: uuidv4(),
-          type: 'fadeIn',
-          target: labelId,
-          start,
-          duration: fadeInDuration,
-        });
+        if (labelId) {
+          commands.push({
+            id: uuidv4(),
+            type: 'move',
+            target: labelId,
+            from: { x: centerX + slideOffset, y: centerY + 40 },
+            to: { x: centerX, y: centerY + 40 },
+            start,
+            duration: fadeInDuration,
+            easing: 'easeOut',
+          });
+          commands.push({
+            id: uuidv4(),
+            type: 'fadeIn',
+            target: labelId,
+            start,
+            duration: fadeInDuration,
+          });
+        }
         break;
       }
 
       case 'fade': {
-        // Opacity-only entrance, no scale, no position change
         commands.push({
           id: uuidv4(),
           type: 'fadeIn',
@@ -229,18 +227,19 @@ export class StatisticCompiler implements ComponentCompiler {
           start,
           duration: fadeInDuration,
         });
-        commands.push({
-          id: uuidv4(),
-          type: 'fadeIn',
-          target: labelId,
-          start,
-          duration: fadeInDuration,
-        });
+        if (labelId) {
+          commands.push({
+            id: uuidv4(),
+            type: 'fadeIn',
+            target: labelId,
+            start,
+            duration: fadeInDuration,
+          });
+        }
         break;
       }
 
       case 'pop': {
-        // Overshoot scale via keyframes: 0 → 1.15 → 1.0
         const overshootTime = fadeInDuration * 0.6;
         const settleTime = fadeInDuration;
         commands.push({
@@ -261,32 +260,32 @@ export class StatisticCompiler implements ComponentCompiler {
           start,
           duration: fadeInDuration,
         });
-        // Label: same pop but slightly delayed
-        const labelDelay = fadeInDuration * 0.15;
-        commands.push({
-          id: uuidv4(),
-          type: 'setKeyframes',
-          target: labelId,
-          property: 'scale',
-          keyframes: [
-            { time: start + labelDelay, value: 0, easing: 'easeOut' },
-            { time: start + overshootTime + labelDelay, value: 1.15, easing: 'easeIn' },
-            { time: start + settleTime + labelDelay, value: 1.0, easing: 'easeOut' },
-          ],
-        });
-        commands.push({
-          id: uuidv4(),
-          type: 'fadeIn',
-          target: labelId,
-          start: start + labelDelay,
-          duration: fadeInDuration,
-        });
+        if (labelId) {
+          const labelDelay = fadeInDuration * 0.15;
+          commands.push({
+            id: uuidv4(),
+            type: 'setKeyframes',
+            target: labelId,
+            property: 'scale',
+            keyframes: [
+              { time: start + labelDelay, value: 0, easing: 'easeOut' },
+              { time: start + overshootTime + labelDelay, value: 1.15, easing: 'easeIn' },
+              { time: start + settleTime + labelDelay, value: 1.0, easing: 'easeOut' },
+            ],
+          });
+          commands.push({
+            id: uuidv4(),
+            type: 'fadeIn',
+            target: labelId,
+            start: start + labelDelay,
+            duration: fadeInDuration,
+          });
+        }
         break;
       }
 
       case 'zoom':
       default: {
-        // Default: scale entrance (original behavior)
         commands.push({
           id: uuidv4(),
           type: 'fadeIn',
@@ -294,13 +293,15 @@ export class StatisticCompiler implements ComponentCompiler {
           start,
           duration: fadeInDuration,
         });
-        commands.push({
-          id: uuidv4(),
-          type: 'fadeIn',
-          target: labelId,
-          start,
-          duration: fadeInDuration,
-        });
+        if (labelId) {
+          commands.push({
+            id: uuidv4(),
+            type: 'fadeIn',
+            target: labelId,
+            start,
+            duration: fadeInDuration,
+          });
+        }
         commands.push({
           id: uuidv4(),
           type: 'scale',
@@ -323,13 +324,15 @@ export class StatisticCompiler implements ComponentCompiler {
       start: fadeOutStart,
       duration: fadeInDuration,
     });
-    commands.push({
-      id: uuidv4(),
-      type: 'fadeOut',
-      target: labelId,
-      start: fadeOutStart,
-      duration: fadeInDuration,
-    });
+    if (labelId) {
+      commands.push({
+        id: uuidv4(),
+        type: 'fadeOut',
+        target: labelId,
+        start: fadeOutStart,
+        duration: fadeInDuration,
+      });
+    }
 
     return commands;
   }

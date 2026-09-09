@@ -139,15 +139,17 @@ END`;
     expect(result.errors.some((e) => e.code === 'MISSING_FIELD' && e.field === 'text')).toBe(true);
   });
 
-  it('rejects component missing required LABEL field', () => {
+  it('accepts component without LABEL field (label is optional)', () => {
     const response = `COMPONENT: statistic
 TEXT: 73%
 DURATION: 4
 END`;
 
     const result = parseAIResponse(response, DEFAULT_OPTIONS);
-    expect(result.success).toBe(false);
-    expect(result.errors.some((e) => e.code === 'MISSING_FIELD' && e.field === 'label')).toBe(true);
+    expect(result.success).toBe(true);
+    expect(result.plan!.components).toHaveLength(1);
+    expect(result.plan!.components[0].data.value).toBe('73%');
+    expect(result.plan!.components[0].data.label).toBeFalsy();
   });
 
   it('rejects component missing required DURATION field', () => {

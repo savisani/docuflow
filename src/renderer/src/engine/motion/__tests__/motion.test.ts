@@ -357,14 +357,14 @@ describe('Motion Plan Validation — Resource Limits', () => {
     expect(result.valid).toBe(false);
   });
 
-  it('rejects empty component label', () => {
+  it('accepts component without label (label is optional)', () => {
     const plan = validPlan({
       components: [
-        { type: 'statistic', data: { value: '42', label: '' }, timing: { start: 0, duration: 2 } },
+        { type: 'statistic', data: { value: '42' }, timing: { start: 0, duration: 2 } },
       ],
     });
     const result = validateMotionPlan(plan);
-    expect(result.valid).toBe(false);
+    expect(result.valid).toBe(true);
   });
 
   it('rejects text exceeding max length', () => {
@@ -606,10 +606,10 @@ describe('Statistic Compiler — Validation', () => {
     expect(errors.length).toBeGreaterThan(0);
   });
 
-  it('rejects empty label', () => {
+  it('accepts missing label (label is optional)', () => {
     const compiler = new StatisticCompiler();
-    const errors = compiler.validate({ value: '42', label: '' }, 1920, 1080);
-    expect(errors.length).toBeGreaterThan(0);
+    const errors = compiler.validate({ value: '42' }, 1920, 1080);
+    expect(errors).toHaveLength(0);
   });
 
   it('rejects value exceeding max length', () => {
@@ -969,5 +969,191 @@ describe('Statistic Compiler — Motion Vocabulary', () => {
       const data = result.data as { commands: any[]; commandCount: number };
       expect(data.commandCount).toBeGreaterThan(0);
     }
+  });
+});
+
+// ───────────────────────────────────────────────────────────────
+// Regression: duplicate text and motion style behavior
+// ───────────────────────────────────────────────────────────────
+describe('Regression — duplicate text and motion differentiation', () => {
+  const compiler = new StatisticCompiler();
+
+  it('no label → only 1 text command (value)', () => {
+    const commands = compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '42%' },
+        timing: { start: 0, duration: 3 },
+      },
+      1920, 1080
+    );
+    const textCmds = commands.filter((c) => c.type === 'text');
+    expect(textCmds).toHaveLength(1);
+    expect(textCmds[0].content).toBe('42%');
+  });
+
+  it('label provided → 2 text commands (value + label)', () => {
+    const commands = compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '73%', label: 'of traffic' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920, 1080
+    );
+    const textCmds = commands.filter((c) => c.type === 'text');
+    expect(textCmds).toHaveLength(2);
+    expect(textCmds[0].content).toBe('73%');
+    expect(textCmds[1].content).toBe('of traffic');
+  });
+
+  it('zoom: fadeIn + scale', () => {
+    const commands = compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '42%' },
+        timing: { start: 0, duration: 3 },
+        style: { motion: 'zoom' },
+      },
+      1920, 1080
+    );
+    const hasFadeIn = commands.some((c) => c.type === 'fadeIn' && c.target);
+    const hasScale = commands.some((c) => c.type === 'scale');
+    const hasMove = commands.some((c) => c.type === 'move');
+    expect(hasFadeIn).toBe(true);
+    expect(hasScale).toBe(true);
+    expect(hasMove).toBe(false);
+  });
+
+  it('slideUp: move + fadeIn', () => {
+    const commands = compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '42%' },
+        timing: { start: 0, duration: 3 },
+        style: { motion: 'slideUp' },
+      },
+      1920, 1080
+    );
+    const moveCmds = commands.filter((c) => c.type === 'move');
+    const fadeInCmds = commands.filter((c) => c.type === 'fadeIn');
+    expect(moveCmds.length).toBeGreaterThanOrEqual(1);
+    expect(fadeInCmds.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('slideLeft: move + fadeIn', () => {
+    const commands = compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '42%' },
+        timing: { start: 0, duration: 3 },
+        style: { motion: 'slideLeft' },
+      },
+      1920, 1080
+    );
+    const moveCmds = commands.filter((c) => c.type === 'move');
+    expect(moveCmds.length).toBeGreaterThanOrEqual(1);
+    expect(moveCmds[0].from.x).toBeLessThan(moveCmds[0].to.x);
+  });
+
+  it('slideRight: move + fadeIn', () => {
+    const commands = compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '42%' },
+        timing: { start: 0, duration: 3 },
+        style: { motion: 'slideRight' },
+      },
+      1920, 1080
+    );
+    const moveCmds = commands.filter((c) => c.type === 'move');
+    expect(moveCmds.length).toBeGreaterThanOrEqual(1);
+    expect(moveCmds[0].from.x).toBeGreaterThan(moveCmds[0].to.x);
+  });
+
+  it('fade: fadeIn only, no move, no scale', () => {
+    const commands = compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '42%' },
+        timing: { start: 0, duration: 3 },
+        style: { motion: 'fade' },
+      },
+      1920, 1080
+    );
+    const fadeInCmds = commands.filter((c) => c.type === 'fadeIn');
+    const moveCmds = commands.filter((c) => c.type === 'move');
+    const scaleCmds = commands.filter((c) => c.type === 'scale');
+    expect(fadeInCmds.length).toBeGreaterThanOrEqual(1);
+    expect(moveCmds).toHaveLength(0);
+    expect(scaleCmds).toHaveLength(0);
+  });
+
+  it('pop: setKeyframes + fadeIn', () => {
+    const commands = compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '42%' },
+        timing: { start: 0, duration: 3 },
+        style: { motion: 'pop' },
+      },
+      1920, 1080
+    );
+    const keyframeCmds = commands.filter((c) => c.type === 'setKeyframes');
+    expect(keyframeCmds.length).toBeGreaterThanOrEqual(1);
+    expect(keyframeCmds[0].property).toBe('scale');
+  });
+
+  it('case-insensitive motion lookup', () => {
+    const commands = compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '42%' },
+        timing: { start: 0, duration: 3 },
+        style: { motion: 'SLIDEUP' },
+      },
+      1920, 1080
+    );
+    const moveCmds = commands.filter((c) => c.type === 'move');
+    expect(moveCmds.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('no label produces no label-targeting move commands', () => {
+    const commands = compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '42%' },
+        timing: { start: 0, duration: 3 },
+        style: { motion: 'slideUp' },
+      },
+      1920, 1080
+    );
+    const textCmds = commands.filter((c) => c.type === 'text');
+    expect(textCmds).toHaveLength(1);
+    const valueId = textCmds[0].id;
+    const moveCmds = commands.filter((c) => c.type === 'move');
+    for (const cmd of moveCmds) {
+      expect(cmd.target).toBe(valueId);
+    }
+  });
+
+  it('with label produces move commands for both targets', () => {
+    const commands = compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '42%', label: 'stat' },
+        timing: { start: 0, duration: 3 },
+        style: { motion: 'slideUp' },
+      },
+      1920, 1080
+    );
+    const textCmds = commands.filter((c) => c.type === 'text');
+    expect(textCmds).toHaveLength(2);
+    const valueId = textCmds[0].id;
+    const labelId = textCmds[1].id;
+    const moveCmds = commands.filter((c) => c.type === 'move');
+    const targets = moveCmds.map((c) => c.target);
+    expect(targets).toContain(valueId);
+    expect(targets).toContain(labelId);
   });
 });
