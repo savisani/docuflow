@@ -27,6 +27,8 @@ interface DragState {
   currentTrackIndex: number;
   hasMoved: boolean;
   maxDuration?: number;
+  offsetToCenterX: number;
+  offsetToCenterY: number;
 }
 
 export const Timeline: React.FC = () => {
@@ -552,6 +554,23 @@ export const Timeline: React.FC = () => {
         }
       }
 
+      // Calculate offset to center clip under mouse cursor
+      let offsetToCenterX = 0;
+      let offsetToCenterY = 0;
+      if (mode === 'move' && scrollContainerRef.current) {
+        const containerRect = scrollContainerRef.current.getBoundingClientRect();
+        const scrollLeft = scrollContainerRef.current.scrollLeft;
+        const scrollTop = scrollContainerRef.current.scrollTop;
+        const clipWidth = (clip.end - clip.start) * PIXELS_PER_SECOND * zoom;
+        const clipCenterX = clip.start * PIXELS_PER_SECOND * zoom + clipWidth / 2;
+        const clipCenterY = RULER_HEIGHT + layerIndex * TRACK_HEIGHT + TRACK_HEIGHT / 2;
+        // Convert clip center to viewport coordinates
+        const clipCenterViewportX = clipCenterX - scrollLeft + containerRect.left;
+        const clipCenterViewportY = clipCenterY - scrollTop + containerRect.top;
+        offsetToCenterX = clipCenterViewportX - e.clientX;
+        offsetToCenterY = clipCenterViewportY - e.clientY;
+      }
+
       setDragState({
         clipId: cmdId,
         trackType,
@@ -565,6 +584,8 @@ export const Timeline: React.FC = () => {
         currentTrackIndex: layerIndex >= 0 ? layerIndex : 0,
         hasMoved: false,
         maxDuration,
+        offsetToCenterX,
+        offsetToCenterY,
       });
     },
     [selectedCommandId, selectCommand, toggleCommandSelection, commands, trackLayerMap, assets]
@@ -652,7 +673,10 @@ export const Timeline: React.FC = () => {
       const hasMoved = Math.abs(dx) > 3 || Math.abs(dy) > 3;
 
       if (hasMoved) {
-        dragVisualOffsetRef.current = { clipId: state.clipId, dx, dy };
+        // Apply offset to center clip under mouse cursor
+        const visualDx = dx + state.offsetToCenterX;
+        const visualDy = dy + state.offsetToCenterY;
+        dragVisualOffsetRef.current = { clipId: state.clipId, dx: visualDx, dy: visualDy };
       }
 
       const currentZoom = zoomRef.current;
