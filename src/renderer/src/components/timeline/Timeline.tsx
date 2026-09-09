@@ -557,18 +557,13 @@ export const Timeline: React.FC = () => {
       // Calculate offset to center clip under mouse cursor
       let offsetToCenterX = 0;
       let offsetToCenterY = 0;
-      if (mode === 'move' && scrollContainerRef.current) {
-        const containerRect = scrollContainerRef.current.getBoundingClientRect();
-        const scrollLeft = scrollContainerRef.current.scrollLeft;
-        const scrollTop = scrollContainerRef.current.scrollTop;
-        const clipWidth = (clip.end - clip.start) * PIXELS_PER_SECOND * zoom;
-        const clipCenterX = clip.start * PIXELS_PER_SECOND * zoom + clipWidth / 2;
-        const clipCenterY = RULER_HEIGHT + layerIndex * TRACK_HEIGHT + TRACK_HEIGHT / 2;
-        // Convert clip center to viewport coordinates
-        const clipCenterViewportX = clipCenterX - scrollLeft + containerRect.left;
-        const clipCenterViewportY = clipCenterY - scrollTop + containerRect.top;
-        offsetToCenterX = clipCenterViewportX - e.clientX;
-        offsetToCenterY = clipCenterViewportY - e.clientY;
+      if (mode === 'move') {
+        // Use the clip element's bounding rect for accurate positioning
+        const clipRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const clipCenterX = clipRect.left + clipRect.width / 2;
+        const clipCenterY = clipRect.top + clipRect.height / 2;
+        offsetToCenterX = clipCenterX - e.clientX;
+        offsetToCenterY = clipCenterY - e.clientY;
       }
 
       setDragState({
