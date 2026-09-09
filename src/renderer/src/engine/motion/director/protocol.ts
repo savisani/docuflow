@@ -49,6 +49,21 @@ export type KnownPosition = (typeof KNOWN_POSITIONS)[number];
 export const KNOWN_VISUAL_STYLES = ['documentary', 'minimal', 'bold'] as const;
 export const KNOWN_MOTION_STYLES = ['subtle', 'moderate', 'energetic'] as const;
 
+// ── Style Aliases (weak model normalization) ────────────────────
+// Only explicitly approved aliases. The parser normalizes these
+// to canonical values before validation. Unknown styles still fail.
+
+export const STYLE_ALIASES: Record<string, string> = {
+  'minimalist': 'minimal',
+};
+
+// ── Operation Metadata Fields ───────────────────────────────────
+// These fields are NOT component fields. They are operation metadata
+// that may appear inside a component block from weak models (Gemma).
+// The parser extracts them into a separate ParsedOperationBlock.
+
+export const OPERATION_METADATA_FIELDS = ['operation', 'target', 'reason', 'confirm'] as const;
+
 // ── Parsed Component Block ──────────────────────────────────────
 
 export interface ParsedComponentBlock {

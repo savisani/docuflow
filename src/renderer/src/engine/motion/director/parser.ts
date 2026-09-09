@@ -9,6 +9,8 @@ import {
   KNOWN_POSITIONS,
   KNOWN_VISUAL_STYLES,
   KNOWN_MOTION_STYLES,
+  STYLE_ALIASES,
+  OPERATION_METADATA_FIELDS,
   type ParsedComponentBlock,
   type ParsedOperationBlock,
   type ParsedAIResponse,
@@ -53,6 +55,16 @@ function parseLine(raw: string, lineNum: number): ParsedLine | null {
   return { key, value, lineNum };
 }
 
+// ── Style Normalization ────────────────────────────────────────
+// Only explicitly approved aliases are normalized.
+// Unknown styles continue to fail validation.
+
+function normalizeStyle(raw: string | undefined): string | undefined {
+  if (!raw) return raw;
+  const lower = raw.toLowerCase().trim();
+  return STYLE_ALIASES[lower] ?? lower;
+}
+
 // ── Block Parsing ───────────────────────────────────────────────
 
 function parseBlocks(text: string): ParsedAIResponse {
@@ -75,16 +87,38 @@ function parseBlocks(text: string): ParsedAIResponse {
       // Parse as component block
       const type = currentBlock[0].value.toLowerCase();
       const fields: Record<string, string> = {};
+      const operationFields: Record<string, string> = {};
 
       for (let i = 1; i < currentBlock.length; i++) {
         const line = currentBlock[i];
         if (line.key === 'end') continue;
-        fields[line.key] = line.value;
+
+        // Separate operation metadata from component fields.
+        // Weak models (Gemma) may include OPERATION/TARGET/REASON inside
+        // the component block. These are NOT component fields.
+        if ((OPERATION_METADATA_FIELDS as readonly string[]).includes(line.key)) {
+          operationFields[line.key] = line.value;
+        } else {
+          fields[line.key] = line.value;
+        }
       }
 
       components.push({
         type,
         fields,
+        lineStart: blockStartLine,
+        lineEnd: blockStartLine + currentBlock.length - 1,
+      });
+
+      // If operation metadata was found, create a separate operation block.
+      // This allows the operation processing layer to handle it correctly.
+      // If no OPERATION field was provided, default to 'add' for new components.
+      const opType = (operationFields.operation ?? 'add').toLowerCase();
+      operations.push({
+        operation: opType,
+        targetId: operationFields.target,
+        reason: operationFields.reason,
+        confirm: operationFields.confirm,
         lineStart: blockStartLine,
         lineEnd: blockStartLine + currentBlock.length - 1,
       });
@@ -255,13 +289,13 @@ function validateComponent(
     });
   }
 
-  // Validate style if provided
-  const style = block.fields.style;
-  if (style && !KNOWN_VISUAL_STYLES.includes(style as any)) {
+  // Validate style if provided (normalize aliases first)
+  const normalizedStyle = normalizeStyle(block.fields.style);
+  if (block.fields.style && normalizedStyle && !KNOWN_VISUAL_STYLES.includes(normalizedStyle as any)) {
     errors.push({
       line: block.lineStart,
       field: 'style',
-      message: `Unknown style: "${style}". Known styles: ${KNOWN_VISUAL_STYLES.join(', ')}`,
+      message: `Unknown style: "${block.fields.style}". Known styles: ${KNOWN_VISUAL_STYLES.join(', ')}`,
       code: 'UNKNOWN_STYLE',
     });
   }
@@ -306,8 +340,8 @@ function blockToComponent(
   const position = block.fields.position;
   const coords = positionToCoordinates(position, canvasWidth, canvasHeight);
 
-  // Map style to MotionStyle
-  const visualStyle = (block.fields.style as any) || 'documentary';
+  // Map style to MotionStyle (normalize aliases)
+  const visualStyle = normalizeStyle(block.fields.style) || 'documentary';
 
   switch (block.type) {
     case 'statistic': {

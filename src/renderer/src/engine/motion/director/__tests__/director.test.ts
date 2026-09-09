@@ -698,3 +698,347 @@ END`;
     expect(result.plan!.components).toHaveLength(2);
   });
 });
+
+// ═════════════════════════════════════════════════════════════════
+// GEMMA RESPONSE — Operation Metadata in Component Block
+// ═════════════════════════════════════════════════════════════════
+
+describe('Parser — Gemma Response (Operation Metadata in Component)', () => {
+  it('parses the exact Gemma 1B response without errors', () => {
+    const response = `COMPONENT: statistic
+TEXT: 42%
+LABEL: Percentage
+DURATION: 4.0
+STYLE: minimalist
+START: 0.0
+OPERATION: UPDATE
+TARGET: 0
+REASON: Update the percentage
+END: END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.success).toBe(true);
+    expect(result.plan).toBeDefined();
+    expect(result.plan!.components).toHaveLength(1);
+
+    // Statistic fields should be valid
+    const comp = result.plan!.components[0];
+    expect(comp.type).toBe('statistic');
+    expect(comp.data.value).toBe('42%');
+    expect(comp.data.label).toBe('Percentage');
+  });
+
+  it('extracts operation metadata separately from component fields', () => {
+    const response = `COMPONENT: statistic
+TEXT: 42%
+LABEL: Percentage
+DURATION: 4.0
+OPERATION: UPDATE
+TARGET: 0
+REASON: Update the percentage
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.success).toBe(true);
+
+    // The operation should be parsed separately
+    expect(result.operations).toHaveLength(1);
+    expect(result.operations[0].operation).toBe('update');
+    expect(result.operations[0].targetId).toBe('0');
+    expect(result.operations[0].reason).toBe('Update the percentage');
+  });
+
+  it('does not report operation/target/reason as unknown component fields', () => {
+    const response = `COMPONENT: statistic
+TEXT: 42%
+LABEL: Percentage
+DURATION: 4.0
+OPERATION: UPDATE
+TARGET: 0
+REASON: Update the percentage
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.success).toBe(true);
+
+    // No errors should reference operation, target, or reason
+    const fieldErrors = result.errors.filter(
+      (e) => e.field === 'operation' || e.field === 'target' || e.field === 'reason'
+    );
+    expect(fieldErrors).toHaveLength(0);
+  });
+
+  it('normalizes "minimalist" style to "minimal"', () => {
+    const response = `COMPONENT: statistic
+TEXT: 42%
+LABEL: Percentage
+DURATION: 4.0
+STYLE: minimalist
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.success).toBe(true);
+
+    // The component should use canonical style
+    const comp = result.plan!.components[0];
+    expect((comp.style as any).visual).toBe('minimal');
+  });
+
+  it('defaults to ADD when no OPERATION field is present', () => {
+    const response = `COMPONENT: statistic
+TEXT: 73%
+LABEL: of traffic
+DURATION: 4
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.success).toBe(true);
+
+    // Should produce an ADD operation by default
+    expect(result.operations).toHaveLength(1);
+    expect(result.operations[0].operation).toBe('add');
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// STYLE NORMALIZATION
+// ═════════════════════════════════════════════════════════════════
+
+describe('Parser — Style Normalization', () => {
+  it('normalizes "minimalist" to "minimal"', () => {
+    const response = `COMPONENT: statistic
+TEXT: 73%
+LABEL: of traffic
+DURATION: 4
+STYLE: minimalist
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.success).toBe(true);
+    expect((result.plan!.components[0].style as any).visual).toBe('minimal');
+  });
+
+  it('accepts canonical "minimal" directly', () => {
+    const response = `COMPONENT: statistic
+TEXT: 73%
+LABEL: of traffic
+DURATION: 4
+STYLE: minimal
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.success).toBe(true);
+    expect((result.plan!.components[0].style as any).visual).toBe('minimal');
+  });
+
+  it('rejects unknown arbitrary styles like "neon cyberpunk extreme"', () => {
+    const response = `COMPONENT: statistic
+TEXT: 73%
+LABEL: of traffic
+DURATION: 4
+STYLE: neon cyberpunk extreme
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.success).toBe(false);
+    expect(result.errors.some((e) => e.code === 'UNKNOWN_STYLE')).toBe(true);
+  });
+
+  it('rejects unknown style "futuristic"', () => {
+    const response = `COMPONENT: statistic
+TEXT: 73%
+LABEL: of traffic
+DURATION: 4
+STYLE: futuristic
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.success).toBe(false);
+    expect(result.errors.some((e) => e.code === 'UNKNOWN_STYLE')).toBe(true);
+  });
+
+  it('case-insensitive normalization: "Minimalist" -> "minimal"', () => {
+    const response = `COMPONENT: statistic
+TEXT: 73%
+LABEL: of traffic
+DURATION: 4
+STYLE: Minimalist
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.success).toBe(true);
+    expect((result.plan!.components[0].style as any).visual).toBe('minimal');
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// OPERATION METADATA — UPDATE with Valid/Invalid Targets
+// ═════════════════════════════════════════════════════════════════
+
+describe('Parser — Operation Metadata', () => {
+  it('UPDATE with valid stable target is recognized', () => {
+    const response = `COMPONENT: statistic
+TEXT: 99%
+LABEL: Updated value
+DURATION: 3
+OPERATION: update
+TARGET: comp-abc-123
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.success).toBe(true);
+    expect(result.operations).toHaveLength(1);
+    expect(result.operations[0].operation).toBe('update');
+    expect(result.operations[0].targetId).toBe('comp-abc-123');
+  });
+
+  it('UPDATE with invalid target (numeric index) is recognized but operation layer rejects', () => {
+    const response = `COMPONENT: statistic
+TEXT: 99%
+LABEL: Updated value
+DURATION: 3
+OPERATION: update
+TARGET: 0
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.success).toBe(true);
+
+    // The parser extracts the operation
+    expect(result.operations).toHaveLength(1);
+    expect(result.operations[0].operation).toBe('update');
+    expect(result.operations[0].targetId).toBe('0');
+
+    // But the operations layer rejects it because "0" is not a valid existing ID
+    const opResult = processOperations(result.operations, ['comp-abc-123']);
+    expect(opResult.errors.length).toBeGreaterThan(0);
+    expect(opResult.errors.some((e) => e.code === 'TARGET_NOT_FOUND')).toBe(true);
+  });
+
+  it('REMOVE remains confirmation-gated', () => {
+    const response = `COMPONENT: statistic
+TEXT: 73%
+LABEL: of traffic
+DURATION: 4
+OPERATION: remove
+TARGET: comp-abc-123
+REASON: outdated
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.success).toBe(true);
+
+    const opResult = processOperations(result.operations, ['comp-abc-123']);
+    expect(opResult.blocked).toHaveLength(1);
+    expect(opResult.blocked[0].type).toBe('remove');
+    expect(opResult.blocked[0].confirmRequired).toBe(true);
+  });
+
+  it('REASON field is extracted as metadata', () => {
+    const response = `COMPONENT: statistic
+TEXT: 73%
+LABEL: of traffic
+DURATION: 4
+OPERATION: update
+TARGET: comp-abc-123
+REASON: Update the percentage
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.operations[0].reason).toBe('Update the percentage');
+  });
+
+  it('CONFIRM field is extracted as metadata', () => {
+    const response = `COMPONENT: statistic
+TEXT: 73%
+LABEL: of traffic
+DURATION: 4
+OPERATION: remove
+TARGET: comp-abc-123
+REASON: outdated
+CONFIRM: REQUIRED
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.operations[0].confirm).toBe('REQUIRED');
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// NUMERIC INDEXES MUST NOT BECOME STABLE IDS
+// ═════════════════════════════════════════════════════════════════
+
+describe('Parser — Numeric Index Rejection', () => {
+  it('numeric TARGET is parsed but rejected by operations layer', () => {
+    const response = `COMPONENT: statistic
+TEXT: 73%
+LABEL: of traffic
+DURATION: 4
+OPERATION: update
+TARGET: 0
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.success).toBe(true);
+
+    // "0" is parsed as the targetId string
+    expect(result.operations[0].targetId).toBe('0');
+
+    // But no real component has ID "0", so operations layer rejects it
+    const opResult = processOperations(result.operations, ['real-component-id']);
+    expect(opResult.errors.some((e) => e.code === 'TARGET_NOT_FOUND')).toBe(true);
+  });
+
+  it('numeric string TARGET is not silently converted to an ID', () => {
+    const response = `COMPONENT: statistic
+TEXT: 73%
+LABEL: of traffic
+DURATION: 4
+OPERATION: update
+TARGET: 42
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.operations[0].targetId).toBe('42');
+
+    // Even with "42" as an existing ID (unlikely), it must match exactly
+    const opResult = processOperations(result.operations, ['42']);
+    expect(opResult.operations).toHaveLength(1);
+    expect(opResult.operations[0].targetId).toBe('42');
+
+    // But with a real ID, it fails
+    const opResult2 = processOperations(result.operations, ['comp-real-id']);
+    expect(opResult2.errors.some((e) => e.code === 'TARGET_NOT_FOUND')).toBe(true);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// UNKNOWN COMPONENT FIELDS REMAIN REJECTED
+// ═════════════════════════════════════════════════════════════════
+
+describe('Parser — Unknown Fields Still Rejected', () => {
+  it('rejects component with arbitrary unknown field', () => {
+    const response = `COMPONENT: statistic
+TEXT: 73%
+LABEL: of traffic
+DURATION: 4
+INJECTED_FIELD: malicious
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.success).toBe(false);
+    expect(result.errors.some((e) => e.code === 'UNKNOWN_FIELD' && e.field === 'injected_field')).toBe(true);
+  });
+
+  it('rejects unknown component type', () => {
+    const response = `COMPONENT: chart
+TEXT: 73%
+LABEL: of traffic
+DURATION: 4
+END`;
+
+    const result = parseAIResponse(response, DEFAULT_OPTIONS);
+    expect(result.success).toBe(false);
+    expect(result.errors.some((e) => e.code === 'UNKNOWN_COMPONENT')).toBe(true);
+  });
+});
