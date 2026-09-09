@@ -7,7 +7,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from 'remotion';
-import { TimelineState, LayerState, AudioTrack, TextLayer } from '../types/timeline';
+import { TimelineState, LayerState, AudioTrack, TextLayer, AnimatedProperty } from '../types/timeline';
 import { resolveLayerState, resolveAudioVolume, isAudioActive, isTextActive, resolveCameraState } from '../engine/timeline/resolver';
 import { interpolate } from '../engine/animation/interpolation';
 
@@ -170,6 +170,20 @@ const RenderAudio: React.FC<{
   );
 };
 
+function resolveTextAnimation(animations: AnimatedProperty[], property: string, frame: number, baseValue: number): number {
+  let value = baseValue;
+  for (const anim of animations) {
+    if (anim.property !== property) continue;
+    if (frame < anim.startFrame) continue;
+    if (frame >= anim.endFrame) {
+      value = anim.to;
+    } else {
+      value = interpolate(frame, anim.startFrame, anim.endFrame, anim.from, anim.to, anim.easing);
+    }
+  }
+  return value;
+}
+
 const RenderText: React.FC<{
   text: TextLayer;
   frame: number;
@@ -177,15 +191,27 @@ const RenderText: React.FC<{
 }> = ({ text, frame, fps }) => {
   if (!isTextActive(text, frame)) return null;
 
-  const fadeInEnd = text.startFrame + Math.round(0.3 * fps);
-  const fadeOutStart = text.endFrame - Math.round(0.3 * fps);
+  const hasAnimations = text.animations.length > 0;
 
-  let opacity = 1;
-  if (frame < fadeInEnd) {
-    opacity = interpolate(frame, text.startFrame, fadeInEnd, 0, 1, 'easeOut');
-  } else if (frame > fadeOutStart) {
-    opacity = interpolate(frame, fadeOutStart, text.endFrame, 1, 0, 'easeIn');
+  let opacity: number;
+  let scale: number;
+
+  if (hasAnimations) {
+    opacity = resolveTextAnimation(text.animations, 'opacity', frame, 1);
+    scale = resolveTextAnimation(text.animations, 'scale', frame, 1);
+  } else {
+    const fadeInEnd = text.startFrame + Math.round(0.3 * fps);
+    const fadeOutStart = text.endFrame - Math.round(0.3 * fps);
+    opacity = 1;
+    if (frame < fadeInEnd) {
+      opacity = interpolate(frame, text.startFrame, fadeInEnd, 0, 1, 'easeOut');
+    } else if (frame > fadeOutStart) {
+      opacity = interpolate(frame, fadeOutStart, text.endFrame, 1, 0, 'easeIn');
+    }
+    scale = 1;
   }
+
+  if (opacity <= 0) return null;
 
   const positionStyle: React.CSSProperties = text.isSubtitle
     ? {
@@ -199,6 +225,8 @@ const RenderText: React.FC<{
         top: text.y,
       };
 
+  const scaleTransform = scale !== 1 ? ` scale(${scale})` : '';
+
   return (
     <div
       style={{
@@ -210,6 +238,7 @@ const RenderText: React.FC<{
         fontWeight: text.isSubtitle ? 'bold' : 'normal',
         textShadow: '2px 2px 4px rgba(0,0,0,0.8)',
         opacity,
+        transform: scaleTransform || undefined,
         whiteSpace: 'pre-wrap',
         textAlign: 'center',
         maxWidth: text.isSubtitle ? '80%' : undefined,

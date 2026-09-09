@@ -4,7 +4,11 @@ import { processMotionRequest } from '../gateway';
 import { getCapabilities, isCapabilityAllowed } from '../capabilities';
 import { ComponentRegistry } from '../components/registry';
 import { StatisticCompiler } from '../components/statistic/compiler';
+import { buildTimeline } from '../../timeline/builder';
+import { resolveLayerState } from '../../timeline/resolver';
+import { isTextActive } from '../../timeline/resolver';
 import type { MotionPlanV1, MotionRequestV1 } from '../types';
+import type { ProjectSettings } from '../../../types/project';
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -626,5 +630,133 @@ describe('Statistic Compiler — Validation', () => {
       1080
     );
     expect(errors.length).toBeGreaterThan(0);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// STATISTIC COMPILER — ANIMATION COMMANDS
+// ═════════════════════════════════════════════════════════════════
+
+describe('Statistic Compiler — Animation Commands', () => {
+  const compiler = new StatisticCompiler();
+  const settings: ProjectSettings = { width: 1920, height: 1080, fps: 30 };
+
+  function compileStatistic(value: string, label: string, duration: number, start = 0) {
+    return compiler.compile(
+      { type: 'statistic', data: { value, label }, timing: { start, duration } },
+      1920,
+      1080
+    );
+  }
+
+  it('produces text commands for value and label', () => {
+    const commands = compileStatistic('42%', 'sample rate', 4);
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds).toHaveLength(2);
+    expect(textCmds[0].content).toBe('42%');
+    expect(textCmds[1].content).toBe('sample rate');
+  });
+
+  it('produces fadeIn commands for both text elements', () => {
+    const commands = compileStatistic('42%', 'sample rate', 4);
+    const fadeIns = commands.filter(c => c.type === 'fadeIn');
+    expect(fadeIns).toHaveLength(2);
+    for (const cmd of fadeIns) {
+      expect(cmd.start).toBe(0);
+      expect(cmd.duration).toBeGreaterThan(0);
+      expect(cmd.duration).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  it('produces fadeOut commands for both text elements', () => {
+    const commands = compileStatistic('42%', 'sample rate', 4);
+    const fadeOuts = commands.filter(c => c.type === 'fadeOut');
+    expect(fadeOuts).toHaveLength(2);
+    for (const cmd of fadeOuts) {
+      expect(cmd.start).toBeGreaterThan(3);
+      expect(cmd.start).toBeLessThan(4);
+      expect(cmd.duration).toBeGreaterThan(0);
+    }
+  });
+
+  it('produces a scale command for the value', () => {
+    const commands = compileStatistic('42%', 'sample rate', 4);
+    const scales = commands.filter(c => c.type === 'scale');
+    expect(scales).toHaveLength(1);
+    expect(scales[0].from).toBe(0.8);
+    expect(scales[0].to).toBe(1);
+    expect(scales[0].easing).toBe('easeOut');
+  });
+
+  it('animation commands target text command IDs', () => {
+    const commands = compileStatistic('42%', 'sample rate', 4);
+    const textIds = commands.filter(c => c.type === 'text').map(c => c.id);
+    const animCmds = commands.filter(c => c.type === 'fadeIn' || c.type === 'fadeOut' || c.type === 'scale');
+    for (const cmd of animCmds) {
+      expect(textIds).toContain(cmd.target);
+    }
+  });
+
+  it('no animation exceeds the statistic duration', () => {
+    const duration = 4;
+    const commands = compileStatistic('42%', 'sample rate', duration);
+    for (const cmd of commands) {
+      const cmdEnd = cmd.start + (cmd.duration || 0);
+      expect(cmdEnd).toBeLessThanOrEqual(duration + 0.01);
+    }
+  });
+
+  it('no new command types are introduced', () => {
+    const allowedTypes = ['text', 'fadeIn', 'fadeOut', 'scale'];
+    const commands = compileStatistic('42%', 'sample rate', 4);
+    for (const cmd of commands) {
+      expect(allowedTypes).toContain(cmd.type);
+    }
+  });
+
+  it('centered position uses canvas midpoint', () => {
+    const commands = compileStatistic('42%', 'sample rate', 4);
+    const valueText = commands.find(c => c.type === 'text' && c.content === '42%')!;
+    expect(valueText.x).toBe(960);
+    expect(valueText.y).toBe(510);
+  });
+
+  it('compiles through buildTimeline and attaches animations to text layers', () => {
+    const commands = compileStatistic('42%', 'sample rate', 4);
+    const timeline = buildTimeline(commands, [], settings);
+
+    expect(timeline.textLayers.length).toBe(2);
+    const valueLayer = timeline.textLayers.find(t => t.content === '42%')!;
+    expect(valueLayer).toBeDefined();
+    expect(valueLayer.animations.length).toBeGreaterThan(0);
+
+    const opacityAnims = valueLayer.animations.filter(a => a.property === 'opacity');
+    expect(opacityAnims.length).toBeGreaterThanOrEqual(2);
+
+    const scaleAnims = valueLayer.animations.filter(a => a.property === 'scale');
+    expect(scaleAnims.length).toBe(1);
+  });
+
+  it('text layer resolves correct opacity at frame 0 (before fade-in completes)', () => {
+    const commands = compileStatistic('42%', 'sample rate', 4);
+    const timeline = buildTimeline(commands, [], settings);
+    const valueLayer = timeline.textLayers.find(t => t.content === '42%')!;
+    expect(isTextActive(valueLayer, 0)).toBe(true);
+  });
+
+  it('text layer resolves correct opacity mid-duration (fully visible)', () => {
+    const commands = compileStatistic('42%', 'sample rate', 4);
+    const timeline = buildTimeline(commands, [], settings);
+    const valueLayer = timeline.textLayers.find(t => t.content === '42%')!;
+    const midFrame = Math.round(2 * settings.fps);
+    expect(isTextActive(valueLayer, midFrame)).toBe(true);
+  });
+
+  it('text layer is inactive after end', () => {
+    const commands = compileStatistic('42%', 'sample rate', 4);
+    const timeline = buildTimeline(commands, [], settings);
+    const valueLayer = timeline.textLayers.find(t => t.content === '42%')!;
+    const afterEnd = Math.round(4.1 * settings.fps);
+    expect(isTextActive(valueLayer, afterEnd)).toBe(false);
   });
 });

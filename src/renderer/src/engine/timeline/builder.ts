@@ -79,6 +79,10 @@ export function buildTimeline(
   const audioTracks: AudioTrack[] = [];
   const textLayers: TextLayer[] = [];
 
+  function findTextLayer(id: string): TextLayer | undefined {
+    return textLayers.find(t => t.id === id);
+  }
+
   const sorted = [...commands].sort((a, b) => a.start - b.start);
 
   let maxFrame = 0;
@@ -204,8 +208,19 @@ export function buildTimeline(
 
       case 'scale': {
         const layer = layers[cmd.target];
+        const textLayer = layer ? undefined : findTextLayer(cmd.target);
         if (layer) {
           layer.animations.push({
+            property: 'scale',
+            startFrame,
+            endFrame: startFrame + durationFrames,
+            from: cmd.from,
+            to: cmd.to,
+            easing: cmd.easing || 'linear',
+          });
+          if (startFrame + durationFrames > maxFrame) maxFrame = startFrame + durationFrames;
+        } else if (textLayer) {
+          textLayer.animations.push({
             property: 'scale',
             startFrame,
             endFrame: startFrame + durationFrames,
@@ -276,9 +291,21 @@ export function buildTimeline(
 
       case 'fadeIn': {
         const layer = layers[cmd.target];
+        const textLayer = layer ? undefined : findTextLayer(cmd.target);
         if (layer) {
           const dur = Math.round(cmd.duration * fps);
           layer.animations.push({
+            property: 'opacity',
+            startFrame,
+            endFrame: startFrame + dur,
+            from: 0,
+            to: 1,
+            easing: 'easeOut',
+          });
+          if (startFrame + dur > maxFrame) maxFrame = startFrame + dur;
+        } else if (textLayer) {
+          const dur = Math.round(cmd.duration * fps);
+          textLayer.animations.push({
             property: 'opacity',
             startFrame,
             endFrame: startFrame + dur,
@@ -293,9 +320,21 @@ export function buildTimeline(
 
       case 'fadeOut': {
         const layer = layers[cmd.target];
+        const textLayer = layer ? undefined : findTextLayer(cmd.target);
         if (layer) {
           const dur = Math.round(cmd.duration * fps);
           layer.animations.push({
+            property: 'opacity',
+            startFrame,
+            endFrame: startFrame + dur,
+            from: 1,
+            to: 0,
+            easing: 'easeIn',
+          });
+          if (startFrame + dur > maxFrame) maxFrame = startFrame + dur;
+        } else if (textLayer) {
+          const dur = Math.round(cmd.duration * fps);
+          textLayer.animations.push({
             property: 'opacity',
             startFrame,
             endFrame: startFrame + dur,
@@ -709,6 +748,7 @@ export function buildTimeline(
           color: textCmd?.color ?? '#FFFFFF',
           isSubtitle: isSub,
           zIndex: textZIndex,
+          animations: [],
         });
         if (endFrame > maxFrame) maxFrame = endFrame;
         break;

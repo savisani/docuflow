@@ -82,6 +82,7 @@ export interface TextLayer {
   color: string;
   isSubtitle: boolean;
   zIndex: number;
+  animations: AnimatedProperty[];
 }
 
 export interface CameraState {
