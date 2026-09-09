@@ -562,8 +562,8 @@ export const Timeline: React.FC = () => {
         const clipRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const clipCenterX = clipRect.left + clipRect.width / 2;
         const clipCenterY = clipRect.top + clipRect.height / 2;
-        offsetToCenterX = clipCenterX - e.clientX;
-        offsetToCenterY = clipCenterY - e.clientY;
+        offsetToCenterX = e.clientX - clipCenterX;
+        offsetToCenterY = e.clientY - clipCenterY;
       }
 
       setDragState({
@@ -732,7 +732,9 @@ export const Timeline: React.FC = () => {
 
       const dx = visualOffset?.dx ?? 0;
       const dy = visualOffset?.dy ?? 0;
-      const dt = dx / (PIXELS_PER_SECOND * zoomRef.current);
+      const rawDx = dx - state.offsetToCenterX;
+      const rawDy = dy - state.offsetToCenterY;
+      const dt = rawDx / (PIXELS_PER_SECOND * zoomRef.current);
       const currentSnap = snapRef.current;
       const currentTrackLayerMap = trackLayerMapRef.current;
       const currentUpdateCommand = updateCommandRef.current;
@@ -742,7 +744,7 @@ export const Timeline: React.FC = () => {
       if (state.mode === 'move') {
         const rawStart = state.originalStart + dt;
         const newStart = Math.max(0, currentSnap(rawStart, state.clipId));
-        const rawTrackIndex = state.originalLayerIndex + Math.round(dy / TRACK_HEIGHT);
+        const rawTrackIndex = state.originalLayerIndex + Math.round(rawDy / TRACK_HEIGHT);
         const clampedTrackIndex = Math.max(0, Math.min(currentTrackLayerMap.length - 1, rawTrackIndex));
 
         let targetZIndex = state.originalZIndex;
