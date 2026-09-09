@@ -5,6 +5,7 @@ import { Asset } from '../types/assets';
 import { ProjectSettings, Project, ProjectVoiceover, ProjectTranscript, ProjectSceneMarker, ProjectScene } from '../types/project';
 import { Command } from '../engine/commands/types';
 import { TimelineState } from '../types/timeline';
+import type { MotionPlanV1 } from '../engine/motion/types';
 import { buildTimeline } from '../engine/timeline/builder';
 import { ProjectSchema } from '../schemas';
 import { normalizeError } from '../../../core/errors';
@@ -12,7 +13,7 @@ import { migrateProject, CURRENT_PROJECT_VERSION } from '../../../core/project';
 import type { SerializedDocuFlowError, ErrorCode } from '../../../core/errors';
 
 export type PreviewMode = 'timeline' | 'asset';
-export type ActiveTab = 'studio' | 'generator' | 'scenes';
+export type ActiveTab = 'studio' | 'generator' | 'scenes' | 'motion';
 export type RightPanel = 'inspector' | 'commands' | 'animation';
 
 export interface GeneratedImage {
@@ -182,6 +183,12 @@ interface DocuFlowState {
 
   // Clipboard for cut/copy/paste
   clipboardCommands: Command[];
+
+  // AI Motion Graphics state
+  motionPlan: MotionPlanV1 | null;
+  motionPreviewCommands: Command[];
+  setMotionPlan: (plan: MotionPlanV1 | null) => void;
+  setMotionPreviewCommands: (commands: Command[]) => void;
 
   setProject: (project: Project) => void;
   setAssets: (assets: Asset[]) => void;
@@ -417,6 +424,9 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
 
   clipboardCommands: [],
 
+  motionPlan: null,
+  motionPreviewCommands: [],
+
   setProject: (project) => {
     const state = get();
     const newVoiceover = project.voiceover ?? null;
@@ -518,6 +528,8 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
   setTimeline: (timeline) => set({ timeline }),
   setSettings: (settings) => set({ settings, isDirty: true, saveStatus: 'unsaved' }),
   setActiveTab: (tab) => set({ activeTab: tab }),
+  setMotionPlan: (plan) => set({ motionPlan: plan }),
+  setMotionPreviewCommands: (commands) => set({ motionPreviewCommands: commands }),
   addGeneratedImage: (image) => set((state) => ({ generatedImages: [...state.generatedImages, image] })),
   updateGeneratedImage: (id, updates) => set((state) => ({
     generatedImages: state.generatedImages.map((img) =>

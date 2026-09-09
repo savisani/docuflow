@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Minus, Square, X, Maximize2, Undo2, Redo2, PanelLeft, Image, SlidersHorizontal, Sparkles, Film, Clapperboard, FileText, FolderOpen, Save, FilePlus } from 'lucide-react';
+import { Minus, Square, X, Maximize2, Undo2, Redo2, PanelLeft, Image, SlidersHorizontal, Sparkles, Film, Clapperboard, FileText, FolderOpen, Save, FilePlus, Workflow } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { Tooltip, Dropdown } from '../ui';
 
@@ -7,6 +7,7 @@ const TABS = [
   { id: 'studio' as const, label: 'Studio', icon: Film },
   { id: 'generator' as const, label: 'Image Gen', icon: Sparkles },
   { id: 'scenes' as const, label: 'Scene Gen', icon: Clapperboard },
+  { id: 'motion' as const, label: 'Motion GFX', icon: Workflow },
 ] as const;
 
 export const TitleBar: React.FC = () => {

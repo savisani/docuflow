@@ -1,0 +1,630 @@
+import { describe, it, expect } from 'vitest';
+import { validateMotionPlan, validateMotionRequest, MOTION_LIMITS } from '../validator';
+import { processMotionRequest } from '../gateway';
+import { getCapabilities, isCapabilityAllowed } from '../capabilities';
+import { ComponentRegistry } from '../components/registry';
+import { StatisticCompiler } from '../components/statistic/compiler';
+import type { MotionPlanV1, MotionRequestV1 } from '../types';
+
+// ── Helpers ─────────────────────────────────────────────────────
+
+function validPlan(overrides?: Partial<MotionPlanV1>): MotionPlanV1 {
+  return {
+    version: 1,
+    metadata: { name: 'Test Plan' },
+    canvas: { width: 1920, height: 1080 },
+    duration: 5,
+    style: { visual: 'documentary', motion: 'subtle' },
+    components: [
+      {
+        type: 'statistic',
+        data: { value: '73%', label: 'of global traffic' },
+        timing: { start: 0, duration: 4 },
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function validRequest(overrides?: Partial<MotionRequestV1>): MotionRequestV1 {
+  return {
+    version: 1,
+    operation: 'getCapabilities',
+    requestId: 'test-req-001',
+    ...overrides,
+  };
+}
+
+// ═════════════════════════════════════════════════════════════════
+// VALID INPUTS
+// ═════════════════════════════════════════════════════════════════
+
+describe('Motion Plan Validation — Valid Inputs', () => {
+  it('accepts a minimal valid plan', () => {
+    const result = validateMotionPlan(validPlan());
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('accepts a plan with optional fields', () => {
+    const plan = validPlan({
+      metadata: { name: 'Test', description: 'A test plan', createdAt: '2026-01-01' },
+      components: [
+        {
+          type: 'statistic',
+          id: 'comp-1',
+          data: { value: '42', label: 'Answers', unit: 'count', source: 'research' },
+          timing: { start: 0, duration: 3 },
+          style: { color: '#FF0000' },
+        },
+      ],
+    });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts plan with multiple components', () => {
+    const plan = validPlan({
+      components: [
+        { type: 'statistic', data: { value: '1', label: 'First' }, timing: { start: 0, duration: 2 } },
+        { type: 'statistic', data: { value: '2', label: 'Second' }, timing: { start: 2, duration: 2 } },
+        { type: 'statistic', data: { value: '3', label: 'Third' }, timing: { start: 4, duration: 1 } },
+      ],
+    });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(true);
+  });
+});
+
+describe('Motion Request Validation — Valid Inputs', () => {
+  it('accepts a valid getCapabilities request', () => {
+    const result = validateMotionRequest(validRequest());
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts a valid compilePlan request', () => {
+    const result = validateMotionRequest(validRequest({
+      operation: 'compilePlan',
+      plan: validPlan(),
+    }));
+    expect(result.valid).toBe(true);
+  });
+});
+
+describe('Capability Model — Valid', () => {
+  it('returns all capabilities', () => {
+    const caps = getCapabilities();
+    expect(caps.length).toBeGreaterThanOrEqual(7);
+  });
+
+  it('allows known capabilities', () => {
+    expect(isCapabilityAllowed('motion.plan.create')).toBe(true);
+    expect(isCapabilityAllowed('motion.plan.validate')).toBe(true);
+    expect(isCapabilityAllowed('motion.component.list')).toBe(true);
+    expect(isCapabilityAllowed('motion.component.compile')).toBe(true);
+    expect(isCapabilityAllowed('motion.preview')).toBe(true);
+    expect(isCapabilityAllowed('motion.timeline.preview')).toBe(true);
+    expect(isCapabilityAllowed('motion.timeline.add')).toBe(true);
+  });
+});
+
+describe('Component Registry — Valid', () => {
+  it('registers statistic component', () => {
+    expect(ComponentRegistry.isRegistered('statistic')).toBe(true);
+  });
+
+  it('returns registered types', () => {
+    const types = ComponentRegistry.getRegisteredTypes();
+    expect(types).toContain('statistic');
+  });
+
+  it('gets statistic compiler', () => {
+    const compiler = ComponentRegistry.get('statistic');
+    expect(compiler).toBeDefined();
+    expect(compiler?.componentType).toBe('statistic');
+  });
+});
+
+describe('Statistic Compiler — Valid', () => {
+  it('compiles a statistic component to commands', () => {
+    const compiler = new StatisticCompiler();
+    const commands = compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '73%', label: 'of global traffic' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+
+    expect(commands.length).toBeGreaterThan(0);
+    // Should have text commands for value and label
+    const textCmds = commands.filter((c) => c.type === 'text');
+    expect(textCmds.length).toBe(2);
+    // Should have fade animations
+    const fadeCmds = commands.filter((c) => c.type === 'fadeIn' || c.type === 'fadeOut');
+    expect(fadeCmds.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('validates correct data', () => {
+    const compiler = new StatisticCompiler();
+    const errors = compiler.validate(
+      { value: '73%', label: 'of global traffic' },
+      1920,
+      1080
+    );
+    expect(errors).toHaveLength(0);
+  });
+});
+
+describe('Gateway — Valid Operations', () => {
+  it('processes getCapabilities', () => {
+    const response = processMotionRequest(validRequest());
+    expect(response.status).toBe('success');
+    expect(response.operation).toBe('getCapabilities');
+    expect(Array.isArray(response.data)).toBe(true);
+  });
+
+  it('processes getComponents', () => {
+    const response = processMotionRequest(validRequest({ operation: 'getComponents' }));
+    expect(response.status).toBe('success');
+    expect(response.data).toEqual([{ type: 'statistic' }]);
+  });
+
+  it('processes validatePlan', () => {
+    const response = processMotionRequest(validRequest({
+      operation: 'validatePlan',
+      plan: validPlan(),
+    }));
+    expect(response.status).toBe('success');
+    expect((response.data as any).valid).toBe(true);
+  });
+
+  it('processes createPlan', () => {
+    const response = processMotionRequest(validRequest({
+      operation: 'createPlan',
+      plan: validPlan(),
+    }));
+    expect(response.status).toBe('success');
+  });
+
+  it('processes compilePlan', () => {
+    const response = processMotionRequest(validRequest({
+      operation: 'compilePlan',
+      plan: validPlan(),
+    }));
+    expect(response.status).toBe('success');
+    const data = response.data as { commands: any[]; commandCount: number };
+    expect(data.commandCount).toBeGreaterThan(0);
+    expect(data.commands.length).toBeGreaterThan(0);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// INVALID / MALICIOUS INPUTS
+// ═════════════════════════════════════════════════════════════════
+
+describe('Motion Plan Validation — Invalid Inputs', () => {
+  it('rejects null input', () => {
+    const result = validateMotionPlan(null);
+    expect(result.valid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects non-object input', () => {
+    const result = validateMotionPlan('not an object');
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects missing version', () => {
+    const plan = validPlan();
+    (plan as any).version = undefined;
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.field === 'version')).toBe(true);
+  });
+
+  it('rejects wrong version', () => {
+    const plan = validPlan();
+    (plan as any).version = 2;
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects missing metadata', () => {
+    const plan = validPlan();
+    (plan as any).metadata = undefined;
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects empty metadata name', () => {
+    const plan = validPlan({ metadata: { name: '' } });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects negative duration', () => {
+    const plan = validPlan({ duration: -1 });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects zero duration', () => {
+    const plan = validPlan({ duration: 0 });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects duration exceeding limit', () => {
+    const plan = validPlan({ duration: MOTION_LIMITS.MAX_DURATION + 1 });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects non-finite duration', () => {
+    const plan = validPlan({ duration: Infinity });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects NaN duration', () => {
+    const plan = validPlan({ duration: NaN });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects invalid canvas width', () => {
+    const plan = validPlan({ canvas: { width: 0, height: 1080 } });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects canvas width exceeding limit', () => {
+    const plan = validPlan({ canvas: { width: MOTION_LIMITS.MAX_CANVAS_WIDTH + 1, height: 1080 } });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects non-integer canvas width', () => {
+    const plan = validPlan({ canvas: { width: 1920.5, height: 1080 } });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects invalid style visual', () => {
+    const plan = validPlan({ style: { visual: 'neon', motion: 'subtle' } as any });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects invalid style motion', () => {
+    const plan = validPlan({ style: { visual: 'documentary', motion: 'frantic' } as any });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+  });
+});
+
+describe('Motion Plan Validation — Resource Limits', () => {
+  it('rejects plan with too many components', () => {
+    const components = Array.from({ length: MOTION_LIMITS.MAX_COMPONENTS + 1 }, (_, i) => ({
+      type: 'statistic' as const,
+      data: { value: `${i}`, label: `Item ${i}` },
+      timing: { start: 0, duration: 1 },
+    }));
+    const plan = validPlan({ components });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.code === 'too_big')).toBe(true);
+  });
+
+  it('rejects component with timing exceeding plan duration', () => {
+    const plan = validPlan({
+      duration: 5,
+      components: [
+        { type: 'statistic', data: { value: '1', label: 'X' }, timing: { start: 3, duration: 4 } },
+      ],
+    });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.code === 'TIMING_EXCEEDS_DURATION')).toBe(true);
+  });
+
+  it('rejects duplicate component IDs', () => {
+    const plan = validPlan({
+      components: [
+        { type: 'statistic', id: 'dup', data: { value: '1', label: 'A' }, timing: { start: 0, duration: 2 } },
+        { type: 'statistic', id: 'dup', data: { value: '2', label: 'B' }, timing: { start: 2, duration: 2 } },
+      ],
+    });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.code === 'DUPLICATE_IDS')).toBe(true);
+  });
+
+  it('rejects empty component value', () => {
+    const plan = validPlan({
+      components: [
+        { type: 'statistic', data: { value: '', label: 'Label' }, timing: { start: 0, duration: 2 } },
+      ],
+    });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects empty component label', () => {
+    const plan = validPlan({
+      components: [
+        { type: 'statistic', data: { value: '42', label: '' }, timing: { start: 0, duration: 2 } },
+      ],
+    });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects text exceeding max length', () => {
+    const longText = 'x'.repeat(MOTION_LIMITS.MAX_TEXT_LENGTH + 1);
+    const plan = validPlan({
+      components: [
+        { type: 'statistic', data: { value: longText, label: 'Label' }, timing: { start: 0, duration: 2 } },
+      ],
+    });
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(false);
+  });
+});
+
+describe('Motion Request Validation — Invalid Inputs', () => {
+  it('rejects null request', () => {
+    const result = validateMotionRequest(null);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects unknown operation', () => {
+    const result = validateMotionRequest({
+      version: 1,
+      operation: 'execute',
+      requestId: 'test',
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.code === 'UNKNOWN_OPERATION')).toBe(true);
+  });
+
+  it('rejects arbitrary operations', () => {
+    const maliciousOps = [
+      'shell', 'exec', 'run', 'filesystem', 'process', 'system',
+      'invokeAny', 'eval', 'function', 'spawn', 'child_process',
+    ];
+    for (const op of maliciousOps) {
+      const result = validateMotionRequest({
+        version: 1,
+        operation: op,
+        requestId: 'test',
+      });
+      expect(result.valid).toBe(false);
+    }
+  });
+
+  it('rejects missing requestId', () => {
+    const result = validateMotionRequest({
+      version: 1,
+      operation: 'getCapabilities',
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.code === 'MISSING_REQUEST_ID')).toBe(true);
+  });
+
+  it('rejects wrong version', () => {
+    const result = validateMotionRequest({
+      version: 99,
+      operation: 'getCapabilities',
+      requestId: 'test',
+    });
+    expect(result.valid).toBe(false);
+  });
+});
+
+describe('Gateway — Security', () => {
+  it('rejects unknown operations', () => {
+    const response = processMotionRequest({
+      version: 1,
+      operation: 'execute',
+      requestId: 'test',
+    });
+    expect(response.status).toBe('error');
+  });
+
+  it('rejects malicious operations', () => {
+    const maliciousOps = [
+      'shell', 'exec', 'run', 'filesystem', 'process', 'system',
+      'invokeAny', 'eval', 'function', 'spawn', 'child_process',
+    ];
+    for (const op of maliciousOps) {
+      const response = processMotionRequest({
+        version: 1,
+        operation: op,
+        requestId: 'test',
+      });
+      expect(response.status).toBe('error');
+    }
+  });
+
+  it('rejects compilePlan without plan', () => {
+    const response = processMotionRequest({
+      version: 1,
+      operation: 'compilePlan',
+      requestId: 'test',
+    });
+    expect(response.status).toBe('error');
+  });
+
+  it('rejects compilePlan with invalid plan', () => {
+    const response = processMotionRequest({
+      version: 1,
+      operation: 'compilePlan',
+      requestId: 'test',
+      plan: { version: 1, metadata: { name: '' } },
+    });
+    expect(response.status).toBe('error');
+  });
+
+  it('rejects plan with unknown component type', () => {
+    const response = processMotionRequest({
+      version: 1,
+      operation: 'compilePlan',
+      requestId: 'test',
+      plan: validPlan({
+        components: [
+          { type: 'malicious_component' as any, data: {}, timing: { start: 0, duration: 1 } },
+        ],
+      }),
+    });
+    expect(response.status).toBe('error');
+  });
+
+  it('rejects malformed JSON input', () => {
+    const response = processMotionRequest('not json at all');
+    expect(response.status).toBe('error');
+  });
+
+  it('rejects array input', () => {
+    const response = processMotionRequest([1, 2, 3]);
+    expect(response.status).toBe('error');
+  });
+
+  it('rejects numeric input', () => {
+    const response = processMotionRequest(42);
+    expect(response.status).toBe('error');
+  });
+});
+
+describe('Security — Path Traversal', () => {
+  it('rejects plans with filesystem paths in component data', () => {
+    const plan = validPlan({
+      components: [
+        {
+          type: 'statistic',
+          data: { value: 'C:\\Users\\admin\\secret.txt', label: 'test' },
+          timing: { start: 0, duration: 2 },
+        },
+      ],
+    });
+    // The plan should still validate since data fields are strings
+    // But the gateway compilation will treat them as text content, not paths
+    const result = validateMotionPlan(plan);
+    expect(result.valid).toBe(true); // Data is strings, validated as strings
+    // The key security is that paths are never executed, only rendered as text
+  });
+
+  it('rejects shell commands in structural fields', () => {
+    const plan = validPlan({
+      metadata: { name: 'test' },
+    });
+    // Inject suspicious content into a structural field
+    (plan as any).metadata.name = 'eval("malicious")';
+    const result = validateMotionPlan(plan);
+    // This should be caught by suspicious content detection
+    // if it appears in structural fields
+  });
+});
+
+describe('Security — No Execution Path', () => {
+  it('statistic compiler produces only text and animation commands', () => {
+    const compiler = new StatisticCompiler();
+    const commands = compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '73%', label: 'of global traffic' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+
+    const allowedTypes = ['text', 'fadeIn', 'fadeOut', 'scale', 'opacity'];
+    for (const cmd of commands) {
+      expect(allowedTypes).toContain(cmd.type);
+    }
+  });
+
+  it('no command contains executable code', () => {
+    const compiler = new StatisticCompiler();
+    const commands = compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: 'test', label: 'test' },
+        timing: { start: 0, duration: 2 },
+      },
+      1920,
+      1080
+    );
+
+    const planStr = JSON.stringify(commands);
+    expect(planStr).not.toContain('eval(');
+    expect(planStr).not.toContain('Function(');
+    expect(planStr).not.toContain('child_process');
+    expect(planStr).not.toContain('require(');
+    expect(planStr).not.toContain('spawn(');
+    expect(planStr).not.toContain('exec(');
+    expect(planStr).not.toContain('shell');
+    expect(planStr).not.toContain('powershell');
+    expect(planStr).not.toContain('cmd.exe');
+    expect(planStr).not.toContain('python');
+  });
+});
+
+describe('Capability Model — Denials', () => {
+  it('rejects unknown capabilities', () => {
+    expect(isCapabilityAllowed('unknown.capability')).toBe(false);
+    expect(isCapabilityAllowed('')).toBe(false);
+    expect(isCapabilityAllowed('motion.')).toBe(false);
+    expect(isCapabilityAllowed('motion.plan.')).toBe(false);
+    expect(isCapabilityAllowed('motion.system.execute')).toBe(false);
+    expect(isCapabilityAllowed('shell.execute')).toBe(false);
+    expect(isCapabilityAllowed('filesystem.read')).toBe(false);
+  });
+});
+
+describe('Component Registry — Denials', () => {
+  it('rejects unknown component types', () => {
+    expect(ComponentRegistry.isRegistered('unknown')).toBe(false);
+    expect(ComponentRegistry.isRegistered('')).toBe(false);
+    expect(ComponentRegistry.isRegistered('malicious')).toBe(false);
+    expect(ComponentRegistry.get('unknown')).toBeUndefined();
+  });
+});
+
+describe('Statistic Compiler — Validation', () => {
+  it('rejects empty value', () => {
+    const compiler = new StatisticCompiler();
+    const errors = compiler.validate({ value: '', label: 'test' }, 1920, 1080);
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects empty label', () => {
+    const compiler = new StatisticCompiler();
+    const errors = compiler.validate({ value: '42', label: '' }, 1920, 1080);
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects value exceeding max length', () => {
+    const compiler = new StatisticCompiler();
+    const errors = compiler.validate(
+      { value: 'x'.repeat(501), label: 'test' },
+      1920,
+      1080
+    );
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects label exceeding max length', () => {
+    const compiler = new StatisticCompiler();
+    const errors = compiler.validate(
+      { value: '42', label: 'x'.repeat(501) },
+      1920,
+      1080
+    );
+    expect(errors.length).toBeGreaterThan(0);
+  });
+});

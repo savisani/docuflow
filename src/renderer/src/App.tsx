@@ -3,6 +3,7 @@ import { TitleBar } from './components/titlebar/TitleBar';
 import { EditorLayout } from './components/editor/EditorLayout';
 import { ImageGenerator } from './components/generator/ImageGenerator';
 import { SceneGenerator } from './components/generator/SceneGenerator';
+import { MotionGraphicsPanel } from './components/motion/MotionGraphicsPanel';
 import { DropZone } from './components/ui/DropZone';
 import { Console } from './components/console/Console';
 import { useConsoleStore } from './components/console/ConsoleStore';
@@ -302,6 +303,9 @@ function App() {
         </div>
         <div style={{ display: activeTab === 'generator' ? 'contents' : 'none' }} className="w-full h-full">
           <ImageGenerator />
+        </div>
+        <div style={{ display: activeTab === 'motion' ? 'contents' : 'none' }} className="w-full h-full">
+          <MotionGraphicsPanel />
         </div>
       </div>
       <DropZone visible={dropVisible} fileCount={dropFileCount} />

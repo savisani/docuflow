@@ -18,6 +18,12 @@ export {
   type ProjectSettingsInput,
 } from './project.schema';
 export {
+  MotionPlanSchema,
+  MotionRequestSchema,
+  type MotionPlanInput,
+  type MotionRequestInput,
+} from './motion.schema';
+export {
   GenerateLocalEnhancedSchema,
   GenerateLocalSchema,
   ModelSwitchSchema,
