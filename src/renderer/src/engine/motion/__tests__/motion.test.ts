@@ -2648,3 +2648,537 @@ describe('TitleCard — Output Correctness (centered metadata)', () => {
     }
   });
 });
+
+// ═════════════════════════════════════════════════════════════════
+// TITLECARD SUBTITLE/COLOR/MOTION FIX — post-processing inference
+// ═════════════════════════════════════════════════════════════════
+
+describe('TitleCard — Subtitle Preservation', () => {
+  const compiler = new TitleCardCompiler();
+  const settings: ProjectSettings = { width: 1920, height: 1080, fps: 30 };
+
+  it('1. title-only TitleCard produces ONE text layer', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'The Hidden Cost of Traffic' },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds.length).toBe(1);
+    expect(textCmds[0].content).toBe('The Hidden Cost of Traffic');
+
+    const timeline = buildTimeline(commands, [], settings);
+    expect(timeline.textLayers.length).toBe(1);
+  });
+
+  it('2. title + subtitle produces TWO visible text layers', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: {
+          title: 'The Hidden Cost of Traffic',
+          subtitle: 'Why congestion wastes more than fuel',
+        },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds.length).toBe(2);
+    expect(textCmds[0].content).toBe('The Hidden Cost of Traffic');
+    expect(textCmds[1].content).toBe('Why congestion wastes more than fuel');
+
+    const timeline = buildTimeline(commands, [], settings);
+    expect(timeline.textLayers.length).toBe(2);
+  });
+
+  it('3. subtitle is below the title', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: {
+          title: 'The Hidden Cost of Traffic',
+          subtitle: 'Why congestion wastes more than fuel',
+        },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    const title = textCmds.find(c => c.content === 'The Hidden Cost of Traffic')!;
+    const subtitle = textCmds.find(c => c.content === 'Why congestion wastes more than fuel')!;
+    expect(subtitle.y).toBeGreaterThan(title.y);
+  });
+
+  it('4. both title and subtitle are horizontally centered', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: {
+          title: 'The Hidden Cost of Traffic',
+          subtitle: 'Why congestion wastes more than fuel',
+        },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    for (const cmd of textCmds) {
+      expect(cmd.centered).toBe(true);
+    }
+
+    const timeline = buildTimeline(commands, [], settings);
+    for (const layer of timeline.textLayers) {
+      expect(layer.centered).toBe(true);
+    }
+  });
+});
+
+describe('TitleCard — Default Color Behavior', () => {
+  const compiler = new TitleCardCompiler();
+
+  it('1. no COLOR → #FFFFFF for title and #CCCCCC for subtitle', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: {
+          title: 'The Hidden Cost of Traffic',
+          subtitle: 'Why congestion wastes more than fuel',
+        },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds[0].color).toBe('#FFFFFF');
+    expect(textCmds[1].color).toBe('#CCCCCC');
+  });
+
+  it('2. explicit valid COLOR → requested color', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: {
+          title: 'The Hidden Cost of Traffic',
+          color: '#FF5500',
+        },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds[0].color).toBe('#FF5500');
+  });
+
+  it('3. post-processing removes AI-invented color when user did not request one', () => {
+    // Simulate AI hallucinating a blue color when user didn't request any color
+    const aiResponse = `COMPONENT: titlecard
+TITLE: The Hidden Cost of Traffic
+SUBTITLE: Why congestion wastes more than fuel
+COLOR: #3B82F6
+POSITION: center
+DURATION: 5
+MOTION: slideLeft
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying The Hidden Cost of Traffic with subtitle Why congestion wastes more than fuel, fading in from the left.',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const component = parseResult.plan!.components[0];
+    const data = component.data as { title: string; subtitle?: string; color?: string };
+    expect(data.color).toBeUndefined();
+  });
+
+  it('4. post-processing preserves explicit color when user requested one', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: The Hidden Cost of Traffic
+COLOR: #FF0000
+POSITION: center
+DURATION: 5
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a red title card saying The Hidden Cost of Traffic',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const component = parseResult.plan!.components[0];
+    const data = component.data as { color?: string };
+    expect(data.color).toBe('#FF0000');
+  });
+
+  it('5. post-processing preserves hex color when user requested one', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test
+COLOR: #AABBCC
+POSITION: center
+DURATION: 5
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card in #AABBCC saying Test',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const component = parseResult.plan!.components[0];
+    const data = component.data as { color?: string };
+    expect(data.color).toBe('#AABBCC');
+  });
+});
+
+describe('TitleCard — Directional Motion Inference', () => {
+  const compiler = new TitleCardCompiler();
+
+  it('1. "fading in from the left" → slideLeft (directional has priority over fade)', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: The Hidden Cost of Traffic
+SUBTITLE: Why congestion wastes more than fuel
+POSITION: center
+DURATION: 5
+MOTION: fade
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying The Hidden Cost of Traffic with subtitle Why congestion wastes more than fuel, fading in from the left.',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const component = parseResult.plan!.components[0];
+    expect(component.style?.motion).toBe('slideLeft');
+  });
+
+  it('2. "fade in from the left" → slideLeft', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test
+POSITION: center
+DURATION: 5
+MOTION: fade
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test, fade in from the left',
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.plan!.components[0].style?.motion).toBe('slideLeft');
+  });
+
+  it('3. "slide in from the left" → slideLeft', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test
+POSITION: center
+DURATION: 5
+MOTION: fade
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test, slide in from the left',
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.plan!.components[0].style?.motion).toBe('slideLeft');
+  });
+
+  it('4. "enter from the left" → slideLeft', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test
+POSITION: center
+DURATION: 5
+MOTION: fade
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test, enter from the left',
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.plan!.components[0].style?.motion).toBe('slideLeft');
+  });
+
+  it('5. "from below" → slideUp (existing mapping preserved)', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test
+POSITION: center
+DURATION: 5
+MOTION: fade
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test from below',
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.plan!.components[0].style?.motion).toBe('slideUp');
+  });
+
+  it('6. "from the right" → slideRight (existing mapping preserved)', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test
+POSITION: center
+DURATION: 5
+MOTION: fade
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test from the right',
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.plan!.components[0].style?.motion).toBe('slideRight');
+  });
+
+  it('7. "pops in" → pop (existing mapping preserved)', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test
+POSITION: center
+DURATION: 5
+MOTION: fade
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test that pops in',
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.plan!.components[0].style?.motion).toBe('pop');
+  });
+
+  it('8. "zooms in" → zoom (existing mapping preserved)', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test
+POSITION: center
+DURATION: 5
+MOTION: fade
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test that zooms in',
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.plan!.components[0].style?.motion).toBe('zoom');
+  });
+
+  it('9. "appears normally" → fade (existing mapping preserved)', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test
+POSITION: center
+DURATION: 5
+MOTION: slideLeft
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test that appears normally',
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.plan!.components[0].style?.motion).toBe('fade');
+  });
+
+  it('10. slideLeft compiler generates correct move + fadeIn for both title and subtitle', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: {
+          title: 'The Hidden Cost of Traffic',
+          subtitle: 'Why congestion wastes more than fuel',
+        },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'slideLeft' },
+      },
+      1920,
+      1080
+    );
+
+    const textCmds = commands.filter(c => c.type === 'text');
+    const textIds = textCmds.map(c => c.id);
+
+    // slideLeft should generate move + fadeIn for title and subtitle
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBeGreaterThanOrEqual(2);
+    for (const cmd of moveCmds) {
+      expect(textIds).toContain((cmd as any).target);
+    }
+
+    const fadeInCmds = commands.filter(c => c.type === 'fadeIn');
+    expect(fadeInCmds.length).toBeGreaterThanOrEqual(2);
+    for (const cmd of fadeInCmds) {
+      expect(textIds).toContain((cmd as any).target);
+    }
+  });
+});
+
+describe('TitleCard — Complete Pipeline (user scenario)', () => {
+  const compiler = new TitleCardCompiler();
+
+  it('1. full scenario: subtitle + color defaults + slideLeft motion', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: The Hidden Cost of Traffic
+SUBTITLE: Why congestion wastes more than fuel
+POSITION: center
+DURATION: 5
+MOTION: fade
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying The Hidden Cost of Traffic with subtitle Why congestion wastes more than fuel, fading in from the left.',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const plan = parseResult.plan!;
+
+    // Component type
+    expect(plan.components.length).toBe(1);
+    expect(plan.components[0].type).toBe('titlecard');
+
+    // TITLE and SUBTITLE
+    const data = plan.components[0].data as { title: string; subtitle: string; color?: string };
+    expect(data.title).toBe('The Hidden Cost of Traffic');
+    expect(data.subtitle).toBe('Why congestion wastes more than fuel');
+
+    // COLOR = default white (no color requested)
+    expect(data.color).toBeUndefined();
+
+    // MOTION = slideLeft (directional phrase has priority)
+    expect(plan.components[0].style?.motion).toBe('slideLeft');
+
+    // Compile to commands
+    const commands = compiler.compile(plan.components[0], 1920, 1080);
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds.length).toBe(2);
+
+    // Title is centered
+    expect(textCmds[0].centered).toBe(true);
+    expect(textCmds[0].color).toBe('#FFFFFF');
+
+    // Subtitle is centered below title
+    expect(textCmds[1].centered).toBe(true);
+    expect(textCmds[1].color).toBe('#CCCCCC');
+    expect(textCmds[1].y).toBeGreaterThan(textCmds[0].y);
+
+    // slideLeft generates move commands
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBeGreaterThanOrEqual(2);
+
+    // Verify via buildTimeline
+    const timeline = buildTimeline(commands, [], { width: 1920, height: 1080, fps: 30 });
+    expect(timeline.textLayers.length).toBe(2);
+    const titleLayer = timeline.textLayers.find(t => t.content === 'The Hidden Cost of Traffic')!;
+    const subtitleLayer = timeline.textLayers.find(t => t.content === 'Why congestion wastes more than fuel')!;
+    expect(titleLayer.centered).toBe(true);
+    expect(subtitleLayer.centered).toBe(true);
+    expect(subtitleLayer.y).toBeGreaterThan(titleLayer.y);
+  });
+
+  it('2. subtitle preserved when AI omits it but user provided one', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: The Hidden Cost of Traffic
+POSITION: center
+DURATION: 5
+MOTION: slideLeft
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying The Hidden Cost of Traffic with subtitle Why congestion wastes more than fuel, fading in from the left.',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const data = parseResult.plan!.components[0].data as { title: string; subtitle: string };
+    expect(data.subtitle).toBe('Why congestion wastes more than fuel');
+  });
+
+  it('3. slideLeft motion enters from the left (move from.x < to.x)', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: {
+          title: 'Test',
+          subtitle: 'Subtitle',
+        },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'slideLeft' },
+      },
+      1920,
+      1080
+    );
+
+    const moveCmds = commands.filter(c => c.type === 'move');
+    for (const cmd of moveCmds) {
+      const move = cmd as { from: { x: number }; to: { x: number } };
+      expect(move.from.x).toBeLessThan(move.to.x);
+    }
+  });
+});

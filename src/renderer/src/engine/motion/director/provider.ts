@@ -73,7 +73,7 @@ COMPONENT: titlecard
 FIELDS: ${titlecardFieldList}
 Use for title cards, headlines, section headers, or any request that explicitly mentions "title card", "title", "heading", or "headline".
 The TITLE field contains the main title text.
-SUBTITLE is optional — only include if user provides a subtitle.
+SUBTITLE — CRITICAL: If the user provides any text after "with subtitle", "subtitle:", or similar phrasing, you MUST include it as the SUBTITLE field. Do NOT omit the subtitle when the user explicitly provides one. Do NOT truncate or ignore the subtitle text.
 TitleCard is for text-based titles, NOT for numerical statistics.
 
 POSITIONS: ${positionList}
@@ -113,13 +113,14 @@ RULES:
 MOTION INTENT INFERENCE:
 When the user describes HOW the element should appear, map their natural language to the correct MOTION value:
 - "from below", "slides up", "comes up from bottom", "rises" → MOTION: slideUp
-- "from the left", "slides in from left", "fading in from the left" → MOTION: slideLeft
-- "from the right", "slides in from right" → MOTION: slideRight
+- "from the left", "slides in from left", "fading in from the left", "slide in from the left", "enter from the left", "comes in from the left" → MOTION: slideLeft
+- "from the right", "slides in from right", "fading in from the right" → MOTION: slideRight
 - "fade in", "appears", "fades", "gradually appears" → MOTION: fade
 - "pops", "bounces in", "springs", "pops in" → MOTION: pop
 - "zooms in", "grows", "scales up" → MOTION: zoom
 - "normal", "standard", "default" → omit MOTION field (uses fade for titlecard, fade for statistic)
 When no motion intent is expressed, omit the MOTION field.
+PRIORITY RULE: If a prompt contains BOTH a fade/appear word AND a directional phrase (e.g., "fading in from the left"), the directional phrase has priority. Use slideLeft, NOT fade.
 
 SIZE INTENT INFERENCE:
 When the user describes the size, map to FONT_SIZE:
@@ -143,6 +144,7 @@ When the user describes color, map to COLOR:
 - "green" → COLOR: #22C55E
 - "yellow" → COLOR: #EAB308
 - A hex value → use that value
+CRITICAL — If the user does NOT mention any color (no "red", "blue", "white", "in color", hex code, etc.), do NOT include a COLOR field. The system will default to #FFFFFF. Do NOT invent or hallucinate a color when none was requested.
 
 EXAMPLE — simple new statistic (no label, no motion):
 COMPONENT: statistic

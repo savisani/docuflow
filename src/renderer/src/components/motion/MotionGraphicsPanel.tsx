@@ -219,6 +219,7 @@ export const MotionGraphicsPanel: React.FC = () => {
       canvasWidth: settings.width,
       canvasHeight: settings.height,
       defaultDuration: duration,
+      userPrompt: prompt.trim(),
     });
 
     if (!parseResult.success) {

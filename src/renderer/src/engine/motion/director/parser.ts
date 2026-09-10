@@ -447,6 +447,131 @@ function blockToComponent(
   }
 }
 
+// ── Deterministic Post-Processing ──────────────────────────────
+// These functions correct AI hallucinations by cross-referencing the
+// user's original prompt with the AI's parsed output.
+
+/**
+ * Infer motion from the user's raw prompt text.
+ * Directional phrases have priority over generic fade/appear words.
+ * Returns the canonical motion name or undefined if no motion phrase detected.
+ */
+function inferMotionFromPrompt(prompt: string): string | undefined {
+  const lower = prompt.toLowerCase();
+
+  // Directional phrases (highest priority)
+  if (/\bfrom\s+the\s+left\b|\bslide[s]?\s+in\s+from\s+left\b|\benter\s+from\s+the\s+left\b|\bcomes?\s+in\s+from\s+the\s+left\b/i.test(lower)) {
+    return 'slideLeft';
+  }
+  if (/\bfrom\s+the\s+right\b|\bslide[s]?\s+in\s+from\s+right\b|\benter\s+from\s+the\s+right\b|\bcomes?\s+in\s+from\s+the\s+right\b/i.test(lower)) {
+    return 'slideRight';
+  }
+  if (/\bfrom\s+below\b|\bslide[s]?\s+up\b|\bcomes?\s+up\s+from\s+bottom\b|\brises?\b/i.test(lower)) {
+    return 'slideUp';
+  }
+
+  // Non-directional motions (lower priority — only if no directional phrase found)
+  if (/\bpops?\s+in\b|\bbounces?\s+in\b|\bsprings?\b/i.test(lower)) {
+    return 'pop';
+  }
+  if (/\bzooms?\s+in\b|\bgrows?\b|\bscales?\s+up\b/i.test(lower)) {
+    return 'zoom';
+  }
+  if (/\bfade[s]?\s+in\b|\bappears?\b|\bgradually\s+appears\b/i.test(lower)) {
+    return 'fade';
+  }
+
+  return undefined;
+}
+
+/**
+ * Check if the user explicitly mentions a color in their prompt.
+ * Returns the color keyword/hex if found, or undefined.
+ */
+function detectColorInPrompt(prompt: string): string | undefined {
+  const lower = prompt.toLowerCase();
+
+  // Check for hex colors
+  const hexMatch = lower.match(/#([0-9a-f]{6}|[0-9a-f]{3})\b/);
+  if (hexMatch) return hexMatch[0];
+
+  // Check for named colors
+  const colorNames = ['white', 'red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink', 'black', 'gray', 'grey'];
+  for (const name of colorNames) {
+    // Match color names as whole words, but not in contexts like "from the left"
+    if (new RegExp(`\\b${name}\\b`).test(lower)) {
+      return name;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Check if the user mentions a subtitle in their prompt.
+ * Returns the subtitle text if found, or undefined.
+ */
+function detectSubtitleInPrompt(prompt: string): string | undefined {
+  const lower = prompt.toLowerCase();
+
+  // Match "with subtitle <text>", "subtitle: <text>", "with a subtitle <text>"
+  const subtitleMatch = lower.match(/(?:with\s+(?:a\s+)?subtitle\s*[:\-]?\s*|subtitle\s*[:\-]\s*)(.+?)(?:,\s*(?:fading|slide|zoom|pop|fade|enter|coming|appearing|in\s+the|from\s+the)\b|$)/i);
+  if (subtitleMatch) {
+    // Extract the subtitle text from the original prompt (preserve case)
+    const subtitleStart = lower.indexOf(subtitleMatch[0]);
+    const subtitleText = prompt.substring(subtitleStart + subtitleMatch[0].indexOf(subtitleMatch[1]), subtitleStart + subtitleMatch[0].indexOf(subtitleMatch[1]) + subtitleMatch[1].length).trim();
+    if (subtitleText.length > 0) return subtitleText;
+  }
+
+  return undefined;
+}
+
+/**
+ * Post-process parsed components to correct AI hallucinations.
+ * Cross-references the user's original prompt with the AI's output.
+ */
+function postProcessComponents(
+  components: MotionComponent[],
+  userPrompt: string
+): MotionComponent[] {
+  if (!userPrompt || components.length === 0) return components;
+
+  const inferredMotion = inferMotionFromPrompt(userPrompt);
+  const userMentionedColor = detectColorInPrompt(userPrompt);
+  const userSubtitle = detectSubtitleInPrompt(userPrompt);
+
+  return components.map(comp => {
+    const corrected = { ...comp };
+
+    // 1. Fix motion: if user prompt contains a directional phrase, ensure correct motion
+    if (inferredMotion && corrected.style) {
+      const currentMotion = corrected.style.motion?.toLowerCase();
+      const inferredLower = inferredMotion.toLowerCase();
+      if (currentMotion !== inferredLower) {
+        corrected.style = { ...corrected.style, motion: inferredMotion };
+      }
+    }
+
+    // 2. Fix color: if user did NOT mention a color, remove any AI-invented color
+    if (!userMentionedColor && corrected.data && 'color' in corrected.data) {
+      const data = corrected.data as Record<string, unknown>;
+      if (data.color) {
+        corrected.data = { ...corrected.data, color: undefined } as typeof corrected.data;
+      }
+    }
+
+    // 3. Fix subtitle: if user mentioned a subtitle but AI omitted it, restore it
+    if (userSubtitle && corrected.type === 'titlecard') {
+      const data = corrected.data as { title: string; subtitle?: string };
+      if (!data.subtitle || data.subtitle.trim().length === 0) {
+        corrected.data = { ...corrected.data, subtitle: userSubtitle } as typeof corrected.data;
+      }
+    }
+
+    return corrected;
+  });
+}
+
 // ── Main Parse Function ─────────────────────────────────────────
 
 export interface ParseOptions {
@@ -454,6 +579,7 @@ export interface ParseOptions {
   canvasHeight: number;
   defaultDuration?: number;
   defaultStyle?: string;
+  userPrompt?: string;
 }
 
 export interface ParseResult {
@@ -544,17 +670,22 @@ export function parseAIResponse(
     };
   }
 
+  // 4b. Post-process: correct AI hallucinations using deterministic prompt analysis
+  const processedComponents = options.userPrompt
+    ? postProcessComponents(components, options.userPrompt)
+    : components;
+
   // 5. Build MotionPlanV1
   const totalDuration = Math.max(
     defaultDuration,
-    ...components.map((c) => c.timing.start + c.timing.duration)
+    ...processedComponents.map((c) => c.timing.start + c.timing.duration)
   );
 
   const plan: MotionPlanV1 = {
     version: MOTION_PLAN_VERSION,
     metadata: {
       name: 'AI Generated Motion Plan',
-      description: `Parsed from AI response (${components.length} components)`,
+      description: `Parsed from AI response (${processedComponents.length} components)`,
       createdAt: new Date().toISOString(),
     },
     canvas: { width: canvasWidth, height: canvasHeight },
@@ -563,7 +694,7 @@ export function parseAIResponse(
       visual: 'documentary',
       motion: 'subtle',
     },
-    components,
+    components: processedComponents,
   };
 
   return {
