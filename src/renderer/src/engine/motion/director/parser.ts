@@ -506,6 +506,71 @@ function inferMotionFromPrompt(prompt: string): string | undefined {
 }
 
 /**
+ * Strip recognized motion-command phrases from the end of a text string.
+ * Only strips phrases that match the existing motion vocabulary.
+ * Returns the cleaned text with the motion phrase removed.
+ *
+ * Examples:
+ *   "Why congestion wastes more than fuel, fading in from the left"
+ *   → "Why congestion wastes more than fuel"
+ *
+ *   "The left side of the city has higher traffic"
+ *   → "The left side of the city has higher traffic" (unchanged)
+ */
+function stripMotionPhrasesFromText(text: string): string {
+  if (!text) return text;
+
+  const lower = text.toLowerCase().trimEnd();
+
+  // Ordered from most specific (longer) to least specific (shorter)
+  // to avoid partial matches. Each pattern targets the END of the text.
+  // Patterns include optional trailing punctuation (periods, commas, etc.)
+  const motionPhrasePatterns = [
+    // Directional with "fading/fade" prefix
+    /,\s*(?:fading|fade)\s+(?:in\s+)?from\s+the\s+(?:left|right|bottom)\s*[.,;:!?]?\s*$/i,
+    /,\s*(?:fading|fade)\s+(?:in\s+)?from\s+(?:left|right|bottom)\s*[.,;:!?]?\s*$/i,
+
+    // Directional with "slides/slide/coming/comes/enters/enter/appears/appear" prefix
+    /,\s*(?:slides?|coming|comes?|enters?|appears?)\s+(?:in\s+)?from\s+the\s+(?:left|right|bottom)\s*[.,;:!?]?\s*$/i,
+    /,\s*(?:slides?|coming|comes?|enters?|appears?)\s+(?:in\s+)?from\s+(?:left|right|bottom)\s*[.,;:!?]?\s*$/i,
+
+    // Directional with "rises/rise"
+    /,\s*(?:rises?|rising)\s+from\s+(?:the\s+)?(?:below|bottom)\s*[.,;:!?]?\s*$/i,
+
+    // Directional with "slides up from below"
+    /,\s*(?:slides?|coming|comes?|enters?|appears?)\s+up\s+from\s+(?:the\s+)?(?:below|bottom)\s*[.,;:!?]?\s*$/i,
+
+    // Directional without prefix: "from the left", "from the right", "from below"
+    /,\s*from\s+the\s+(?:left|right|bottom|below)\s*[.,;:!?]?\s*$/i,
+    /,\s*from\s+(?:left|right|bottom|below)\s*[.,;:!?]?\s*$/i,
+
+    // Generic motions with "in" suffix
+    /,\s*(?:fading|fade)\s+in\s*[.,;:!?]?\s*$/i,
+    /,\s*(?:slides?|coming|comes?|enters?|appears?)\s+in\s*[.,;:!?]?\s*$/i,
+    /,\s*(?:pops?|bounces?|springs?)\s+in\s*[.,;:!?]?\s*$/i,
+    /,\s*(?:zooms?|grows?|scales?)\s+(?:in|up)\s*[.,;:!?]?\s*$/i,
+
+    // Simple standalone motions
+    /,\s*(?:fading|fade)s?\s*[.,;:!?]?\s*$/i,
+    /,\s*(?:pops?|bounces?|springs?)\s*[.,;:!?]?\s*$/i,
+    /,\s*(?:zooms?|grows?|scales?)\s*[.,;:!?]?\s*$/i,
+  ];
+
+  for (const pattern of motionPhrasePatterns) {
+    if (pattern.test(lower)) {
+      // Remove the matched pattern and trailing comma/whitespace
+      const cleaned = text.replace(pattern, '').trim();
+      // Only return if we actually stripped something and what remains is non-empty
+      if (cleaned.length > 0 && cleaned !== text.trim()) {
+        return cleaned;
+      }
+    }
+  }
+
+  return text.trim();
+}
+
+/**
  * Check if the user explicitly mentions a color in their prompt.
  * Returns the color keyword/hex if found, or undefined.
  */
@@ -531,17 +596,22 @@ function detectColorInPrompt(prompt: string): string | undefined {
 /**
  * Check if the user mentions a subtitle in their prompt.
  * Returns the subtitle text if found, or undefined.
+ * Strips recognized motion phrases from the extracted subtitle.
  */
 function detectSubtitleInPrompt(prompt: string): string | undefined {
   const lower = prompt.toLowerCase();
 
   // Match "with subtitle <text>", "subtitle: <text>", "with a subtitle <text>"
-  const subtitleMatch = lower.match(/(?:with\s+(?:a\s+)?subtitle\s*[:\-]?\s*|subtitle\s*[:\-]\s*)(.+?)(?:,\s*(?:fading|slide|zoom|pop|fade|enter|coming|appearing|in\s+the|from\s+the)\b|$)/i);
+  // Capture everything after the subtitle marker until end of string
+  const subtitleMatch = lower.match(/(?:with\s+(?:a\s+)?subtitle\s*[:\-]?\s*|subtitle\s*[:\-]\s*)(.+)/i);
   if (subtitleMatch) {
     // Extract the subtitle text from the original prompt (preserve case)
     const subtitleStart = lower.indexOf(subtitleMatch[0]);
-    const subtitleText = prompt.substring(subtitleStart + subtitleMatch[0].indexOf(subtitleMatch[1]), subtitleStart + subtitleMatch[0].indexOf(subtitleMatch[1]) + subtitleMatch[1].length).trim();
-    if (subtitleText.length > 0) return subtitleText;
+    const rawSubtitleText = prompt.substring(subtitleStart + subtitleMatch[0].indexOf(subtitleMatch[1])).trim();
+    if (rawSubtitleText.length > 0) {
+      // Strip recognized motion phrases from the extracted subtitle
+      return stripMotionPhrasesFromText(rawSubtitleText);
+    }
   }
 
   return undefined;
@@ -586,6 +656,28 @@ function postProcessComponents(
       const data = corrected.data as { title?: string; name?: string; subtitle?: string };
       if (!data.subtitle || data.subtitle.trim().length === 0) {
         corrected.data = { ...corrected.data, subtitle: userSubtitle } as typeof corrected.data;
+      }
+    }
+
+    // 4. Strip motion phrases from TITLE and SUBTITLE fields
+    //    This is the deterministic safeguard against motion-phrase contamination.
+    if (corrected.type === 'titlecard' || corrected.type === 'lowerthird') {
+      const data = corrected.data as { title?: string; name?: string; subtitle?: string };
+
+      // Strip motion phrases from subtitle
+      if (data.subtitle) {
+        const cleanedSubtitle = stripMotionPhrasesFromText(data.subtitle);
+        if (cleanedSubtitle !== data.subtitle) {
+          corrected.data = { ...corrected.data, subtitle: cleanedSubtitle } as typeof corrected.data;
+        }
+      }
+
+      // Strip motion phrases from title (if it's a titlecard)
+      if (corrected.type === 'titlecard' && data.title) {
+        const cleanedTitle = stripMotionPhrasesFromText(data.title);
+        if (cleanedTitle !== data.title) {
+          corrected.data = { ...corrected.data, title: cleanedTitle } as typeof corrected.data;
+        }
       }
     }
 

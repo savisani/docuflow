@@ -3161,6 +3161,248 @@ END`;
     expect(data.subtitle).toBe('Why congestion wastes more than fuel');
   });
 
+  it('4. subtitle + "fade in from the left" strips motion phrase', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test Title
+SUBTITLE: Test Subtitle, fade in from the left
+POSITION: center
+DURATION: 5
+MOTION: slideLeft
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test Title with subtitle Test Subtitle, fade in from the left.',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const data = parseResult.plan!.components[0].data as { title: string; subtitle: string };
+    expect(data.subtitle).toBe('Test Subtitle');
+  });
+
+  it('5. subtitle + "slides in from the left" strips motion phrase', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test Title
+SUBTITLE: Test Subtitle, slides in from the left
+POSITION: center
+DURATION: 5
+MOTION: slideLeft
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test Title with subtitle Test Subtitle, slides in from the left.',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const data = parseResult.plan!.components[0].data as { title: string; subtitle: string };
+    expect(data.subtitle).toBe('Test Subtitle');
+  });
+
+  it('6. subtitle + "fading in from the right" strips motion phrase', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test Title
+SUBTITLE: Test Subtitle, fading in from the right
+POSITION: center
+DURATION: 5
+MOTION: slideRight
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test Title with subtitle Test Subtitle, fading in from the right.',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const data = parseResult.plan!.components[0].data as { title: string; subtitle: string };
+    expect(data.subtitle).toBe('Test Subtitle');
+  });
+
+  it('7. subtitle + "slides in from the right" strips motion phrase', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test Title
+SUBTITLE: Test Subtitle, slides in from the right
+POSITION: center
+DURATION: 5
+MOTION: slideRight
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test Title with subtitle Test Subtitle, slides in from the right.',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const data = parseResult.plan!.components[0].data as { title: string; subtitle: string };
+    expect(data.subtitle).toBe('Test Subtitle');
+  });
+
+  it('8. subtitle + "fading in" strips motion phrase', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test Title
+SUBTITLE: Test Subtitle, fading in
+POSITION: center
+DURATION: 5
+MOTION: fade
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test Title with subtitle Test Subtitle, fading in.',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const data = parseResult.plan!.components[0].data as { title: string; subtitle: string };
+    expect(data.subtitle).toBe('Test Subtitle');
+  });
+
+  it('9. legitimate subtitle containing "left" is preserved', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test Title
+SUBTITLE: The left side of the city has higher traffic
+POSITION: center
+DURATION: 5
+MOTION: fade
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test Title with subtitle The left side of the city has higher traffic.',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const data = parseResult.plan!.components[0].data as { title: string; subtitle: string };
+    expect(data.subtitle).toBe('The left side of the city has higher traffic');
+  });
+
+  it('10. legitimate subtitle containing "right" is preserved', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test Title
+SUBTITLE: The right lane is closed for construction
+POSITION: center
+DURATION: 5
+MOTION: fade
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test Title with subtitle The right lane is closed for construction.',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const data = parseResult.plan!.components[0].data as { title: string; subtitle: string };
+    expect(data.subtitle).toBe('The right lane is closed for construction');
+  });
+
+  it('11. legitimate subtitle containing "fade" as content is preserved', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test Title
+SUBTITLE: The fade to black was dramatic
+POSITION: center
+DURATION: 5
+MOTION: fade
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test Title with subtitle The fade to black was dramatic.',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const data = parseResult.plan!.components[0].data as { title: string; subtitle: string };
+    expect(data.subtitle).toBe('The fade to black was dramatic');
+  });
+
+  it('12. subtitle + "slides up from below" strips motion phrase', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test Title
+SUBTITLE: Test Subtitle, slides up from below
+POSITION: center
+DURATION: 5
+MOTION: slideUp
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test Title with subtitle Test Subtitle, slides up from below.',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const data = parseResult.plan!.components[0].data as { title: string; subtitle: string };
+    expect(data.subtitle).toBe('Test Subtitle');
+  });
+
+  it('13. subtitle + "zooms in" strips motion phrase', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test Title
+SUBTITLE: Test Subtitle, zooms in
+POSITION: center
+DURATION: 5
+MOTION: zoom
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test Title with subtitle Test Subtitle, zooms in.',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const data = parseResult.plan!.components[0].data as { title: string; subtitle: string };
+    expect(data.subtitle).toBe('Test Subtitle');
+  });
+
+  it('14. subtitle + "pops in" strips motion phrase', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test Title
+SUBTITLE: Test Subtitle, pops in
+POSITION: center
+DURATION: 5
+MOTION: pop
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test Title with subtitle Test Subtitle, pops in.',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const data = parseResult.plan!.components[0].data as { title: string; subtitle: string };
+    expect(data.subtitle).toBe('Test Subtitle');
+  });
+
   it('3. slideLeft motion enters from the left (move from.x < to.x)', () => {
     const commands = compiler.compile(
       {
