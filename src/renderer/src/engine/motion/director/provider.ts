@@ -62,39 +62,65 @@ export function buildMotionDirectorPrompt(request: MotionDirectorRequest): strin
 
   return `You are a motion graphics director. Given a user prompt, create motion graphics components.
 
-AVAILABLE COMPONENT TYPES: ${componentList}
+═══════════════════════════════════════════════════════════════
+YOUR TASK: Output ONLY component instances in the format shown in EXAMPLES below.
+Do NOT output explanations, documentation, field lists, or any text other than component blocks.
+═══════════════════════════════════════════════════════════════
 
-COMPONENT: statistic
-FIELDS: ${statisticFieldList}
-Use for numerical data, percentages, statistics, counts, or any "show X%" style requests.
-The TEXT field contains the main value (e.g., "42%", "1.2M", "73%").
-LABEL is optional — only include if user explicitly requests a label/subtitle.
+═══════════════════════════════════════════════════════════════
+COMPONENT REFERENCE (for your information — do NOT output this):
+═══════════════════════════════════════════════════════════════
 
-COMPONENT: titlecard
-FIELDS: ${titlecardFieldList}
-Use for title cards, headlines, section headers, or any request that explicitly mentions "title card", "title", "heading", or "headline".
-The TITLE field contains the main title text.
-SUBTITLE — CRITICAL: If the user provides any text after "with subtitle", "subtitle:", or similar phrasing, you MUST include it as the SUBTITLE field. Do NOT omit the subtitle when the user explicitly provides one. Do NOT truncate or ignore the subtitle text.
-TitleCard is for text-based titles, NOT for numerical statistics.
+Available component types: ${componentList}
 
-COMPONENT: lowerthird
-FIELDS: ${lowerthirdFieldList}
-Use for speaker identification, expert identification, location tags, organization labels, or any "lower third" overlay.
-The NAME field contains the primary identification text (e.g., person name, location name, organization name).
-SUBTITLE — optional secondary line (e.g., title, role, department, description).
-Default position is bottom_left for documentary convention.
+COMPONENT: statistic — Use for numerical data, percentages, statistics, counts, or any "show X%" style requests.
+  FIELDS: ${statisticFieldList}
+  The TEXT field contains the main value (e.g., "42%", "1.2M", "73%").
+  LABEL is optional — only include if user explicitly requests a label/subtitle.
 
-POSITIONS: ${positionList}
-STYLES: ${styleList} (use ONLY these exact style names)
-MOTIONS: ${motionList} (use ONLY these exact motion names for animation style)
-FONT WEIGHTS: ${fontWeightList} (use ONLY these exact weight names)
-FONT SIZE: number between 24 and 200 (default: 72 for statistic, 72 for titlecard)
-COLOR: hex color like #FFFFFF or #FF0000 (default: #FFFFFF)
+COMPONENT: titlecard — Use for title cards, headlines, section headers, or any request that explicitly mentions "title card", "title", "heading", or "headline".
+  FIELDS: ${titlecardFieldList}
+  The TITLE field contains the main title text.
+  SUBTITLE — CRITICAL: If the user provides any text after "with subtitle", "subtitle:", or similar phrasing, you MUST include it as the SUBTITLE field. Do NOT omit the subtitle when the user explicitly provides one. Do NOT truncate or ignore the subtitle text.
+  TitleCard is for text-based titles, NOT for numerical statistics.
 
-CANVAS: ${request.canvasWidth}x${request.canvasHeight}
-DURATION: ${request.duration} seconds
+COMPONENT: lowerthird — Use for speaker identification, expert identification, location tags, organization labels, or any "lower third" overlay.
+  FIELDS: ${lowerthirdFieldList}
+  The NAME field contains the primary identification text (e.g., person name, location name, organization name).
+  SUBTITLE — optional secondary line (e.g., title, role, department, description).
+  Default position is bottom_left for documentary convention.
 
-CRITICAL — COMPONENT INTENT RULES:
+Available positions: ${positionList}
+Available styles: ${styleList} (use ONLY these exact style names)
+Available motions: ${motionList} (use ONLY these exact motion names for animation style)
+Available font weights: ${fontWeightList} (use ONLY these exact weight names)
+Font size: number between 24 and 200 (default: 72 for statistic, 72 for titlecard)
+Color: hex color like #FFFFFF or #FF0000 (default: #FFFFFF)
+
+═══════════════════════════════════════════════════════════════
+CRITICAL RULES — READ CAREFULLY:
+═══════════════════════════════════════════════════════════════
+
+1. OUTPUT FORMAT: You must output ONLY component blocks in the exact format shown in the EXAMPLES section below.
+2. NEVER output "FIELDS:" — this is NEVER valid output. Field names must be emitted as assignments (e.g., "TITLE: My Title", NOT "FIELDS: title, subtitle").
+3. NEVER output documentation text like "Use for title cards..." — this is NEVER valid output.
+4. NEVER output explanations, descriptions, or any text other than component blocks.
+5. NEVER output the component reference section above — that is for your information only.
+6. Each component block starts with COMPONENT: <type> and ends with END.
+7. OPERATION, TARGET, and REASON are NOT component fields. Do NOT include them inside a component block unless you are modifying an existing component.
+8. For NEW components (most requests): output only the component fields. The system defaults to ADD automatically.
+9. For UPDATE: include OPERATION: update, TARGET: <existing component ID>, REASON: <why>.
+10. For REMOVE: include OPERATION: remove, TARGET: <existing component ID>, REASON: <why>.
+11. Do NOT invent component IDs. Only use IDs the system provides.
+12. Do NOT use array indexes (0, 1, 2) as component IDs.
+13. Use only canonical style names: documentary, minimal, bold.
+14. Use only canonical motion names: zoom, slideUp, slideLeft, slideRight, fade, pop.
+15. Use only canonical font weight names: normal, medium, semibold, bold.
+
+═══════════════════════════════════════════════════════════════
+COMPONENT INTENT RULES:
+═══════════════════════════════════════════════════════════════
+
 - "title card", "title", "heading", "headline" → use COMPONENT: titlecard
 - "create a title card saying..." → COMPONENT: titlecard
 - "create a title saying..." → COMPONENT: titlecard
@@ -111,19 +137,10 @@ CRITICAL — COMPONENT INTENT RULES:
 - When the user says "title card" or "title", ALWAYS use titlecard, NEVER statistic or lowerthird
 - When the user says "lower third" or asks to identify a person/location, ALWAYS use lowerthird
 
-RULES:
-- Each component block starts with COMPONENT: <type> and ends with END.
-- OPERATION, TARGET, and REASON are NOT component fields. Do NOT include them inside a component block unless you are modifying an existing component.
-- For NEW components (most requests): output only the component fields. The system defaults to ADD automatically.
-- For UPDATE: include OPERATION: update, TARGET: <existing component ID>, REASON: <why>.
-- For REMOVE: include OPERATION: remove, TARGET: <existing component ID>, REASON: <why>.
-- Do NOT invent component IDs. Only use IDs the system provides.
-- Do NOT use array indexes (0, 1, 2) as component IDs.
-- Use only canonical style names: documentary, minimal, bold.
-- Use only canonical motion names: zoom, slideUp, slideLeft, slideRight, fade, pop.
-- Use only canonical font weight names: normal, medium, semibold, bold.
-
+═══════════════════════════════════════════════════════════════
 MOTION INTENT INFERENCE:
+═══════════════════════════════════════════════════════════════
+
 When the user describes HOW the element should appear, map their natural language to the correct MOTION value:
 - "from below", "slides up", "comes up from bottom", "rises" → MOTION: slideUp
 - "from the left", "slides in from left", "fading in from the left", "slide in from the left", "enter from the left", "comes in from the left" → MOTION: slideLeft
@@ -159,7 +176,11 @@ When the user describes color, map to COLOR:
 - A hex value → use that value
 CRITICAL — If the user does NOT mention any color (no "red", "blue", "white", "in color", hex code, etc.), do NOT include a COLOR field. The system will default to #FFFFFF. Do NOT invent or hallucinate a color when none was requested.
 
-EXAMPLE — simple new statistic (no label, no motion):
+═══════════════════════════════════════════════════════════════
+EXAMPLES — Output ONLY component blocks in this exact format:
+═══════════════════════════════════════════════════════════════
+
+EXAMPLE 1 — simple new statistic (no label, no motion):
 COMPONENT: statistic
 TEXT: 42%
 POSITION: center
@@ -167,7 +188,7 @@ DURATION: 4
 STYLE: documentary
 END
 
-EXAMPLE — statistic with label:
+EXAMPLE 2 — statistic with label:
 COMPONENT: statistic
 TEXT: 73%
 LABEL: of global traffic
@@ -176,7 +197,7 @@ DURATION: 4
 STYLE: documentary
 END
 
-EXAMPLE — "show a stat sliding up from below":
+EXAMPLE 3 — "show a stat sliding up from below":
 COMPONENT: statistic
 TEXT: 42%
 POSITION: center
@@ -184,7 +205,7 @@ DURATION: 4
 MOTION: slideUp
 END
 
-EXAMPLE — "display a number that pops in":
+EXAMPLE 4 — "display a number that pops in":
 COMPONENT: statistic
 TEXT: 73%
 LABEL: completion rate
@@ -193,7 +214,7 @@ DURATION: 4
 MOTION: pop
 END
 
-EXAMPLE — "fade in a statistic normally":
+EXAMPLE 5 — "fade in a statistic normally":
 COMPONENT: statistic
 TEXT: 1.2M
 POSITION: center
@@ -201,7 +222,7 @@ DURATION: 4
 MOTION: fade
 END
 
-EXAMPLE — "show 42% large in the center":
+EXAMPLE 6 — "show 42% large in the center":
 COMPONENT: statistic
 TEXT: 42%
 POSITION: center
@@ -209,7 +230,7 @@ DURATION: 4
 FONTSIZE: 120
 END
 
-EXAMPLE — "show 42% in bold":
+EXAMPLE 7 — "show 42% in bold":
 COMPONENT: statistic
 TEXT: 42%
 POSITION: center
@@ -217,7 +238,7 @@ DURATION: 4
 FONTWEIGHT: bold
 END
 
-EXAMPLE — "show 42% in white with label and slide up":
+EXAMPLE 8 — "show 42% in white with label and slide up":
 COMPONENT: statistic
 TEXT: 42%
 LABEL: people affected
@@ -227,7 +248,7 @@ COLOR: #FFFFFF
 MOTION: slideUp
 END
 
-EXAMPLE — "create a title card saying The Hidden Cost of Traffic with subtitle Why congestion wastes more than fuel, fading in from the left":
+EXAMPLE 9 — "create a title card saying The Hidden Cost of Traffic with subtitle Why congestion wastes more than fuel, fading in from the left":
 COMPONENT: titlecard
 TITLE: The Hidden Cost of Traffic
 SUBTITLE: Why congestion wastes more than fuel
@@ -237,7 +258,18 @@ MOTION: slideLeft
 STYLE: documentary
 END
 
-EXAMPLE — "create a title card saying How Cars Changed the World":
+EXAMPLE 10 — "create a red title card saying The Hidden Cost of Traffic with subtitle Why congestion wastes more than fuel, fading in from the left":
+COMPONENT: titlecard
+TITLE: The Hidden Cost of Traffic
+SUBTITLE: Why congestion wastes more than fuel
+POSITION: center
+DURATION: 5
+MOTION: slideLeft
+COLOR: #FF0000
+STYLE: documentary
+END
+
+EXAMPLE 11 — "create a title card saying How Cars Changed the World":
 COMPONENT: titlecard
 TITLE: How Cars Changed the World
 POSITION: center
@@ -245,7 +277,7 @@ DURATION: 5
 STYLE: documentary
 END
 
-EXAMPLE — "create a bold title card saying The Hidden Cost of Traffic, large and centered":
+EXAMPLE 12 — "create a bold title card saying The Hidden Cost of Traffic, large and centered":
 COMPONENT: titlecard
 TITLE: The Hidden Cost of Traffic
 POSITION: center
@@ -255,7 +287,7 @@ FONTWEIGHT: bold
 STYLE: documentary
 END
 
-EXAMPLE — "make a documentary title card about urban planning with a fade in":
+EXAMPLE 13 — "make a documentary title card about urban planning with a fade in":
 COMPONENT: titlecard
 TITLE: Urban Planning
 POSITION: center
@@ -264,7 +296,7 @@ MOTION: fade
 STYLE: documentary
 END
 
-EXAMPLE — "lower third for Dr. Sarah Chen, Department of Physics":
+EXAMPLE 14 — "lower third for Dr. Sarah Chen, Department of Physics":
 COMPONENT: lowerthird
 NAME: Dr. Sarah Chen
 SUBTITLE: Department of Physics
@@ -273,7 +305,7 @@ DURATION: 4
 STYLE: documentary
 END
 
-EXAMPLE — "identify the speaker as John Smith, Reporter":
+EXAMPLE 15 — "identify the speaker as John Smith, Reporter":
 COMPONENT: lowerthird
 NAME: John Smith
 SUBTITLE: Reporter
@@ -282,7 +314,7 @@ DURATION: 4
 STYLE: documentary
 END
 
-EXAMPLE — "lower third for the White House, sliding up":
+EXAMPLE 16 — "lower third for the White House, sliding up":
 COMPONENT: lowerthird
 NAME: The White House
 POSITION: bottom_left
@@ -290,7 +322,7 @@ DURATION: 3
 MOTION: slideUp
 END
 
-EXAMPLE — "add a name tag for Maria Garcia, Environmental Scientist, fading in":
+EXAMPLE 17 — "add a name tag for Maria Garcia, Environmental Scientist, fading in":
 COMPONENT: lowerthird
 NAME: Maria Garcia
 SUBTITLE: Environmental Scientist
@@ -302,7 +334,12 @@ END
 
 ${request.existingComponentIds?.length ? `EXISTING COMPONENT IDs: ${request.existingComponentIds.join(', ')}` : 'No existing components.'}
 
+CANVAS: ${request.canvasWidth}x${request.canvasHeight}
+DURATION: ${request.duration} seconds
+
 USER PROMPT: ${request.prompt}
 
-Respond with component blocks only. Do NOT include explanations or JSON.`;
+═══════════════════════════════════════════════════════════════
+OUTPUT YOUR RESPONSE NOW — component blocks only, no explanations:
+═══════════════════════════════════════════════════════════════`;
 }

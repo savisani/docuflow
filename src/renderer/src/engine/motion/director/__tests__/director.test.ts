@@ -1044,3 +1044,68 @@ END`;
     expect(result.errors.some((e) => e.code === 'UNKNOWN_COMPONENT')).toBe(true);
   });
 });
+
+// ═════════════════════════════════════════════════════════════════
+// PROVIDER PROMPT CLARITY TESTS
+// ═════════════════════════════════════════════════════════════════
+
+describe('Provider Prompt — Clarity and Anti-Documentation', () => {
+  const request = makeRequest({
+    prompt: 'Create a red title card saying The Hidden Cost of Traffic with subtitle Why congestion wastes more than fuel, fading in from the left.',
+  });
+
+  const prompt = buildMotionDirectorPrompt(request);
+
+  it('prompt contains explicit instruction that FIELDS: is NEVER valid output', () => {
+    expect(prompt).toMatch(/NEVER output "FIELDS:.*this is NEVER valid output/i);
+  });
+
+  it('prompt contains explicit instruction that documentation text is NEVER valid output', () => {
+    expect(prompt).toMatch(/NEVER output documentation text like "Use for title cards.*this is NEVER valid output/i);
+  });
+
+  it('prompt contains explicit instruction that explanations are NEVER valid output', () => {
+    expect(prompt).toMatch(/NEVER output explanations.*component blocks/i);
+  });
+
+  it('prompt contains explicit instruction that component reference is for information only', () => {
+    expect(prompt).toMatch(/COMPONENT REFERENCE.*for your information.*do NOT output/i);
+  });
+
+  it('prompt separates documentation from expected output with clear sections', () => {
+    expect(prompt).toMatch(/YOUR TASK.*Output ONLY component instances/i);
+    expect(prompt).toMatch(/COMPONENT REFERENCE.*for your information/i);
+    expect(prompt).toMatch(/EXAMPLES.*Output ONLY component blocks/i);
+    expect(prompt).toMatch(/OUTPUT YOUR RESPONSE NOW.*component blocks only/i);
+  });
+
+  it('prompt contains TitleCard example with COLOR and directional motion', () => {
+    expect(prompt).toMatch(/EXAMPLE 10.*red title card.*fading in from the left/i);
+    expect(prompt).toMatch(/COMPONENT: titlecard\s+TITLE: The Hidden Cost of Traffic\s+SUBTITLE: Why congestion wastes more than fuel\s+POSITION: center\s+DURATION: 5\s+MOTION: slideLeft\s+COLOR: #FF0000\s+STYLE: documentary/s);
+  });
+
+  it('prompt contains example with subtitle and directional motion', () => {
+    expect(prompt).toMatch(/EXAMPLE 9.*title card.*subtitle.*fading in from the left/i);
+    expect(prompt).toMatch(/COMPONENT: titlecard\s+TITLE: The Hidden Cost of Traffic\s+SUBTITLE: Why congestion wastes more than fuel\s+POSITION: center\s+DURATION: 5\s+MOTION: slideLeft\s+STYLE: documentary/s);
+  });
+
+  it('prompt contains explicit instruction to output only component blocks', () => {
+    expect(prompt).toMatch(/OUTPUT YOUR RESPONSE NOW.*component blocks only.*no explanations/i);
+  });
+
+  it('prompt does not include FIELDS: as valid output in examples', () => {
+    // The COMPONENT REFERENCE section contains FIELDS: for information only
+    // The EXAMPLES section should NOT contain FIELDS: as valid output
+    const examplesSection = prompt.split('EXAMPLES —')[1] || '';
+    expect(examplesSection).not.toMatch(/FIELDS:/);
+  });
+
+  it('prompt includes all required fields for titlecard in examples', () => {
+    expect(prompt).toMatch(/TITLE:/);
+    expect(prompt).toMatch(/SUBTITLE:/);
+    expect(prompt).toMatch(/MOTION:/);
+    expect(prompt).toMatch(/COLOR:/);
+    expect(prompt).toMatch(/DURATION:/);
+    expect(prompt).toMatch(/END/);
+  });
+});
