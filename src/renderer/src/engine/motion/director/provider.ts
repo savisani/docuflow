@@ -73,12 +73,6 @@ COMPONENT REFERENCE (for your information — do NOT output this):
 
 Available component types: ${componentList}
 
-COMPONENT: statistic — Use for numerical data, percentages, statistics, counts, or any "show X%" style requests.
-  REQUIRED FIELDS: TEXT, DURATION
-  OPTIONAL FIELDS: label, unit, source, position, style, motion, start, fontSize, fontWeight, color
-  The TEXT field contains the main value (e.g., "42%", "1.2M", "73%").
-  LABEL is optional — only include if user explicitly requests a label/subtitle.
-
 COMPONENT: titlecard — Use for title cards, headlines, section headers, or any request that explicitly mentions "title card", "title", "heading", or "headline".
   REQUIRED FIELDS: TITLE, DURATION
   OPTIONAL FIELDS: subtitle, position, style, motion, start, fontSize, fontWeight, color
@@ -87,6 +81,12 @@ COMPONENT: titlecard — Use for title cards, headlines, section headers, or any
   ★ For titlecard, the main text field is TITLE. For statistic, the main text field is TEXT. These are DIFFERENT fields for DIFFERENT components.
   SUBTITLE — CRITICAL: If the user provides any text after "with subtitle", "subtitle:", or similar phrasing, you MUST include it as the SUBTITLE field. Do NOT omit the subtitle when the user explicitly provides one. Do NOT truncate or ignore the subtitle text.
   TitleCard is for text-based titles, NOT for numerical statistics.
+
+COMPONENT: statistic — Use for numerical data, percentages, statistics, counts, or any "show X%" style requests.
+  REQUIRED FIELDS: TEXT, DURATION
+  OPTIONAL FIELDS: label, unit, source, position, style, motion, start, fontSize, fontWeight, color
+  The TEXT field contains the main value (e.g., "42%", "1.2M", "73%").
+  LABEL is optional — only include if user explicitly requests a label/subtitle.
 
 COMPONENT: lowerthird — Use for speaker identification, expert identification, location tags, organization labels, or any "lower third" overlay.
   REQUIRED FIELDS: NAME, DURATION
@@ -126,12 +126,12 @@ CRITICAL RULES — READ CAREFULLY:
 FIELD NAME RULES — CRITICAL:
 ═══════════════════════════════════════════════════════════════
 
-★ statistic component: Use TEXT for the main value (e.g., "TEXT: 42%")
 ★ titlecard component: Use TITLE for the main title text (e.g., "TITLE: My Title")
+★ statistic component: Use TEXT for the main value (e.g., "TEXT: 42%")
 ★ lowerthird component: Use NAME for the primary identification (e.g., "NAME: John Smith")
 
-★ TEXT is ONLY valid for statistic. Using TEXT for titlecard or lowerthird will be REJECTED.
 ★ TITLE is ONLY valid for titlecard. Using TITLE for statistic or lowerthird will be REJECTED.
+★ TEXT is ONLY valid for statistic. Using TEXT for titlecard or lowerthird will be REJECTED.
 ★ NAME is ONLY valid for lowerthird. Using NAME for statistic or titlecard will be REJECTED.
 
 Each component type has its OWN field name for the main text. Do NOT mix field names between component types.
@@ -199,75 +199,7 @@ CRITICAL — If the user does NOT mention any color (no "red", "blue", "white", 
 EXAMPLES — Output ONLY component blocks in this exact format:
 ═══════════════════════════════════════════════════════════════
 
-EXAMPLE 1 — simple new statistic (no label, no motion):
-COMPONENT: statistic
-TEXT: 42%
-POSITION: center
-DURATION: 4
-STYLE: documentary
-END
-
-EXAMPLE 2 — statistic with label:
-COMPONENT: statistic
-TEXT: 73%
-LABEL: of global traffic
-POSITION: center
-DURATION: 4
-STYLE: documentary
-END
-
-EXAMPLE 3 — "show a stat sliding up from below":
-COMPONENT: statistic
-TEXT: 42%
-POSITION: center
-DURATION: 4
-MOTION: slideUp
-END
-
-EXAMPLE 4 — "display a number that pops in":
-COMPONENT: statistic
-TEXT: 73%
-LABEL: completion rate
-POSITION: center
-DURATION: 4
-MOTION: pop
-END
-
-EXAMPLE 5 — "fade in a statistic normally":
-COMPONENT: statistic
-TEXT: 1.2M
-POSITION: center
-DURATION: 4
-MOTION: fade
-END
-
-EXAMPLE 6 — "show 42% large in the center":
-COMPONENT: statistic
-TEXT: 42%
-POSITION: center
-DURATION: 4
-FONTSIZE: 120
-END
-
-EXAMPLE 7 — "show 42% in bold":
-COMPONENT: statistic
-TEXT: 42%
-POSITION: center
-DURATION: 4
-FONTWEIGHT: bold
-END
-
-EXAMPLE 8 — "show 42% in white with label and slide up":
-COMPONENT: statistic
-TEXT: 42%
-LABEL: people affected
-POSITION: center
-DURATION: 4
-COLOR: #FFFFFF
-MOTION: slideUp
-END
-
-EXAMPLE 9 — "create a title card saying The Hidden Cost of Traffic with subtitle Why congestion wastes more than fuel, fading in from the left":
+EXAMPLE 1 — "create a title card saying The Hidden Cost of Traffic with subtitle Why congestion wastes more than fuel, fading in from the left":
 COMPONENT: titlecard
 TITLE: The Hidden Cost of Traffic
 SUBTITLE: Why congestion wastes more than fuel
@@ -277,7 +209,7 @@ MOTION: slideLeft
 STYLE: documentary
 END
 
-EXAMPLE 10 — "create a red title card saying The Hidden Cost of Traffic with subtitle Why congestion wastes more than fuel, fading in from the left":
+EXAMPLE 2 — "create a red title card saying The Hidden Cost of Traffic with subtitle Why congestion wastes more than fuel, fading in from the left":
 COMPONENT: titlecard
 TITLE: The Hidden Cost of Traffic
 SUBTITLE: Why congestion wastes more than fuel
@@ -288,7 +220,7 @@ COLOR: #FF0000
 STYLE: documentary
 END
 
-EXAMPLE 11 — "create a title card saying How Cars Changed the World":
+EXAMPLE 3 — "create a title card saying How Cars Changed the World":
 COMPONENT: titlecard
 TITLE: How Cars Changed the World
 POSITION: center
@@ -296,7 +228,7 @@ DURATION: 5
 STYLE: documentary
 END
 
-EXAMPLE 12 — "create a bold title card saying The Hidden Cost of Traffic, large and centered":
+EXAMPLE 4 — "create a bold title card saying The Hidden Cost of Traffic, large and centered":
 COMPONENT: titlecard
 TITLE: The Hidden Cost of Traffic
 POSITION: center
@@ -306,7 +238,7 @@ FONTWEIGHT: bold
 STYLE: documentary
 END
 
-EXAMPLE 13 — "make a documentary title card about urban planning with a fade in":
+EXAMPLE 5 — "make a documentary title card about urban planning with a fade in":
 COMPONENT: titlecard
 TITLE: Urban Planning
 POSITION: center
@@ -315,7 +247,58 @@ MOTION: fade
 STYLE: documentary
 END
 
-EXAMPLE 14 — "lower third for Dr. Sarah Chen, Department of Physics":
+EXAMPLE 6 — "show 42% in white with label and slide up":
+COMPONENT: statistic
+TEXT: 42%
+LABEL: people affected
+POSITION: center
+DURATION: 4
+COLOR: #FFFFFF
+MOTION: slideUp
+END
+
+EXAMPLE 7 — "show a stat sliding up from below":
+COMPONENT: statistic
+TEXT: 42%
+POSITION: center
+DURATION: 4
+MOTION: slideUp
+END
+
+EXAMPLE 8 — "display a number that pops in":
+COMPONENT: statistic
+TEXT: 73%
+LABEL: completion rate
+POSITION: center
+DURATION: 4
+MOTION: pop
+END
+
+EXAMPLE 9 — "fade in a statistic normally":
+COMPONENT: statistic
+TEXT: 1.2M
+POSITION: center
+DURATION: 4
+MOTION: fade
+END
+
+EXAMPLE 10 — "show 42% large in the center":
+COMPONENT: statistic
+TEXT: 42%
+POSITION: center
+DURATION: 4
+FONTSIZE: 120
+END
+
+EXAMPLE 11 — "show 42% in bold":
+COMPONENT: statistic
+TEXT: 42%
+POSITION: center
+DURATION: 4
+FONTWEIGHT: bold
+END
+
+EXAMPLE 12 — "lower third for Dr. Sarah Chen, Department of Physics":
 COMPONENT: lowerthird
 NAME: Dr. Sarah Chen
 SUBTITLE: Department of Physics
@@ -324,7 +307,7 @@ DURATION: 4
 STYLE: documentary
 END
 
-EXAMPLE 15 — "identify the speaker as John Smith, Reporter":
+EXAMPLE 13 — "identify the speaker as John Smith, Reporter":
 COMPONENT: lowerthird
 NAME: John Smith
 SUBTITLE: Reporter
@@ -333,7 +316,7 @@ DURATION: 4
 STYLE: documentary
 END
 
-EXAMPLE 16 — "lower third for the White House, sliding up":
+EXAMPLE 14 — "lower third for the White House, sliding up":
 COMPONENT: lowerthird
 NAME: The White House
 POSITION: bottom_left
@@ -341,7 +324,7 @@ DURATION: 3
 MOTION: slideUp
 END
 
-EXAMPLE 17 — "add a name tag for Maria Garcia, Environmental Scientist, fading in":
+EXAMPLE 15 — "add a name tag for Maria Garcia, Environmental Scientist, fading in":
 COMPONENT: lowerthird
 NAME: Maria Garcia
 SUBTITLE: Environmental Scientist

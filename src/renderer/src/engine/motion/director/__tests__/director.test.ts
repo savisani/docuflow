@@ -1080,12 +1080,12 @@ describe('Provider Prompt — Clarity and Anti-Documentation', () => {
   });
 
   it('prompt contains TitleCard example with COLOR and directional motion', () => {
-    expect(prompt).toMatch(/EXAMPLE 10.*red title card.*fading in from the left/i);
+    expect(prompt).toMatch(/EXAMPLE 2.*red title card.*fading in from the left/i);
     expect(prompt).toMatch(/COMPONENT: titlecard\s+TITLE: The Hidden Cost of Traffic\s+SUBTITLE: Why congestion wastes more than fuel\s+POSITION: center\s+DURATION: 5\s+MOTION: slideLeft\s+COLOR: #FF0000\s+STYLE: documentary/s);
   });
 
   it('prompt contains example with subtitle and directional motion', () => {
-    expect(prompt).toMatch(/EXAMPLE 9.*title card.*subtitle.*fading in from the left/i);
+    expect(prompt).toMatch(/EXAMPLE 1.*title card.*subtitle.*fading in from the left/i);
     expect(prompt).toMatch(/COMPONENT: titlecard\s+TITLE: The Hidden Cost of Traffic\s+SUBTITLE: Why congestion wastes more than fuel\s+POSITION: center\s+DURATION: 5\s+MOTION: slideLeft\s+STYLE: documentary/s);
   });
 
@@ -1147,37 +1147,62 @@ describe('Provider Prompt — TitleCard Field Name Rules', () => {
     expect(prompt).toMatch(/lowerthird component.*NAME/i);
   });
 
-  it('prompt example 10 uses TITLE not TEXT for titlecard', () => {
-    const example10 = prompt.split('EXAMPLE 10')[1] || '';
-    expect(example10).toMatch(/TITLE: The Hidden Cost of Traffic/);
-    expect(example10).not.toMatch(/TEXT: The Hidden Cost of Traffic/);
+  it('prompt example 2 uses TITLE not TEXT for titlecard', () => {
+    const example2 = prompt.split('EXAMPLE 2')[1] || '';
+    expect(example2).toMatch(/TITLE: The Hidden Cost of Traffic/);
+    expect(example2).not.toMatch(/TEXT: The Hidden Cost of Traffic/);
   });
 
-  it('prompt example 9 uses TITLE not TEXT for titlecard', () => {
-    const example9 = prompt.split('EXAMPLE 9')[1] || '';
-    expect(example9).toMatch(/TITLE: The Hidden Cost of Traffic/);
-    expect(example9).not.toMatch(/TEXT: The Hidden Cost of Traffic/);
+  it('prompt example 1 uses TITLE not TEXT for titlecard', () => {
+    const example1 = prompt.split('EXAMPLE 1')[1] || '';
+    expect(example1).toMatch(/TITLE: The Hidden Cost of Traffic/);
+    expect(example1).not.toMatch(/TEXT: The Hidden Cost of Traffic/);
   });
 
-  it('prompt example 11 uses TITLE not TEXT for titlecard', () => {
-    const example11 = prompt.split('EXAMPLE 11')[1] || '';
-    expect(example11).toMatch(/TITLE: How Cars Changed the World/);
-    expect(example11).not.toMatch(/TEXT: How Cars Changed the World/);
+  it('prompt example 3 uses TITLE not TEXT for titlecard', () => {
+    const example3 = prompt.split('EXAMPLE 3')[1] || '';
+    expect(example3).toMatch(/TITLE: How Cars Changed the World/);
+    expect(example3).not.toMatch(/TEXT: How Cars Changed the World/);
   });
 
-  it('prompt example 12 uses TITLE not TEXT for titlecard', () => {
-    const example12 = prompt.split('EXAMPLE 12')[1] || '';
-    expect(example12).toMatch(/TITLE: The Hidden Cost of Traffic/);
-    expect(example12).not.toMatch(/TEXT: The Hidden Cost of Traffic/);
+  it('prompt example 4 uses TITLE not TEXT for titlecard', () => {
+    const example4 = prompt.split('EXAMPLE 4')[1] || '';
+    expect(example4).toMatch(/TITLE: The Hidden Cost of Traffic/);
+    expect(example4).not.toMatch(/TEXT: The Hidden Cost of Traffic/);
   });
 
-  it('prompt example 13 uses TITLE not TEXT for titlecard', () => {
-    const example13 = prompt.split('EXAMPLE 13')[1] || '';
-    expect(example13).toMatch(/TITLE: Urban Planning/);
-    expect(example13).not.toMatch(/TEXT: Urban Planning/);
+  it('prompt example 5 uses TITLE not TEXT for titlecard', () => {
+    const example5 = prompt.split('EXAMPLE 5')[1] || '';
+    expect(example5).toMatch(/TITLE: Urban Planning/);
+    expect(example5).not.toMatch(/TEXT: Urban Planning/);
   });
 
   it('prompt explicitly states that using TEXT for titlecard will be rejected', () => {
     expect(prompt).toMatch(/Using TEXT for titlecard.*will be rejected/i);
+  });
+
+  it('prompt has titlecard examples BEFORE statistic examples', () => {
+    const titlecardExamplePos = prompt.indexOf('COMPONENT: titlecard');
+    const statisticExamplePos = prompt.indexOf('COMPONENT: statistic');
+    expect(titlecardExamplePos).toBeLessThan(statisticExamplePos);
+  });
+
+  it('prompt first example is a titlecard', () => {
+    const examplesSection = prompt.split('EXAMPLES —')[1] || '';
+    const firstComponent = examplesSection.match(/COMPONENT: (\w+)/)?.[1];
+    expect(firstComponent).toBe('titlecard');
+  });
+
+  it('prompt field name rules are listed before examples', () => {
+    const fieldRulesPos = prompt.indexOf('FIELD NAME RULES');
+    const examplesPos = prompt.indexOf('EXAMPLES —');
+    expect(fieldRulesPos).toBeLessThan(examplesPos);
+  });
+
+  it('prompt component reference lists titlecard first', () => {
+    const componentRefPos = prompt.indexOf('COMPONENT REFERENCE');
+    const titlecardRefPos = prompt.indexOf('COMPONENT: titlecard');
+    const statisticRefPos = prompt.indexOf('COMPONENT: statistic');
+    expect(titlecardRefPos).toBeLessThan(statisticRefPos);
   });
 });
