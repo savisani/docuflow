@@ -1109,3 +1109,75 @@ describe('Provider Prompt — Clarity and Anti-Documentation', () => {
     expect(prompt).toMatch(/END/);
   });
 });
+
+// ═════════════════════════════════════════════════════════════════
+// TITLECARD FIELD NAME REGRESSION TESTS
+// ═════════════════════════════════════════════════════════════════
+
+describe('Provider Prompt — TitleCard Field Name Rules', () => {
+  const request = makeRequest({
+    prompt: 'Create a red title card saying The Hidden Cost of Traffic with subtitle Why congestion wastes more than fuel, fading in from the left.',
+  });
+
+  const prompt = buildMotionDirectorPrompt(request);
+
+  it('prompt explicitly states TEXT is NOT a valid titlecard field', () => {
+    expect(prompt).toMatch(/TEXT is NOT a valid titlecard field/i);
+  });
+
+  it('prompt explicitly states TITLE must always be used for titlecard', () => {
+    expect(prompt).toMatch(/ALWAYS use TITLE for titlecard/i);
+  });
+
+  it('prompt explicitly states TEXT is ONLY valid for statistic', () => {
+    expect(prompt).toMatch(/TEXT is ONLY valid for statistic/i);
+  });
+
+  it('prompt explicitly states TITLE is ONLY valid for titlecard', () => {
+    expect(prompt).toMatch(/TITLE is ONLY valid for titlecard/i);
+  });
+
+  it('prompt explicitly states each component type has its own field name', () => {
+    expect(prompt).toMatch(/Each component type has its OWN field name/i);
+  });
+
+  it('prompt shows correct field name mapping for each component type', () => {
+    expect(prompt).toMatch(/statistic component.*TEXT/i);
+    expect(prompt).toMatch(/titlecard component.*TITLE/i);
+    expect(prompt).toMatch(/lowerthird component.*NAME/i);
+  });
+
+  it('prompt example 10 uses TITLE not TEXT for titlecard', () => {
+    const example10 = prompt.split('EXAMPLE 10')[1] || '';
+    expect(example10).toMatch(/TITLE: The Hidden Cost of Traffic/);
+    expect(example10).not.toMatch(/TEXT: The Hidden Cost of Traffic/);
+  });
+
+  it('prompt example 9 uses TITLE not TEXT for titlecard', () => {
+    const example9 = prompt.split('EXAMPLE 9')[1] || '';
+    expect(example9).toMatch(/TITLE: The Hidden Cost of Traffic/);
+    expect(example9).not.toMatch(/TEXT: The Hidden Cost of Traffic/);
+  });
+
+  it('prompt example 11 uses TITLE not TEXT for titlecard', () => {
+    const example11 = prompt.split('EXAMPLE 11')[1] || '';
+    expect(example11).toMatch(/TITLE: How Cars Changed the World/);
+    expect(example11).not.toMatch(/TEXT: How Cars Changed the World/);
+  });
+
+  it('prompt example 12 uses TITLE not TEXT for titlecard', () => {
+    const example12 = prompt.split('EXAMPLE 12')[1] || '';
+    expect(example12).toMatch(/TITLE: The Hidden Cost of Traffic/);
+    expect(example12).not.toMatch(/TEXT: The Hidden Cost of Traffic/);
+  });
+
+  it('prompt example 13 uses TITLE not TEXT for titlecard', () => {
+    const example13 = prompt.split('EXAMPLE 13')[1] || '';
+    expect(example13).toMatch(/TITLE: Urban Planning/);
+    expect(example13).not.toMatch(/TEXT: Urban Planning/);
+  });
+
+  it('prompt explicitly states that using TEXT for titlecard will be rejected', () => {
+    expect(prompt).toMatch(/Using TEXT for titlecard.*will be rejected/i);
+  });
+});

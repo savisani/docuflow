@@ -74,18 +74,23 @@ COMPONENT REFERENCE (for your information — do NOT output this):
 Available component types: ${componentList}
 
 COMPONENT: statistic — Use for numerical data, percentages, statistics, counts, or any "show X%" style requests.
-  FIELDS: ${statisticFieldList}
+  REQUIRED FIELDS: TEXT, DURATION
+  OPTIONAL FIELDS: label, unit, source, position, style, motion, start, fontSize, fontWeight, color
   The TEXT field contains the main value (e.g., "42%", "1.2M", "73%").
   LABEL is optional — only include if user explicitly requests a label/subtitle.
 
 COMPONENT: titlecard — Use for title cards, headlines, section headers, or any request that explicitly mentions "title card", "title", "heading", or "headline".
-  FIELDS: ${titlecardFieldList}
-  The TITLE field contains the main title text.
+  REQUIRED FIELDS: TITLE, DURATION
+  OPTIONAL FIELDS: subtitle, position, style, motion, start, fontSize, fontWeight, color
+  ★ CRITICAL — The TITLE field contains the main title text. ALWAYS use TITLE for titlecard, NEVER use TEXT.
+  ★ TEXT is NOT a valid titlecard field. Using TEXT for titlecard will be rejected by the parser.
+  ★ For titlecard, the main text field is TITLE. For statistic, the main text field is TEXT. These are DIFFERENT fields for DIFFERENT components.
   SUBTITLE — CRITICAL: If the user provides any text after "with subtitle", "subtitle:", or similar phrasing, you MUST include it as the SUBTITLE field. Do NOT omit the subtitle when the user explicitly provides one. Do NOT truncate or ignore the subtitle text.
   TitleCard is for text-based titles, NOT for numerical statistics.
 
 COMPONENT: lowerthird — Use for speaker identification, expert identification, location tags, organization labels, or any "lower third" overlay.
-  FIELDS: ${lowerthirdFieldList}
+  REQUIRED FIELDS: NAME, DURATION
+  OPTIONAL FIELDS: subtitle, position, style, motion, start, fontSize, fontWeight, color
   The NAME field contains the primary identification text (e.g., person name, location name, organization name).
   SUBTITLE — optional secondary line (e.g., title, role, department, description).
   Default position is bottom_left for documentary convention.
@@ -116,6 +121,20 @@ CRITICAL RULES — READ CAREFULLY:
 13. Use only canonical style names: documentary, minimal, bold.
 14. Use only canonical motion names: zoom, slideUp, slideLeft, slideRight, fade, pop.
 15. Use only canonical font weight names: normal, medium, semibold, bold.
+
+═══════════════════════════════════════════════════════════════
+FIELD NAME RULES — CRITICAL:
+═══════════════════════════════════════════════════════════════
+
+★ statistic component: Use TEXT for the main value (e.g., "TEXT: 42%")
+★ titlecard component: Use TITLE for the main title text (e.g., "TITLE: My Title")
+★ lowerthird component: Use NAME for the primary identification (e.g., "NAME: John Smith")
+
+★ TEXT is ONLY valid for statistic. Using TEXT for titlecard or lowerthird will be REJECTED.
+★ TITLE is ONLY valid for titlecard. Using TITLE for statistic or lowerthird will be REJECTED.
+★ NAME is ONLY valid for lowerthird. Using NAME for statistic or titlecard will be REJECTED.
+
+Each component type has its OWN field name for the main text. Do NOT mix field names between component types.
 
 ═══════════════════════════════════════════════════════════════
 COMPONENT INTENT RULES:
