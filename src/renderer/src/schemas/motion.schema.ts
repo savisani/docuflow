@@ -28,12 +28,17 @@ const MotionStatisticDataSchema = z.object({
   source: z.string().max(MOTION_LIMITS.MAX_TEXT_LENGTH).optional(),
 });
 
+const MotionTitleCardDataSchema = z.object({
+  title: z.string().min(1).max(MOTION_LIMITS.MAX_TEXT_LENGTH),
+  subtitle: z.string().min(1).max(MOTION_LIMITS.MAX_TEXT_LENGTH).optional(),
+});
+
 const MotionComponentDataSchema: z.ZodType<any> = z.lazy(() =>
-  z.union([MotionStatisticDataSchema])
+  z.union([MotionStatisticDataSchema, MotionTitleCardDataSchema])
 );
 
 const MotionComponentSchema = z.object({
-  type: z.enum(['statistic']),
+  type: z.enum(['statistic', 'titlecard']),
   id: z.string().max(100).optional(),
   data: MotionComponentDataSchema,
   timing: MotionTimingSchema,

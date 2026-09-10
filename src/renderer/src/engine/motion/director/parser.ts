@@ -421,6 +421,27 @@ function blockToComponent(
         },
       };
     }
+    case 'titlecard': {
+      return {
+        type: 'titlecard',
+        id: uuidv4(),
+        data: {
+          title: block.fields.title || '',
+          subtitle: block.fields.subtitle || undefined,
+          fontSize: block.fields.fontsize ? parseFloat(block.fields.fontsize) : undefined,
+          fontWeight: block.fields.fontweight || undefined,
+          color: block.fields.color || undefined,
+        },
+        timing: { start, duration },
+        style: {
+          position: position || 'center',
+          x: coords.x,
+          y: coords.y,
+          visual: visualStyle,
+          ...(motionStyle ? { motion: motionStyle } : {}),
+        },
+      };
+    }
     default:
       throw new Error(`Unknown component type: ${block.type}`);
   }

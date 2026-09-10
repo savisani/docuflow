@@ -48,12 +48,20 @@ const MotionStatisticDataSchema = z.object({
   color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
 });
 
+const MotionTitleCardDataSchema = z.object({
+  title: z.string().min(1).max(MOTION_LIMITS.MAX_TEXT_LENGTH),
+  subtitle: z.string().min(1).max(MOTION_LIMITS.MAX_TEXT_LENGTH).optional(),
+  fontSize: z.number().min(24).max(200).optional(),
+  fontWeight: z.enum(['normal', 'medium', 'semibold', 'bold']).optional(),
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+});
+
 const MotionComponentDataSchema: z.ZodType<MotionComponentData> = z.lazy(() =>
-  z.union([MotionStatisticDataSchema])
+  z.union([MotionStatisticDataSchema, MotionTitleCardDataSchema])
 );
 
 const MotionComponentSchema = z.object({
-  type: z.enum(['statistic']),
+  type: z.enum(['statistic', 'titlecard']),
   id: z.string().max(100).optional(),
   data: MotionComponentDataSchema,
   timing: MotionTimingSchema,

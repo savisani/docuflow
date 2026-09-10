@@ -51,8 +51,9 @@ export interface MotionDirectorProvider {
 // ── System Prompt Template ──────────────────────────────────────
 
 export function buildMotionDirectorPrompt(request: MotionDirectorRequest): string {
-  const componentList = `statistic`;
-  const fieldList = `text, label, unit, source, position, duration, style, motion, start, fontSize, fontWeight, color`;
+  const componentList = `statistic, titlecard`;
+  const statisticFieldList = `text, label, unit, source, position, duration, style, motion, start, fontSize, fontWeight, color`;
+  const titlecardFieldList = `title, subtitle, position, duration, style, motion, start, fontSize, fontWeight, color`;
   const positionList = `center, top, bottom, left, right, top_left, top_right, bottom_left, bottom_right`;
   const styleList = `documentary, minimal, bold`;
   const motionList = `zoom, slideUp, slideLeft, slideRight, fade, pop`;
@@ -61,25 +62,44 @@ export function buildMotionDirectorPrompt(request: MotionDirectorRequest): strin
   return `You are a motion graphics director. Given a user prompt, create motion graphics components.
 
 AVAILABLE COMPONENT TYPES: ${componentList}
-FIELDS PER COMPONENT: ${fieldList}
+
+COMPONENT: statistic
+FIELDS: ${statisticFieldList}
+Use for numerical data, percentages, statistics, counts, or any "show X%" style requests.
+The TEXT field contains the main value (e.g., "42%", "1.2M", "73%").
+LABEL is optional — only include if user explicitly requests a label/subtitle.
+
+COMPONENT: titlecard
+FIELDS: ${titlecardFieldList}
+Use for title cards, headlines, section headers, or any request that explicitly mentions "title card", "title", "heading", or "headline".
+The TITLE field contains the main title text.
+SUBTITLE is optional — only include if user provides a subtitle.
+TitleCard is for text-based titles, NOT for numerical statistics.
+
 POSITIONS: ${positionList}
 STYLES: ${styleList} (use ONLY these exact style names)
 MOTIONS: ${motionList} (use ONLY these exact motion names for animation style)
 FONT WEIGHTS: ${fontWeightList} (use ONLY these exact weight names)
-FONT SIZE: number between 24 and 200 (default: 72 for main value)
-COLOR: hex color like #FFFFFF or #FF0000 (default: #FFFFFF for main value)
+FONT SIZE: number between 24 and 200 (default: 72 for statistic, 72 for titlecard)
+COLOR: hex color like #FFFFFF or #FF0000 (default: #FFFFFF)
 
 CANVAS: ${request.canvasWidth}x${request.canvasHeight}
 DURATION: ${request.duration} seconds
 
+CRITICAL — COMPONENT INTENT RULES:
+- "title card", "title", "heading", "headline" → use COMPONENT: titlecard
+- "create a title card saying..." → COMPONENT: titlecard
+- "create a title saying..." → COMPONENT: titlecard
+- "make a documentary title card..." → COMPONENT: titlecard
+- "add a subtitle..." in context of a title → COMPONENT: titlecard
+- "title: The Hidden Cost of Traffic" → COMPONENT: titlecard
+- "show 42%", "show a statistic", "show a number", percentage, count → COMPONENT: statistic
+- Do NOT use statistic for title cards
+- Do NOT use titlecard for numerical data/statistics
+- When the user says "title card" or "title", ALWAYS use titlecard, NEVER statistic
+
 RULES:
 - Each component block starts with COMPONENT: <type> and ends with END.
-- COMPONENT FIELDS are: text, label, unit, source, position, duration, style, motion, start, fontSize, fontWeight, color.
-- LABEL is optional. Only include it if the user explicitly requests a label or subtitle.
-- MOTION controls the entrance animation style.
-- FONTSIZE controls the main text size. Only include if user specifies a size (e.g., "large", "small", a specific number).
-- FONTWEIGHT controls text weight. Only include if user specifies weight (e.g., "bold", "light").
-- COLOR controls text color. Only include if user specifies a color.
 - OPERATION, TARGET, and REASON are NOT component fields. Do NOT include them inside a component block unless you are modifying an existing component.
 - For NEW components (most requests): output only the component fields. The system defaults to ADD automatically.
 - For UPDATE: include OPERATION: update, TARGET: <existing component ID>, REASON: <why>.
@@ -93,13 +113,13 @@ RULES:
 MOTION INTENT INFERENCE:
 When the user describes HOW the element should appear, map their natural language to the correct MOTION value:
 - "from below", "slides up", "comes up from bottom", "rises" → MOTION: slideUp
-- "from the left", "slides in from left" → MOTION: slideLeft
+- "from the left", "slides in from left", "fading in from the left" → MOTION: slideLeft
 - "from the right", "slides in from right" → MOTION: slideRight
 - "fade in", "appears", "fades", "gradually appears" → MOTION: fade
 - "pops", "bounces in", "springs", "pops in" → MOTION: pop
 - "zooms in", "grows", "scales up" → MOTION: zoom
-- "normal", "standard", "default" → omit MOTION field (uses fade)
-When no motion intent is expressed, omit the MOTION field. The default conservative animation is fade.
+- "normal", "standard", "default" → omit MOTION field (uses fade for titlecard, fade for statistic)
+When no motion intent is expressed, omit the MOTION field.
 
 SIZE INTENT INFERENCE:
 When the user describes the size, map to FONT_SIZE:
@@ -190,6 +210,43 @@ POSITION: center
 DURATION: 4
 COLOR: #FFFFFF
 MOTION: slideUp
+END
+
+EXAMPLE — "create a title card saying The Hidden Cost of Traffic with subtitle Why congestion wastes more than fuel, fading in from the left":
+COMPONENT: titlecard
+TITLE: The Hidden Cost of Traffic
+SUBTITLE: Why congestion wastes more than fuel
+POSITION: center
+DURATION: 5
+MOTION: slideLeft
+STYLE: documentary
+END
+
+EXAMPLE — "create a title card saying How Cars Changed the World":
+COMPONENT: titlecard
+TITLE: How Cars Changed the World
+POSITION: center
+DURATION: 5
+STYLE: documentary
+END
+
+EXAMPLE — "create a bold title card saying The Hidden Cost of Traffic, large and centered":
+COMPONENT: titlecard
+TITLE: The Hidden Cost of Traffic
+POSITION: center
+DURATION: 5
+FONTSIZE: 120
+FONTWEIGHT: bold
+STYLE: documentary
+END
+
+EXAMPLE — "make a documentary title card about urban planning with a fade in":
+COMPONENT: titlecard
+TITLE: Urban Planning
+POSITION: center
+DURATION: 5
+MOTION: fade
+STYLE: documentary
 END
 
 ${request.existingComponentIds?.length ? `EXISTING COMPONENT IDs: ${request.existingComponentIds.join(', ')}` : 'No existing components.'}

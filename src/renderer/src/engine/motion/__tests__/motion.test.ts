@@ -4,6 +4,7 @@ import { processMotionRequest } from '../gateway';
 import { getCapabilities, isCapabilityAllowed } from '../capabilities';
 import { ComponentRegistry } from '../components/registry';
 import { StatisticCompiler } from '../components/statistic/compiler';
+import { TitleCardCompiler } from '../components/titlecard/compiler';
 import { parseAIResponse } from '../director/parser';
 import { buildTimeline } from '../../timeline/builder';
 import { resolveLayerState } from '../../timeline/resolver';
@@ -174,7 +175,7 @@ describe('Gateway — Valid Operations', () => {
   it('processes getComponents', () => {
     const response = processMotionRequest(validRequest({ operation: 'getComponents' }));
     expect(response.status).toBe('success');
-    expect(response.data).toEqual([{ type: 'statistic' }]);
+    expect(response.data).toEqual([{ type: 'statistic' }, { type: 'titlecard' }]);
   });
 
   it('processes validatePlan', () => {
@@ -1642,6 +1643,812 @@ END`;
       // Motion commands still present
       const animTypes = commands.filter(c => c.type !== 'text').map(c => c.type);
       expect(animTypes.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// TITLECARD COMPONENT
+// ═════════════════════════════════════════════════════════════════
+
+describe('TitleCard — Component Registry', () => {
+  it('registers titlecard component', () => {
+    expect(ComponentRegistry.isRegistered('titlecard')).toBe(true);
+  });
+
+  it('returns titlecard in registered types', () => {
+    const types = ComponentRegistry.getRegisteredTypes();
+    expect(types).toContain('titlecard');
+  });
+
+  it('gets titlecard compiler', () => {
+    const compiler = ComponentRegistry.get('titlecard');
+    expect(compiler).toBeDefined();
+    expect(compiler?.componentType).toBe('titlecard');
+  });
+});
+
+describe('TitleCard — Compiler', () => {
+  const compiler = new TitleCardCompiler();
+
+  it('compiles title-only component to commands', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'The Hidden Cost of Traffic' },
+        timing: { start: 0, duration: 5 },
+      },
+      1920,
+      1080
+    );
+
+    expect(commands.length).toBeGreaterThan(0);
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds).toHaveLength(1);
+    expect(textCmds[0].content).toBe('The Hidden Cost of Traffic');
+  });
+
+  it('compiles title + subtitle to two text commands', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: {
+          title: 'The Hidden Cost of Traffic',
+          subtitle: 'Why congestion wastes more than fuel',
+        },
+        timing: { start: 0, duration: 5 },
+      },
+      1920,
+      1080
+    );
+
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds).toHaveLength(2);
+    expect(textCmds[0].content).toBe('The Hidden Cost of Traffic');
+    expect(textCmds[1].content).toBe('Why congestion wastes more than fuel');
+  });
+
+  it('title and subtitle do not duplicate', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: {
+          title: 'The Hidden Cost of Traffic',
+          subtitle: 'Why congestion wastes more than fuel',
+        },
+        timing: { start: 0, duration: 5 },
+      },
+      1920,
+      1080
+    );
+
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds[0].content).not.toBe(textCmds[1].content);
+    // No text command should contain both title and subtitle concatenated
+    for (const cmd of textCmds) {
+      expect(cmd.content).not.toContain('The Hidden Cost of Traffic Why congestion');
+    }
+  });
+
+  it('validates correct data', () => {
+    const errors = compiler.validate(
+      { title: 'The Hidden Cost of Traffic' },
+      1920,
+      1080
+    );
+    expect(errors).toHaveLength(0);
+  });
+
+  it('rejects empty title', () => {
+    const errors = compiler.validate({ title: '' }, 1920, 1080);
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects title exceeding max length', () => {
+    const errors = compiler.validate(
+      { title: 'x'.repeat(501) },
+      1920,
+      1080
+    );
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects subtitle exceeding max length', () => {
+    const errors = compiler.validate(
+      { title: 'Test', subtitle: 'x'.repeat(501) },
+      1920,
+      1080
+    );
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('produces fadeIn commands for title', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Test Title' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const fadeIns = commands.filter(c => c.type === 'fadeIn');
+    expect(fadeIns.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('produces fadeOut commands for title', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Test Title' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const fadeOuts = commands.filter(c => c.type === 'fadeOut');
+    expect(fadeOuts.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('animation commands target text command IDs', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Test', subtitle: 'Sub' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const textIds = commands.filter(c => c.type === 'text').map(c => c.id);
+    const animCmds = commands.filter(c =>
+      c.type === 'fadeIn' || c.type === 'fadeOut' || c.type === 'scale' || c.type === 'move' || c.type === 'setKeyframes'
+    );
+    for (const cmd of animCmds) {
+      expect(textIds).toContain((cmd as any).target);
+    }
+  });
+
+  it('no animation exceeds the titlecard duration', () => {
+    const duration = 5;
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Test' },
+        timing: { start: 0, duration },
+      },
+      1920,
+      1080
+    );
+    for (const cmd of commands) {
+      const cmdEnd = cmd.start + (cmd.duration || 0);
+      expect(cmdEnd).toBeLessThanOrEqual(duration + 0.01);
+    }
+  });
+
+  it('no new command types are introduced', () => {
+    const allowedTypes = ['text', 'fadeIn', 'fadeOut', 'scale', 'move', 'setKeyframes'];
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Test', subtitle: 'Sub' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    for (const cmd of commands) {
+      expect(allowedTypes).toContain(cmd.type);
+    }
+  });
+});
+
+describe('TitleCard — Motion Vocabulary', () => {
+  const compiler = new TitleCardCompiler();
+
+  function compileWithMotion(motion: string | undefined) {
+    return compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'The Hidden Cost of Traffic', subtitle: 'Why congestion wastes more than fuel' },
+        timing: { start: 0, duration: 5 },
+        ...(motion ? { style: { motion } } : {}),
+      },
+      1920,
+      1080
+    );
+  }
+
+  function getCommandTypes(commands: ReturnType<typeof compileWithMotion>) {
+    return commands.map(c => c.type);
+  }
+
+  it('zoom produces scale entrance', () => {
+    const commands = compileWithMotion('zoom');
+    const types = getCommandTypes(commands);
+    expect(types).toContain('scale');
+    expect(types).toContain('fadeIn');
+    expect(types).toContain('fadeOut');
+    expect(types).not.toContain('move');
+    expect(types).not.toContain('setKeyframes');
+  });
+
+  it('slideUp produces move commands with Y offset', () => {
+    const commands = compileWithMotion('slideUp');
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBe(2);
+    for (const cmd of moveCmds) {
+      const move = cmd as any;
+      expect(move.from.y).toBeGreaterThan(move.to.y);
+      expect(move.from.x).toBe(move.to.x);
+    }
+  });
+
+  it('slideLeft produces move commands with X offset', () => {
+    const commands = compileWithMotion('slideLeft');
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBe(2);
+    for (const cmd of moveCmds) {
+      const move = cmd as any;
+      expect(move.from.x).toBeLessThan(move.to.x);
+      expect(move.from.y).toBe(move.to.y);
+    }
+  });
+
+  it('slideRight produces move commands with X offset', () => {
+    const commands = compileWithMotion('slideRight');
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBe(2);
+    for (const cmd of moveCmds) {
+      const move = cmd as any;
+      expect(move.from.x).toBeGreaterThan(move.to.x);
+      expect(move.from.y).toBe(move.to.y);
+    }
+  });
+
+  it('fade produces only fadeIn/fadeOut', () => {
+    const commands = compileWithMotion('fade');
+    const types = getCommandTypes(commands);
+    expect(types).toContain('fadeIn');
+    expect(types).toContain('fadeOut');
+    expect(types).not.toContain('scale');
+    expect(types).not.toContain('move');
+    expect(types).not.toContain('setKeyframes');
+  });
+
+  it('pop produces setKeyframes for overshoot scale', () => {
+    const commands = compileWithMotion('pop');
+    const types = getCommandTypes(commands);
+    expect(types).toContain('setKeyframes');
+    expect(types).toContain('fadeIn');
+    expect(types).toContain('fadeOut');
+    expect(types).not.toContain('scale');
+    expect(types).not.toContain('move');
+  });
+
+  it('default (no motion) produces fade behavior', () => {
+    const commands = compileWithMotion(undefined);
+    const types = getCommandTypes(commands);
+    expect(types).toContain('fadeIn');
+    expect(types).toContain('fadeOut');
+    expect(types).not.toContain('scale');
+    expect(types).not.toContain('move');
+    expect(types).not.toContain('setKeyframes');
+  });
+
+  it('all motions produce text commands for title and subtitle', () => {
+    const motions = ['zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop'];
+    for (const motion of motions) {
+      const commands = compileWithMotion(motion);
+      const textCmds = commands.filter(c => c.type === 'text');
+      expect(textCmds.length).toBe(2);
+      expect(textCmds[0].content).toBe('The Hidden Cost of Traffic');
+      expect(textCmds[1].content).toBe('Why congestion wastes more than fuel');
+    }
+  });
+
+  it('all motions produce fadeOut commands', () => {
+    const motions = ['zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop'];
+    for (const motion of motions) {
+      const commands = compileWithMotion(motion);
+      const fadeOuts = commands.filter(c => c.type === 'fadeOut');
+      expect(fadeOuts.length).toBe(2);
+    }
+  });
+
+  it('case-insensitive motion lookup', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Test' },
+        timing: { start: 0, duration: 3 },
+        style: { motion: 'SLIDELEFT' },
+      },
+      1920,
+      1080
+    );
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('TitleCard — Visual Styling', () => {
+  const compiler = new TitleCardCompiler();
+
+  it('default styling (fontSize=72, fontWeight=bold, color=#FFFFFF)', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Test' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const texts = commands.filter(c => c.type === 'text') as any[];
+    expect(texts[0].fontSize).toBe(72);
+    expect(texts[0].fontWeight).toBe('bold');
+    expect(texts[0].color).toBe('#FFFFFF');
+  });
+
+  it('custom fontSize is preserved', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Test', fontSize: 120 },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const texts = commands.filter(c => c.type === 'text') as any[];
+    expect(texts[0].fontSize).toBe(120);
+  });
+
+  it('custom fontWeight is preserved', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Test', fontWeight: 'semibold' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const texts = commands.filter(c => c.type === 'text') as any[];
+    expect(texts[0].fontWeight).toBe('semibold');
+  });
+
+  it('custom color is preserved', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Test', color: '#FF0000' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const texts = commands.filter(c => c.type === 'text') as any[];
+    expect(texts[0].color).toBe('#FF0000');
+  });
+
+  it('subtitle gets smaller derived fontSize', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Big Title', subtitle: 'Small Sub', fontSize: 100 },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const texts = commands.filter(c => c.type === 'text') as any[];
+    expect(texts).toHaveLength(2);
+    expect(texts[0].fontSize).toBe(100);
+    expect(texts[1].fontSize).toBeLessThan(100);
+  });
+
+  it('position is preserved through parser', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test Title
+POSITION: top
+DURATION: 4
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+    });
+
+    expect(parseResult.success).toBe(true);
+    const comp = parseResult.plan!.components[0];
+    expect((comp.style as any).position).toBe('top');
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// TITLECARD — PARSER (AI RESPONSE → MOTIONPLAN)
+// ═════════════════════════════════════════════════════════════════
+
+describe('TitleCard — Parser', () => {
+  it('parses title card from AI response', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: The Hidden Cost of Traffic
+SUBTITLE: Why congestion wastes more than fuel
+POSITION: center
+DURATION: 5
+MOTION: slideLeft
+STYLE: documentary
+END`;
+
+    const result = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.plan).toBeDefined();
+    expect(result.plan!.components).toHaveLength(1);
+    expect(result.plan!.components[0].type).toBe('titlecard');
+    expect(result.plan!.components[0].data.title).toBe('The Hidden Cost of Traffic');
+    expect(result.plan!.components[0].data.subtitle).toBe('Why congestion wastes more than fuel');
+  });
+
+  it('parses title card without subtitle', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: How Cars Changed the World
+POSITION: center
+DURATION: 5
+STYLE: documentary
+END`;
+
+    const result = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.plan!.components[0].data.title).toBe('How Cars Changed the World');
+    expect(result.plan!.components[0].data.subtitle).toBeUndefined();
+  });
+
+  it('rejects titlecard missing required TITLE field', () => {
+    const aiResponse = `COMPONENT: titlecard
+SUBTITLE: Just a subtitle
+DURATION: 4
+END`;
+
+    const result = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.errors.some(e => e.code === 'MISSING_FIELD' && e.field === 'title')).toBe(true);
+  });
+
+  it('rejects titlecard missing required DURATION field', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test Title
+END`;
+
+    const result = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.errors.some(e => e.code === 'MISSING_FIELD' && e.field === 'duration')).toBe(true);
+  });
+
+  it('rejects titlecard with unknown field', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test
+DURATION: 4
+INJECTED_FIELD: malicious
+END`;
+
+    const result = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.errors.some(e => e.code === 'UNKNOWN_FIELD')).toBe(true);
+  });
+
+  it('parses all optional fields', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: The Hidden Cost
+SUBTITLE: of Traffic
+POSITION: center
+DURATION: 5
+STYLE: documentary
+MOTION: slideLeft
+FONTSIZE: 100
+FONTWEIGHT: bold
+COLOR: #FF0000
+START: 1
+END`;
+
+    const result = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+    });
+
+    expect(result.success).toBe(true);
+    const comp = result.plan!.components[0];
+    expect(comp.data.title).toBe('The Hidden Cost');
+    expect(comp.data.subtitle).toBe('of Traffic');
+    expect(comp.data.fontSize).toBe(100);
+    expect(comp.data.fontWeight).toBe('bold');
+    expect(comp.data.color).toBe('#FF0000');
+    expect(comp.timing.start).toBe(1);
+    expect(comp.timing.duration).toBe(5);
+    expect((comp.style as any).motion).toBe('slideleft');
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// TITLECARD — FULL PATH (AI → PARSE → COMPILE → COMMANDS)
+// ═════════════════════════════════════════════════════════════════
+
+describe('TitleCard — Full Path', () => {
+  it('slideLeft title card compiles to valid move commands', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: The Hidden Cost of Traffic
+SUBTITLE: Why congestion wastes more than fuel
+POSITION: center
+DURATION: 5
+MOTION: slideLeft
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.plan).toBeDefined();
+
+    const result = processMotionRequest({
+      version: 1,
+      operation: 'compilePlan',
+      requestId: 'test-titlecard-slideLeft',
+      plan: parseResult.plan!,
+    });
+
+    expect(result.status).toBe('success');
+    const data = result.data as { commands: any[]; commandCount: number };
+    expect(data.commandCount).toBeGreaterThan(0);
+
+    const commandTypes = data.commands.map((c: any) => c.type);
+    expect(commandTypes).toContain('move');
+    expect(commandTypes).toContain('fadeIn');
+    expect(commandTypes).toContain('text');
+
+    // Verify title and subtitle are separate text commands
+    const textCmds = data.commands.filter((c: any) => c.type === 'text');
+    expect(textCmds).toHaveLength(2);
+    expect(textCmds[0].content).toBe('The Hidden Cost of Traffic');
+    expect(textCmds[1].content).toBe('Why congestion wastes more than fuel');
+  });
+
+  it('fade title card compiles without move or scale', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: How Cars Changed the World
+POSITION: center
+DURATION: 5
+MOTION: fade
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+    });
+
+    expect(parseResult.success).toBe(true);
+
+    const result = processMotionRequest({
+      version: 1,
+      operation: 'compilePlan',
+      requestId: 'test-titlecard-fade',
+      plan: parseResult.plan!,
+    });
+
+    expect(result.status).toBe('success');
+    const data = result.data as { commands: any[]; commandCount: number };
+    const commandTypes = data.commands.map((c: any) => c.type);
+    expect(commandTypes).toContain('fadeIn');
+    expect(commandTypes).not.toContain('scale');
+    expect(commandTypes).not.toContain('move');
+  });
+
+  it('title card with styling compiles correctly', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: The Hidden Cost of Traffic
+POSITION: center
+DURATION: 5
+FONTSIZE: 120
+FONTWEIGHT: bold
+COLOR: #FF5500
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+    });
+
+    expect(parseResult.success).toBe(true);
+
+    const result = processMotionRequest({
+      version: 1,
+      operation: 'compilePlan',
+      requestId: 'test-titlecard-styled',
+      plan: parseResult.plan!,
+    });
+
+    expect(result.status).toBe('success');
+    const data = result.data as { commands: any[]; commandCount: number };
+    const textCmds = data.commands.filter((c: any) => c.type === 'text');
+    expect(textCmds[0].fontSize).toBe(120);
+    expect(textCmds[0].fontWeight).toBe('bold');
+    expect(textCmds[0].color).toBe('#FF5500');
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// STATISTIC vs TITLECARD — Intent Disambiguation
+// ═════════════════════════════════════════════════════════════════
+
+describe('Intent Disambiguation — Statistic vs TitleCard', () => {
+  it('"show 42%" maps to statistic', () => {
+    const aiResponse = `COMPONENT: statistic
+TEXT: 42%
+POSITION: center
+DURATION: 4
+END`;
+
+    const result = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.plan!.components[0].type).toBe('statistic');
+  });
+
+  it('"create a title card saying X" maps to titlecard', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: The Hidden Cost of Traffic
+POSITION: center
+DURATION: 5
+END`;
+
+    const result = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.plan!.components[0].type).toBe('titlecard');
+  });
+
+  it('"create a title saying X" maps to titlecard', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: How Cars Changed the World
+POSITION: center
+DURATION: 5
+END`;
+
+    const result = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.plan!.components[0].type).toBe('titlecard');
+  });
+
+  it('statistic request still produces statistic, not titlecard', () => {
+    const aiResponse = `COMPONENT: statistic
+TEXT: 42%
+LABEL: of traffic
+POSITION: center
+DURATION: 4
+END`;
+
+    const result = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.plan!.components[0].type).toBe('statistic');
+    expect(result.plan!.components[0].data.value).toBe('42%');
+  });
+
+  it('both types can coexist in the same plan', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Traffic Report
+POSITION: center
+DURATION: 5
+END
+
+COMPONENT: statistic
+TEXT: 42%
+POSITION: center
+DURATION: 4
+START: 5
+END`;
+
+    const result = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 10,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.plan!.components).toHaveLength(2);
+    expect(result.plan!.components[0].type).toBe('titlecard');
+    expect(result.plan!.components[1].type).toBe('statistic');
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// STATISTIC — Regression: existing behavior unchanged
+// ═════════════════════════════════════════════════════════════════
+
+describe('Statistic — Regression: existing behavior unchanged', () => {
+  it('statistic still compiles with all original fields', () => {
+    const compiler = new StatisticCompiler();
+    const commands = compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '73%', label: 'of global traffic', unit: '%', source: 'research' },
+        timing: { start: 0, duration: 4 },
+        style: { motion: 'slideUp' },
+      },
+      1920,
+      1080
+    );
+
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds).toHaveLength(2);
+    expect(textCmds[0].content).toBe('73%');
+    expect(textCmds[1].content).toBe('of global traffic');
+
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('statistic motion vocabulary unchanged', () => {
+    const motions = ['zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop'];
+    const compiler = new StatisticCompiler();
+    for (const motion of motions) {
+      const commands = compiler.compile(
+        {
+          type: 'statistic',
+          data: { value: '42%', label: 'test' },
+          timing: { start: 0, duration: 3 },
+          style: { motion },
+        },
+        1920,
+        1080
+      );
+      expect(commands.length).toBeGreaterThan(0);
     }
   });
 });

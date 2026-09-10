@@ -7,7 +7,7 @@
 
 export const MOTION_PLAN_VERSION = 1 as const;
 
-export type MotionComponentType = 'statistic';
+export type MotionComponentType = 'statistic' | 'titlecard';
 
 export interface MotionCanvas {
   width: number;
@@ -34,7 +34,15 @@ export interface MotionStatisticData {
   color?: string;
 }
 
-export type MotionComponentData = MotionStatisticData;
+export interface MotionTitleCardData {
+  title: string;
+  subtitle?: string;
+  fontSize?: number;
+  fontWeight?: string;
+  color?: string;
+}
+
+export type MotionComponentData = MotionStatisticData | MotionTitleCardData;
 
 export interface MotionComponent {
   type: MotionComponentType;

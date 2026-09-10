@@ -1,5 +1,6 @@
 import type { ComponentCompiler } from './compiler';
 import { StatisticCompiler } from './statistic/compiler';
+import { TitleCardCompiler } from './titlecard/compiler';
 
 /**
  * ComponentRegistry — central registry for all motion component compilers.
@@ -29,6 +30,7 @@ function isRegistered(componentType: string): boolean {
 // ── Register built-in compilers ─────────────────────────────────
 
 registerCompiler(new StatisticCompiler());
+registerCompiler(new TitleCardCompiler());
 
 // ── Public API ──────────────────────────────────────────────────
 

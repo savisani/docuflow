@@ -7,7 +7,7 @@
   "author": "",
   "license": "MIT",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "node scripts/ollama-launcher.mjs electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
