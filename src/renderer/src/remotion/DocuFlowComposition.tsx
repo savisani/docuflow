@@ -242,24 +242,36 @@ const RenderText: React.FC<{
 
   if (opacity <= 0) return null;
 
-  const positionStyle: React.CSSProperties = text.centered
-    ? {
-        left: '50%',
-        top: posY,
-      }
-    : text.isSubtitle
-    ? {
-        bottom: text.y !== 950 ? text.y : undefined,
-        top: text.y === 950 ? 'auto' : undefined,
-        left: '50%',
-      }
-    : {
-        left: posX,
-        top: posY,
-      };
+  // For centered text, animations provide absolute positions that must be
+  // converted to offsets from the centered base position.
+  const isCentered = text.centered || text.isSubtitle;
+  let positionStyle: React.CSSProperties;
+  let animOffsetX = 0;
+  let animOffsetY = 0;
+
+  if (isCentered) {
+    // Centered: fixed at 50%, animation x/y become transform offsets
+    positionStyle = {
+      left: '50%',
+      top: text.y,
+    };
+    if (hasAnimations || hasKeyframes) {
+      animOffsetX = posX - text.x;
+      animOffsetY = posY - text.y;
+    }
+  } else {
+    // Non-centered: use absolute positions
+    positionStyle = {
+      left: posX,
+      top: posY,
+    };
+  }
 
   const transformParts: string[] = [];
-  if (text.centered || text.isSubtitle) transformParts.push('translateX(-50%)');
+  if (isCentered) transformParts.push('translateX(-50%)');
+  if (animOffsetX !== 0 || animOffsetY !== 0) {
+    transformParts.push(`translate(${animOffsetX}px, ${animOffsetY}px)`);
+  }
   if (scale !== 1) transformParts.push(`scale(${scale})`);
   const combinedTransform = transformParts.length > 0 ? transformParts.join(' ') : undefined;
 

@@ -2352,14 +2352,14 @@ END`;
     expect(titleLayer!.fontWeight).toBe('bold');
     expect(titleLayer!.color).toBe('#FFFFFF');
     expect(titleLayer!.x).toBe(960);
-    expect(titleLayer!.y).toBe(510);
+    expect(titleLayer!.y).toBeCloseTo(467.95, 0);
 
     // Verify subtitle properties
-    expect(subtitleLayer!.fontSize).toBe(Math.min(28, 72 * 0.4));
+    expect(subtitleLayer!.fontSize).toBe(29);
     expect(subtitleLayer!.fontWeight).toBe('normal');
     expect(subtitleLayer!.color).toBe('#CCCCCC');
     expect(subtitleLayer!.x).toBe(960);
-    expect(subtitleLayer!.y).toBe(580);
+    expect(subtitleLayer!.y).toBeGreaterThan(titleLayer!.y);
 
     // Verify IDs are unique
     expect(titleLayer!.id).not.toBe(subtitleLayer!.id);
@@ -2561,7 +2561,7 @@ describe('TitleCard — Output Correctness (centered metadata)', () => {
     expect(textCmds[0].id).not.toBe(textCmds[1].id);
   });
 
-  it('4. subtitle Y is below title Y (centerY+40 vs centerY-30)', () => {
+  it('4. subtitle Y is below title Y', () => {
     const commands = compileWithTitleAndSubtitle();
     const textCmds = commands.filter(c => c.type === 'text');
     const title = textCmds.find(c => c.content === 'The Hidden Cost of Traffic')!;
@@ -2582,18 +2582,18 @@ describe('TitleCard — Output Correctness (centered metadata)', () => {
     expect(textCmds[0].color).toBe('#FF5500');
   });
 
-  it('7. default font sizes are 72 (title) and 28 (subtitle)', () => {
+  it('7. default font sizes are 72 (title) and 29 (subtitle)', () => {
     const commands = compileWithTitleAndSubtitle();
     const textCmds = commands.filter(c => c.type === 'text');
     expect(textCmds[0].fontSize).toBe(72);
-    expect(textCmds[1].fontSize).toBe(28);
+    expect(textCmds[1].fontSize).toBe(29);
   });
 
   it('8. explicit fontSize is preserved', () => {
     const commands = compileWithTitleAndSubtitle({ fontSize: 120 });
     const textCmds = commands.filter(c => c.type === 'text');
     expect(textCmds[0].fontSize).toBe(120);
-    expect(textCmds[1].fontSize).toBe(Math.min(28, 120 * 0.4));
+    expect(textCmds[1].fontSize).toBe(48);
   });
 
   it('9. buildTimeline propagates centered to TextLayers', () => {
@@ -3180,5 +3180,299 @@ END`;
       const move = cmd as { from: { x: number }; to: { x: number } };
       expect(move.from.x).toBeLessThan(move.to.x);
     }
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// TITLECARD LAYOUT — deterministic sizing and positioning
+// ═════════════════════════════════════════════════════════════════
+
+describe('TitleCard — Layout (deterministic sizing and positioning)', () => {
+  const compiler = new TitleCardCompiler();
+  const settings: ProjectSettings = { width: 1920, height: 1080, fps: 30 };
+
+  it('1. title-only TitleCard remains unchanged (centered at canvas midpoint)', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Hello World' },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds.length).toBe(1);
+    expect(textCmds[0].y).toBe(540);
+    expect(textCmds[0].fontSize).toBe(72);
+  });
+
+  it('2. title + subtitle produces two text layers', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Title', subtitle: 'Subtitle' },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds.length).toBe(2);
+  });
+
+  it('3. subtitle is below title with clear separation', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Title', subtitle: 'Subtitle' },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    const title = textCmds.find(c => c.content === 'Title')!;
+    const subtitle = textCmds.find(c => c.content === 'Subtitle')!;
+    const gap = subtitle.y - title.y;
+    expect(gap).toBeGreaterThan(80);
+  });
+
+  it('4. subtitle font size is readable (>= 28px)', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Title', subtitle: 'Subtitle' },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    const subtitle = textCmds.find(c => c.content === 'Subtitle')!;
+    expect(subtitle.fontSize).toBeGreaterThanOrEqual(28);
+  });
+
+  it('5. default 72px title produces 29px subtitle', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Title', subtitle: 'Subtitle' },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds[0].fontSize).toBe(72);
+    expect(textCmds[1].fontSize).toBe(29);
+  });
+
+  it('6. large title (120px) produces proportionally larger subtitle capped at 48px', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Title', subtitle: 'Subtitle', fontSize: 120 },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds[0].fontSize).toBe(120);
+    expect(textCmds[1].fontSize).toBe(48);
+  });
+
+  it('7. very large title (200px) subtitle capped at 48px', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Title', subtitle: 'Subtitle', fontSize: 200 },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds[0].fontSize).toBe(200);
+    expect(textCmds[1].fontSize).toBe(48);
+  });
+
+  it('8. title and subtitle do not share the same Y position', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Title', subtitle: 'Subtitle' },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds[0].y).not.toBe(textCmds[1].y);
+  });
+
+  it('9. long title pushes subtitle farther down (more gap than short title)', () => {
+    const shortCommands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Hi', subtitle: 'Sub' },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const longCommands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: {
+          title: 'The Hidden Cost of Traffic in Modern Cities',
+          subtitle: 'Sub',
+        },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const shortTexts = shortCommands.filter(c => c.type === 'text');
+    const longTexts = longCommands.filter(c => c.type === 'text');
+    const shortGap = shortTexts[1].y - shortTexts[0].y;
+    const longGap = longTexts[1].y - longTexts[0].y;
+    expect(longGap).toBeGreaterThanOrEqual(shortGap);
+  });
+
+  it('10. both title and subtitle are horizontally centered', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Title', subtitle: 'Subtitle' },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    for (const cmd of textCmds) {
+      expect(cmd.centered).toBe(true);
+    }
+    const timeline = buildTimeline(commands, [], settings);
+    for (const layer of timeline.textLayers) {
+      expect(layer.centered).toBe(true);
+    }
+  });
+
+  it('11. slideLeft still works for title and subtitle', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Title', subtitle: 'Subtitle' },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'slideLeft' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    const textIds = textCmds.map(c => c.id);
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBeGreaterThanOrEqual(2);
+    for (const cmd of moveCmds) {
+      expect(textIds).toContain((cmd as any).target);
+    }
+    const fadeInCmds = commands.filter(c => c.type === 'fadeIn');
+    expect(fadeInCmds.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('12. slideLeft move targets match layout positions', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Title', subtitle: 'Subtitle' },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'slideLeft' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    const titleCmd = textCmds.find(c => c.content === 'Title')!;
+    const subtitleCmd = textCmds.find(c => c.content === 'Subtitle')!;
+    const moveCmds = commands.filter(c => c.type === 'move') as Array<{
+      target: string;
+      from: { x: number; y: number };
+      to: { x: number; y: number };
+    }>;
+    const titleMove = moveCmds.find(m => m.target === titleCmd.id)!;
+    const subtitleMove = moveCmds.find(m => m.target === subtitleCmd.id)!;
+    expect(titleMove.to.y).toBe(titleCmd.y);
+    expect(subtitleMove.to.y).toBe(subtitleCmd.y);
+  });
+
+  it('13. subtitle centered transform is preserved with slideLeft motion', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Title', subtitle: 'Subtitle' },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'slideLeft' },
+      },
+      1920,
+      1080
+    );
+    const timeline = buildTimeline(commands, [], settings);
+    for (const layer of timeline.textLayers) {
+      expect(layer.centered).toBe(true);
+    }
+  });
+
+  it('14. statistic rendering is unchanged', () => {
+    const statCompiler = new StatisticCompiler();
+    const commands = statCompiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '42%', label: 'of traffic' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds.length).toBe(2);
+    for (const cmd of textCmds) {
+      expect((cmd as any).centered).toBeUndefined();
+    }
+    const timeline = buildTimeline(commands, [], settings);
+    for (const layer of timeline.textLayers) {
+      expect(layer.centered).toBe(false);
+    }
+  });
+
+  it('15. title and subtitle block is vertically centered on canvas', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Title', subtitle: 'Subtitle' },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    const title = textCmds.find(c => c.content === 'Title')!;
+    const subtitle = textCmds.find(c => c.content === 'Subtitle')!;
+    const blockMidpoint = (title.y + subtitle.y) / 2;
+    expect(Math.abs(blockMidpoint - 540)).toBeLessThan(20);
   });
 });

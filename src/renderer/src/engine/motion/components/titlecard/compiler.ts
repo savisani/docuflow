@@ -60,11 +60,35 @@ export class TitleCardCompiler implements ComponentCompiler {
     const titleFontWeight = data.fontWeight ?? 'bold';
     const titleColor = data.color ?? '#FFFFFF';
 
+    // Deterministic subtitle sizing: proportional to title, clamped for readability
+    const subtitleFontSize = data.subtitle
+      ? Math.round(Math.min(48, Math.max(28, titleFontSize * 0.4)))
+      : 0;
+
+    // Deterministic vertical positioning based on font sizes
+    const TITLE_LINE_HEIGHT = 1.2;
+    const SUBTITLE_LINE_HEIGHT = 1.3;
+    const SUBTITLE_GAP = 20;
+
+    const titleLineHeight = titleFontSize * TITLE_LINE_HEIGHT;
+    const subtitleLineHeight = subtitleFontSize * SUBTITLE_LINE_HEIGHT;
+
+    let titleY: number;
+    let subtitleY: number;
+
+    if (data.subtitle) {
+      // Center the title+subtitle block as a group around canvas midpoint
+      const totalHeight = titleLineHeight + SUBTITLE_GAP + subtitleLineHeight;
+      titleY = centerY - totalHeight / 2;
+      subtitleY = titleY + titleLineHeight + SUBTITLE_GAP;
+    } else {
+      titleY = centerY;
+    }
+
     const commands: Command[] = [];
 
-    // Title text — large, centered above midpoint
+    // Title text — large, centered
     const titleId = uuidv4();
-    const titleY = data.subtitle ? centerY - 30 : centerY;
     commands.push({
       id: titleId,
       type: 'text',
@@ -88,8 +112,8 @@ export class TitleCardCompiler implements ComponentCompiler {
         type: 'text',
         content: data.subtitle,
         x: centerX,
-        y: centerY + 40,
-        fontSize: Math.min(28, titleFontSize * 0.4),
+        y: subtitleY,
+        fontSize: subtitleFontSize,
         fontFamily: 'Arial',
         fontWeight: 'normal',
         color: '#CCCCCC',
@@ -125,8 +149,8 @@ export class TitleCardCompiler implements ComponentCompiler {
             id: uuidv4(),
             type: 'move',
             target: subtitleId,
-            from: { x: centerX, y: centerY + 40 + slideOffset },
-            to: { x: centerX, y: centerY + 40 },
+            from: { x: centerX, y: subtitleY + slideOffset },
+            to: { x: centerX, y: subtitleY },
             start,
             duration: fadeInDuration,
             easing: 'easeOut',
@@ -166,8 +190,8 @@ export class TitleCardCompiler implements ComponentCompiler {
             id: uuidv4(),
             type: 'move',
             target: subtitleId,
-            from: { x: centerX - slideOffset, y: centerY + 40 },
-            to: { x: centerX, y: centerY + 40 },
+            from: { x: centerX - slideOffset, y: subtitleY },
+            to: { x: centerX, y: subtitleY },
             start,
             duration: fadeInDuration,
             easing: 'easeOut',
@@ -207,8 +231,8 @@ export class TitleCardCompiler implements ComponentCompiler {
             id: uuidv4(),
             type: 'move',
             target: subtitleId,
-            from: { x: centerX + slideOffset, y: centerY + 40 },
-            to: { x: centerX, y: centerY + 40 },
+            from: { x: centerX + slideOffset, y: subtitleY },
+            to: { x: centerX, y: subtitleY },
             start,
             duration: fadeInDuration,
             easing: 'easeOut',
