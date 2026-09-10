@@ -5,7 +5,7 @@ import { parseNaturalLanguage } from '../../engine/commands/nlParser';
 import { validateCommands, normalizeCommands } from '../../engine/commands/validator';
 import { buildTimeline } from '../../engine/timeline/builder';
 import { Command } from '../../engine/commands/types';
-import { Play, CheckCircle, Trash2, RotateCcw, Minimize2, Terminal, Sparkles, Code } from 'lucide-react';
+import { Play, CheckCircle, Trash2, RotateCcw, Minimize2, Terminal, Sparkles, Code, Copy } from 'lucide-react';
 import { Panel, Button, IconButton, Tooltip, Section } from '../ui';
 import { CommandResults } from './CommandResults';
 
@@ -264,8 +264,28 @@ export const CommandConsole: React.FC = () => {
 
       {nlErrors.length > 0 && (
         <div className="px-3 py-1.5 text-df-sm text-df-error bg-red-900/20 border-t border-red-900/30 shrink-0">
-          <div className="flex items-center gap-1 font-semibold mb-0.5">
-            <span>{nlErrors.length} error{nlErrors.length !== 1 ? 's' : ''}</span>
+          <div className="flex items-center justify-between mb-0.5">
+            <span className="font-semibold">{nlErrors.length} error{nlErrors.length !== 1 ? 's' : ''}</span>
+            <button
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(`Parse Errors:\n${nlErrors.join('\n')}`);
+                } catch {
+                  const textarea = document.createElement('textarea');
+                  textarea.value = `Parse Errors:\n${nlErrors.join('\n')}`;
+                  textarea.style.position = 'fixed';
+                  textarea.style.left = '-9999px';
+                  document.body.appendChild(textarea);
+                  textarea.select();
+                  document.execCommand('copy');
+                  document.body.removeChild(textarea);
+                }
+              }}
+              className="text-red-300/60 hover:text-red-300 transition-colors p-0.5"
+              title="Copy errors to clipboard"
+            >
+              <Copy size={10} />
+            </button>
           </div>
           {nlErrors.map((err, i) => (
             <div key={i} className="ml-4 text-df-xs text-red-300/80">{err}</div>

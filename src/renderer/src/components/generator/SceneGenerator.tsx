@@ -3,7 +3,7 @@ import {
   Wand2, Upload, FileText, Mic, Loader2, X, CheckCircle, AlertCircle,
   Film, Clock, Image as ImageIcon, Clapperboard, Sparkles, Play,
   Trash2, Settings, Globe, Key, ChevronDown, ChevronRight,
-  Brain, ArrowDownToLine, MonitorDot, Cpu, Zap, Flower,
+  Brain, ArrowDownToLine, MonitorDot, Cpu, Zap, Flower, Copy,
 } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { Button } from '../ui';
@@ -1142,6 +1142,33 @@ export const SceneGenerator: React.FC = () => {
         }`}>
           {toast.type === 'success' ? <CheckCircle size={14} /> : <X size={14} />}
           <span className="text-df-sm font-medium max-w-[300px] truncate">{toast.message}</span>
+          {toast.type === 'error' && (
+            <button
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(`Error: ${toast.message}`);
+                  setToast(null);
+                  setTimeout(() => setToast({ message: 'Error copied to clipboard', type: 'success' }), 100);
+                } catch {
+                  // Fallback
+                  const textarea = document.createElement('textarea');
+                  textarea.value = `Error: ${toast.message}`;
+                  textarea.style.position = 'fixed';
+                  textarea.style.left = '-9999px';
+                  document.body.appendChild(textarea);
+                  textarea.select();
+                  document.execCommand('copy');
+                  document.body.removeChild(textarea);
+                  setToast(null);
+                  setTimeout(() => setToast({ message: 'Error copied to clipboard', type: 'success' }), 100);
+                }
+              }}
+              className="ml-2 p-1 rounded hover:bg-white/20 transition-colors"
+              title="Copy error to clipboard"
+            >
+              <Copy size={12} />
+            </button>
+          )}
         </div>
       )}
 
@@ -1911,8 +1938,29 @@ export const SceneGenerator: React.FC = () => {
                               <Loader2 size={18} className="text-amber-400 animate-spin" />
                             </div>
                           ) : scene.status === 'error' ? (
-                            <div className="rounded-lg border border-red-500/20 aspect-video bg-red-500/5 flex items-center justify-center p-2">
+                            <div className="rounded-lg border border-red-500/20 aspect-video bg-red-500/5 flex flex-col items-center justify-center p-2 gap-1">
                               <span className="text-[8px] text-red-400 text-center leading-tight">{scene.error}</span>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    await navigator.clipboard.writeText(`Scene Error: ${scene.error}`);
+                                  } catch {
+                                    const textarea = document.createElement('textarea');
+                                    textarea.value = `Scene Error: ${scene.error}`;
+                                    textarea.style.position = 'fixed';
+                                    textarea.style.left = '-9999px';
+                                    document.body.appendChild(textarea);
+                                    textarea.select();
+                                    document.execCommand('copy');
+                                    document.body.removeChild(textarea);
+                                  }
+                                }}
+                                className="text-[8px] text-red-300/60 hover:text-red-300 transition-colors flex items-center gap-0.5"
+                                title="Copy error to clipboard"
+                              >
+                                <Copy size={8} />
+                                <span>Copy</span>
+                              </button>
                             </div>
                           ) : (
                             <div className="rounded-lg border border-white/5 aspect-video bg-slate-900/50 flex items-center justify-center">

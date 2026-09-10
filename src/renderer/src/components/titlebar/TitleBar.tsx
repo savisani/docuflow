@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Minus, Square, X, Maximize2, Undo2, Redo2, PanelLeft, Image, SlidersHorizontal, Sparkles, Film, Clapperboard, FileText, FolderOpen, Save, FilePlus, Workflow, Power, Loader2 } from 'lucide-react';
+import { Minus, Square, X, Maximize2, Undo2, Redo2, PanelLeft, Image, SlidersHorizontal, Sparkles, Film, Clapperboard, FileText, FolderOpen, Save, FilePlus, Workflow, Power, Loader2, Copy } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { Tooltip, Dropdown } from '../ui';
 
@@ -182,12 +182,34 @@ export const TitleBar: React.FC = () => {
         
         {/* Unload Status Toast */}
         {unloadMessage && (
-          <div className={`absolute top-full left-0 mt-1 px-2 py-1 rounded-df-sm text-df-xs font-medium whitespace-nowrap z-50 ${
+          <div className={`absolute top-full left-0 mt-1 px-2 py-1 rounded-df-sm text-df-xs font-medium whitespace-nowrap z-50 flex items-center gap-1 ${
             unloadMessage.type === 'success' ? 'bg-df-success text-white' :
             unloadMessage.type === 'error' ? 'bg-df-error text-white' :
             'bg-df-surface-3 text-df-text-primary border border-df-border'
           }`}>
-            {unloadMessage.text}
+            <span>{unloadMessage.text}</span>
+            {unloadMessage.type === 'error' && (
+              <button
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(`Error: ${unloadMessage.text}`);
+                  } catch {
+                    const textarea = document.createElement('textarea');
+                    textarea.value = `Error: ${unloadMessage.text}`;
+                    textarea.style.position = 'fixed';
+                    textarea.style.left = '-9999px';
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textarea);
+                  }
+                }}
+                className="ml-1 p-0.5 rounded hover:bg-white/20 transition-colors"
+                title="Copy error to clipboard"
+              >
+                <Copy size={10} />
+              </button>
+            )}
           </div>
         )}
       </div>

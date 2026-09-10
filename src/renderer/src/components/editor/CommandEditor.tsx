@@ -303,10 +303,40 @@ export const CommandEditor: React.FC = () => {
                   Commands applied successfully
                 </div>
               )}
+              {errors.length > 0 && (
+                <div className="px-3 py-1 text-df-xs text-[var(--color-error)] bg-[var(--color-error-muted)] flex items-center justify-between">
+                  <span>{errors.length} validation error{errors.length !== 1 ? 's' : ''}</span>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const errorText = errors.map(e => 
+                          e.line > 0 ? `Line ${e.line}: ${e.message}` : e.message
+                        ).join('\n');
+                        await navigator.clipboard.writeText(`Validation Errors:\n${errorText}`);
+                      } catch {
+                        const textarea = document.createElement('textarea');
+                        textarea.value = `Validation Errors:\n${errors.map(e => 
+                          e.line > 0 ? `Line ${e.line}: ${e.message}` : e.message
+                        ).join('\n')}`;
+                        textarea.style.position = 'fixed';
+                        textarea.style.left = '-9999px';
+                        document.body.appendChild(textarea);
+                        textarea.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(textarea);
+                      }
+                    }}
+                    className="text-[var(--color-error)]/60 hover:text-[var(--color-error)] transition-colors p-0.5"
+                    title="Copy all errors to clipboard"
+                  >
+                    <Copy size={10} />
+                  </button>
+                </div>
+              )}
               {errors.map((error, i) => (
                 <div key={i} className="px-3 py-1 text-df-sm text-[var(--color-error)] bg-[var(--color-error-muted)] flex items-start gap-1">
                   <AlertTriangle size={10} className="mt-0.5 shrink-0" />
-                  <span>
+                  <span className="flex-1">
                     {error.line > 0 && <span className="font-mono opacity-70">L{error.line}: </span>}
                     {error.message}
                   </span>

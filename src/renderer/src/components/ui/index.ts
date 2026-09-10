@@ -16,6 +16,9 @@ export {
   NumberInput,
 } from './primitives';
 
+export { ErrorCopyButton } from './ErrorCopyButton';
+export type { ErrorCopyButtonProps } from './ErrorCopyButton';
+
 export { Panel } from './Panel';
 
 export { DropZone } from './DropZone';

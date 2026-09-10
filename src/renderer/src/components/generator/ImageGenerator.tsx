@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Settings, Wand2, Image as ImageIcon, Download, Film, Plus, Cloud, X, Sliders, Sparkles, ZoomIn, Save, CheckCircle, FolderOpen, RefreshCw, Cpu, Monitor, ArrowUp, CpuIcon, Flower } from 'lucide-react';
+import { Settings, Wand2, Image as ImageIcon, Download, Film, Plus, Cloud, X, Sliders, Sparkles, ZoomIn, Save, CheckCircle, FolderOpen, RefreshCw, Cpu, Monitor, ArrowUp, CpuIcon, Flower, Copy } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { Button } from '../ui';
 import { CLOUDFLARE_MODELS, CloudflareConfig } from '../../utils/cloudflareApi';
@@ -654,6 +654,32 @@ export const ImageGenerator: React.FC = () => {
         }`}>
           {toast.type === 'success' ? <CheckCircle size={14} /> : <X size={14} />}
           <span className="text-df-sm font-medium max-w-[300px] truncate">{toast.message}</span>
+          {toast.type === 'error' && (
+            <button
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(`Error: ${toast.message}`);
+                  setToast(null);
+                  setTimeout(() => setToast({ message: 'Error copied to clipboard', type: 'success' }), 100);
+                } catch {
+                  const textarea = document.createElement('textarea');
+                  textarea.value = `Error: ${toast.message}`;
+                  textarea.style.position = 'fixed';
+                  textarea.style.left = '-9999px';
+                  document.body.appendChild(textarea);
+                  textarea.select();
+                  document.execCommand('copy');
+                  document.body.removeChild(textarea);
+                  setToast(null);
+                  setTimeout(() => setToast({ message: 'Error copied to clipboard', type: 'success' }), 100);
+                }
+              }}
+              className="ml-2 p-1 rounded hover:bg-white/20 transition-colors"
+              title="Copy error to clipboard"
+            >
+              <Copy size={12} />
+            </button>
+          )}
         </div>
       )}
 
@@ -1212,10 +1238,30 @@ export const ImageGenerator: React.FC = () => {
           )}
 
           {error && (
-            <p className="mt-1.5 text-df-xs text-df-error flex items-center gap-1">
+            <div className="mt-1.5 text-df-xs text-df-error flex items-center gap-1">
               <span className="inline-block w-1 h-1 rounded-full bg-df-error shrink-0" />
-              {error}
-            </p>
+              <span className="flex-1">{error}</span>
+              <button
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(`Error: ${error}`);
+                  } catch {
+                    const textarea = document.createElement('textarea');
+                    textarea.value = `Error: ${error}`;
+                    textarea.style.position = 'fixed';
+                    textarea.style.left = '-9999px';
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textarea);
+                  }
+                }}
+                className="text-df-error/60 hover:text-df-error transition-colors p-0.5"
+                title="Copy error to clipboard"
+              >
+                <Copy size={10} />
+              </button>
+            </div>
           )}
 
           {/* Local Generation Progress */}

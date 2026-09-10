@@ -349,8 +349,30 @@ export const Inspector: React.FC = () => {
                 </div>
               )}
               {testResult === 'error' && (
-                <div className="text-df-base text-df-error">
-                  <div className="flex items-center gap-1"><XCircle size={12} /> Audio test: FAILED</div>
+                <div className="text-df-base text-df-error relative">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1"><XCircle size={12} /> Audio test: FAILED</div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(`Audio Test Error: ${testError || 'Unknown error'}`);
+                        } catch {
+                          const textarea = document.createElement('textarea');
+                          textarea.value = `Audio Test Error: ${testError || 'Unknown error'}`;
+                          textarea.style.position = 'fixed';
+                          textarea.style.left = '-9999px';
+                          document.body.appendChild(textarea);
+                          textarea.select();
+                          document.execCommand('copy');
+                          document.body.removeChild(textarea);
+                        }
+                      }}
+                      className="text-df-error/60 hover:text-df-error transition-colors p-0.5"
+                      title="Copy error to clipboard"
+                    >
+                      <Copy size={10} />
+                    </button>
+                  </div>
                   {testError && <div className="mt-1 font-mono text-df-xs text-df-error/80">{testError}</div>}
                 </div>
               )}

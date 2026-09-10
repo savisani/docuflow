@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Activity, ChevronRight, Loader2, Zap, Send, Settings, FileText, RefreshCw,
+  Activity, ChevronRight, Loader2, Zap, Send, Settings, FileText, RefreshCw, Copy,
 } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { buildProjectContext, ProjectContext } from '../../services/aiService';
@@ -463,8 +463,28 @@ const LiveAITab: React.FC<{
 
       {/* Error display */}
       {status === 'error' && outputText && (
-        <div className="bg-red-500/5 rounded-lg border border-red-500/10 p-2.5">
-          <p className="text-[9px] text-red-400">{outputText}</p>
+        <div className="bg-red-500/5 rounded-lg border border-red-500/10 p-2.5 relative">
+          <p className="text-[9px] text-red-400 pr-6">{outputText}</p>
+          <button
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(`AI Error: ${outputText}`);
+              } catch {
+                const textarea = document.createElement('textarea');
+                textarea.value = `AI Error: ${outputText}`;
+                textarea.style.position = 'fixed';
+                textarea.style.left = '-9999px';
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+              }
+            }}
+            className="absolute top-2 right-2 text-red-400/60 hover:text-red-400 transition-colors p-0.5"
+            title="Copy error to clipboard"
+          >
+            <Copy size={10} />
+          </button>
         </div>
       )}
     </div>
