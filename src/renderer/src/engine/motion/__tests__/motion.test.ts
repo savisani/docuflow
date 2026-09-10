@@ -2298,10 +2298,75 @@ END`;
 
     expect(result.status).toBe('success');
     const data = result.data as { commands: any[]; commandCount: number };
+
     const textCmds = data.commands.filter((c: any) => c.type === 'text');
+    expect(textCmds).toHaveLength(1);
+    expect(textCmds[0].content).toBe('The Hidden Cost of Traffic');
     expect(textCmds[0].fontSize).toBe(120);
     expect(textCmds[0].fontWeight).toBe('bold');
     expect(textCmds[0].color).toBe('#FF5500');
+  });
+
+  it('slideLeft title card produces TWO text layers through buildTimeline with correct properties', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: The Hidden Cost of Traffic
+SUBTITLE: Why congestion wastes more than fuel
+POSITION: center
+DURATION: 5
+MOTION: slideLeft
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.plan).toBeDefined();
+
+    const compileResult = processMotionRequest({
+      version: 1,
+      operation: 'compilePlan',
+      requestId: 'test-titlecard-slideLeft-buildTimeline',
+      plan: parseResult.plan!,
+    });
+
+    expect(compileResult.status).toBe('success');
+    const { commands } = compileResult.data as { commands: any[] };
+
+    const settings: ProjectSettings = { width: 1920, height: 1080, fps: 30 };
+    const timeline = buildTimeline(commands, [], settings);
+
+    // CRITICAL: both title and subtitle must become TextLayers
+    expect(timeline.textLayers.length).toBe(2);
+
+    const titleLayer = timeline.textLayers.find(t => t.content === 'The Hidden Cost of Traffic');
+    const subtitleLayer = timeline.textLayers.find(t => t.content === 'Why congestion wastes more than fuel');
+
+    expect(titleLayer).toBeDefined();
+    expect(subtitleLayer).toBeDefined();
+
+    // Verify title properties
+    expect(titleLayer!.fontSize).toBe(72);
+    expect(titleLayer!.fontWeight).toBe('bold');
+    expect(titleLayer!.color).toBe('#FFFFFF');
+    expect(titleLayer!.x).toBe(960);
+    expect(titleLayer!.y).toBe(510);
+
+    // Verify subtitle properties
+    expect(subtitleLayer!.fontSize).toBe(Math.min(28, 72 * 0.4));
+    expect(subtitleLayer!.fontWeight).toBe('normal');
+    expect(subtitleLayer!.color).toBe('#CCCCCC');
+    expect(subtitleLayer!.x).toBe(960);
+    expect(subtitleLayer!.y).toBe(580);
+
+    // Verify IDs are unique
+    expect(titleLayer!.id).not.toBe(subtitleLayer!.id);
+
+    // Verify both have animations
+    expect(titleLayer!.animations.length).toBeGreaterThan(0);
+    expect(subtitleLayer!.animations.length).toBeGreaterThan(0);
   });
 });
 
