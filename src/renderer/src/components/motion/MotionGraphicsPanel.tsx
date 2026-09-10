@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Play, CheckCircle, AlertCircle, Plus, Loader2, RefreshCw, ChevronDown, Eye } from 'lucide-react';
+import { Play, CheckCircle, AlertCircle, Plus, Loader2, RefreshCw, ChevronDown, Eye, Copy, Check } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { processMotionRequest, MOTION_LIMITS } from '../../engine/motion';
 import { OllamaMotionProvider } from '../../engine/motion/director/providers/ollama';
@@ -27,42 +27,76 @@ interface ClassifiedError {
   type: ErrorType;
   message: string;
   details?: string;
+  rawResponse?: string;
+  componentType?: string;
+  missingField?: string;
 }
 
-function classifyError(error: string, context?: { parseErrors?: Array<{ message: string }>; validationErrors?: string[] }): ClassifiedError {
+function classifyError(error: string, context?: { parseErrors?: Array<{ message: string }>; validationErrors?: string[]; rawResponse?: string }): ClassifiedError {
   const lower = error.toLowerCase();
 
   if (lower.includes('ollama') && (lower.includes('unavailable') || lower.includes('refused') || lower.includes('failed to fetch') || lower.includes('econnrefused'))) {
-    return { type: 'ollama-unavailable', message: 'Ollama is not running or not reachable.', details: 'Start Ollama and ensure it is listening on localhost:11434.' };
+    return { type: 'ollama-unavailable', message: 'Ollama is not running or not reachable.', details: 'Start Ollama and ensure it is listening on localhost:11434.', rawResponse: context?.rawResponse };
   }
 
   if (lower.includes('ollama') && lower.includes('404')) {
-    return { type: 'model-unavailable', message: 'Selected model is not available in Ollama.', details: 'Pull the model with: ollama pull <model-name>' };
+    return { type: 'model-unavailable', message: 'Selected model is not available in Ollama.', details: 'Pull the model with: ollama pull <model-name>', rawResponse: context?.rawResponse };
   }
 
   if (context?.parseErrors && context.parseErrors.length > 0) {
     const msgs = context.parseErrors.map((e) => e.message).join('\n');
-    return { type: 'parse-error', message: 'AI response could not be parsed.', details: msgs };
+    const missingField = context.parseErrors[0]?.message?.match(/Missing required field:\s*(\w+)/i)?.[1];
+    return { type: 'parse-error', message: 'AI response could not be parsed.', details: msgs, rawResponse: context?.rawResponse, missingField };
   }
 
   if (context?.validationErrors && context.validationErrors.length > 0) {
     const msgs = context.validationErrors.join('\n');
-    return { type: 'validation-error', message: 'AI response failed validation.', details: msgs };
+    return { type: 'validation-error', message: 'AI response failed validation.', details: msgs, rawResponse: context?.rawResponse };
   }
 
   if (lower.includes('remove') && lower.includes('blocked')) {
-    return { type: 'blocked-remove', message: 'AI requested a REMOVE operation which is blocked.', details: 'REMOVE operations require explicit user confirmation and are not automatically executed.' };
+    return { type: 'blocked-remove', message: 'AI requested a REMOVE operation which is blocked.', details: 'REMOVE operations require explicit user confirmation and are not automatically executed.', rawResponse: context?.rawResponse };
   }
 
   if (lower.includes('unsupported') || lower.includes('unknown component')) {
-    return { type: 'unsupported-component', message: 'AI used an unsupported component type.', details: error };
+    return { type: 'unsupported-component', message: 'AI used an unsupported component type.', details: error, rawResponse: context?.rawResponse };
   }
 
   if (lower.includes('validation') || lower.includes('invalid')) {
-    return { type: 'validation-error', message: 'AI response failed validation.', details: error };
+    return { type: 'validation-error', message: 'AI response failed validation.', details: error, rawResponse: context?.rawResponse };
   }
 
-  return { type: 'unknown', message: error };
+  return { type: 'unknown', message: error, rawResponse: context?.rawResponse };
+}
+
+// ── Copy Error to Clipboard ────────────────────────────────────
+
+function formatErrorForClipboard(error: ClassifiedError): string {
+  const lines: string[] = [];
+  lines.push(`Error Type: ${error.type}`);
+  lines.push(`Message: ${error.message}`);
+  if (error.missingField) {
+    lines.push(`Missing Field: ${error.missingField}`);
+  }
+  if (error.details) {
+    lines.push(`Details: ${error.details}`);
+  }
+  if (error.rawResponse) {
+    lines.push(`\n--- Raw AI Response ---`);
+    lines.push(error.rawResponse);
+    lines.push(`--- End Raw Response ---`);
+  }
+  return lines.join('\n');
+}
+
+async function copyErrorToClipboard(error: ClassifiedError): Promise<boolean> {
+  try {
+    const text = formatErrorForClipboard(error);
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ── Component ──────────────────────────────────────────────────
@@ -82,6 +116,7 @@ export const MotionGraphicsPanel: React.FC = () => {
   const [compiledCommands, setCompiledCommands] = useState<Command[]>([]);
   const [blockedOps, setBlockedOps] = useState<string[]>([]);
   const [showRaw, setShowRaw] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
 
   const providerRef = useRef(new OllamaMotionProvider());
 
@@ -173,7 +208,7 @@ export const MotionGraphicsPanel: React.FC = () => {
 
     if (aiResult.finishReason === 'error') {
       setStatus('error');
-      setClassifiedError(classifyError(aiResult.error || 'Unknown AI error'));
+      setClassifiedError(classifyError(aiResult.error || 'Unknown AI error', { rawResponse: aiResult.text }));
       return;
     }
 
@@ -188,7 +223,7 @@ export const MotionGraphicsPanel: React.FC = () => {
 
     if (!parseResult.success) {
       setStatus('error');
-      setClassifiedError(classifyError('Parse failed', { parseErrors: parseResult.errors }));
+      setClassifiedError(classifyError('Parse failed', { parseErrors: parseResult.errors, rawResponse: aiResult.text }));
       return;
     }
 
@@ -210,7 +245,7 @@ export const MotionGraphicsPanel: React.FC = () => {
 
     if (validationResult.status === 'error') {
       setStatus('error');
-      setClassifiedError(classifyError('Validation failed', { validationErrors: validationResult.errors }));
+      setClassifiedError(classifyError('Validation failed', { validationErrors: validationResult.errors, rawResponse: aiResult.text }));
       return;
     }
 
@@ -224,7 +259,7 @@ export const MotionGraphicsPanel: React.FC = () => {
 
     if (compileResult.status === 'error') {
       setStatus('error');
-      setClassifiedError(classifyError(compileResult.error || 'Compilation failed'));
+      setClassifiedError(classifyError(compileResult.error || 'Compilation failed', { rawResponse: aiResult.text }));
       return;
     }
 
@@ -387,12 +422,29 @@ export const MotionGraphicsPanel: React.FC = () => {
       {status === 'error' && classifiedError && (
         <div className="p-3 mx-4 mt-3 bg-df-error/10 border border-df-error/30 rounded-df-sm flex items-start gap-2">
           <AlertCircle size={12} className="text-df-error mt-0.5 shrink-0" />
-          <div className="text-df-xs text-df-error whitespace-pre-wrap">
+          <div className="flex-1 text-df-xs text-df-error whitespace-pre-wrap">
             <div className="font-medium">{classifiedError.message}</div>
             {classifiedError.details && (
               <div className="mt-1 text-df-text-muted whitespace-pre-wrap">{classifiedError.details}</div>
             )}
           </div>
+          <button
+            onClick={async () => {
+              const success = await copyErrorToClipboard(classifiedError);
+              if (success) {
+                setCopySuccess(true);
+                setTimeout(() => setCopySuccess(false), 2000);
+              }
+            }}
+            className="shrink-0 p-1 rounded-df-sm hover:bg-df-error/20 transition-colors"
+            title="Copy error to clipboard"
+          >
+            {copySuccess ? (
+              <Check size={12} className="text-df-success" />
+            ) : (
+              <Copy size={12} className="text-df-text-muted" />
+            )}
+          </button>
         </div>
       )}
 

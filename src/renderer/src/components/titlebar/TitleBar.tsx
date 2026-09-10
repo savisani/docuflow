@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Minus, Square, X, Maximize2, Undo2, Redo2, PanelLeft, Image, SlidersHorizontal, Sparkles, Film, Clapperboard, FileText, FolderOpen, Save, FilePlus, Workflow } from 'lucide-react';
+import { Minus, Square, X, Maximize2, Undo2, Redo2, PanelLeft, Image, SlidersHorizontal, Sparkles, Film, Clapperboard, FileText, FolderOpen, Save, FilePlus, Workflow, Power, Loader2 } from 'lucide-react';
 import { useDocuFlowStore } from '../../app/store';
 import { Tooltip, Dropdown } from '../ui';
 
@@ -12,6 +12,8 @@ const TABS = [
 
 export const TitleBar: React.FC = () => {
   const [isMaximized, setIsMaximized] = useState(false);
+  const [unloadingModels, setUnloadingModels] = useState(false);
+  const [unloadMessage, setUnloadMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
   const {
     historyIndex, history,
     panelVisibility, setPanelVisibility,
@@ -46,6 +48,74 @@ export const TitleBar: React.FC = () => {
   const handleSaveAs = useCallback(async () => {
     await saveAsProject();
   }, [saveAsProject]);
+
+  // ── Unload All Models ──────────────────────────────────────────
+  const handleUnloadAllModels = useCallback(async () => {
+    if (unloadingModels) return;
+    
+    setUnloadingModels(true);
+    setUnloadMessage(null);
+    
+    try {
+      // Check if any model is currently loaded
+      const modelStatus = await window.docuflow?.getModelStatus();
+      const activeModel = await window.docuflow?.getActiveLocalModel();
+      
+      // If no model is loaded and no Ollama model is active
+      if (!modelStatus?.loaded && (!activeModel || activeModel.type === 'none')) {
+        setUnloadMessage({ text: 'No models currently loaded', type: 'info' });
+        setUnloadingModels(false);
+        return;
+      }
+      
+      let unloadCount = 0;
+      let errors: string[] = [];
+      
+      // Unload diffusion model if loaded
+      if (modelStatus?.loaded) {
+        try {
+          const result = await window.docuflow?.unloadModel();
+          if (result?.success) {
+            unloadCount++;
+          } else {
+            errors.push(result?.error || 'Failed to unload diffusion model');
+          }
+        } catch (err) {
+          errors.push(err instanceof Error ? err.message : 'Failed to unload diffusion model');
+        }
+      }
+      
+      // Unload Ollama model (keep_alive: 0) without stopping the server
+      if (activeModel?.type === 'ollama' && activeModel?.model) {
+        try {
+          // Use the offloadModel function which sends keep_alive: 0
+          const { offloadModel } = await import('../../services/aiService');
+          const result = await offloadModel(activeModel.model);
+          if (result.success) {
+            unloadCount++;
+          } else {
+            errors.push(result.error || 'Failed to unload Ollama model');
+          }
+        } catch (err) {
+          errors.push(err instanceof Error ? err.message : 'Failed to unload Ollama model');
+        }
+      }
+      
+      if (errors.length > 0) {
+        setUnloadMessage({ text: `Partial unload: ${errors.join('; ')}`, type: 'error' });
+      } else if (unloadCount > 0) {
+        setUnloadMessage({ text: 'All models unloaded', type: 'success' });
+      } else {
+        setUnloadMessage({ text: 'No models currently loaded', type: 'info' });
+      }
+    } catch (err) {
+      setUnloadMessage({ text: err instanceof Error ? err.message : 'Failed to unload models', type: 'error' });
+    } finally {
+      setUnloadingModels(false);
+      // Auto-dismiss message after 3 seconds
+      setTimeout(() => setUnloadMessage(null), 3000);
+    }
+  }, [unloadingModels]);
 
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1;
@@ -86,6 +156,40 @@ export const TitleBar: React.FC = () => {
             <span>{tab.label}</span>
           </button>
         ))}
+      </div>
+
+      <div className="w-px h-4 bg-df-divider mx-1" />
+
+      {/* Unload All Models Button */}
+      <div
+        className="relative"
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      >
+        <Tooltip content="Unload all AI models from VRAM" position="bottom">
+          <button
+            onClick={handleUnloadAllModels}
+            disabled={unloadingModels}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-df-sm text-df-xs font-medium bg-df-surface-2 hover:bg-df-surface-3 border border-df-border text-df-text-muted hover:text-df-text-primary transition-all duration-df-fast disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {unloadingModels ? (
+              <Loader2 size={11} className="animate-spin" />
+            ) : (
+              <Power size={11} />
+            )}
+            <span>Unload All Models</span>
+          </button>
+        </Tooltip>
+        
+        {/* Unload Status Toast */}
+        {unloadMessage && (
+          <div className={`absolute top-full left-0 mt-1 px-2 py-1 rounded-df-sm text-df-xs font-medium whitespace-nowrap z-50 ${
+            unloadMessage.type === 'success' ? 'bg-df-success text-white' :
+            unloadMessage.type === 'error' ? 'bg-df-error text-white' :
+            'bg-df-surface-3 text-df-text-primary border border-df-border'
+          }`}>
+            {unloadMessage.text}
+          </div>
+        )}
       </div>
 
       <div className="w-px h-4 bg-df-divider mx-1" />
