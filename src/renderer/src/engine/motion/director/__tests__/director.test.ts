@@ -1206,3 +1206,82 @@ describe('Provider Prompt — TitleCard Field Name Rules', () => {
     expect(titlecardRefPos).toBeLessThan(statisticRefPos);
   });
 });
+
+// ═════════════════════════════════════════════════════════════════
+// TITLECARD SUBTITLE/MOTION SEPARATION TESTS
+// ═════════════════════════════════════════════════════════════════
+
+describe('Provider Prompt — TitleCard Subtitle/Motion Separation', () => {
+  it('prompt explicitly states motion phrases are commands, not subtitle text', () => {
+    const request = makeRequest({
+      prompt: 'Create a title card saying Test with subtitle Test Sub',
+    });
+    const prompt = buildMotionDirectorPrompt(request);
+    expect(prompt).toMatch(/Motion phrases such as.*are COMMANDS, NOT subtitle text/i);
+  });
+
+  it('prompt explicitly states to extract only human-readable subtitle content', () => {
+    const request = makeRequest({
+      prompt: 'Create a title card saying Test with subtitle Test Sub',
+    });
+    const prompt = buildMotionDirectorPrompt(request);
+    expect(prompt).toMatch(/Extract ONLY the human-readable subtitle content/i);
+  });
+
+  it('prompt explicitly states comma before motion phrase indicates end of subtitle', () => {
+    const request = makeRequest({
+      prompt: 'Create a title card saying Test with subtitle Test Sub',
+    });
+    const prompt = buildMotionDirectorPrompt(request);
+    expect(prompt).toMatch(/The comma before a motion phrase indicates the end of the subtitle content/i);
+  });
+
+  it('prompt explicitly states motion phrases are not subtitle text in MOTION section', () => {
+    const request = makeRequest({
+      prompt: 'Create a title card saying Test with subtitle Test Sub',
+    });
+    const prompt = buildMotionDirectorPrompt(request);
+    expect(prompt).toMatch(/Motion phrases are COMMANDS, not text content/i);
+  });
+
+  it('prompt lists recognized motion-command vocabulary with NOT subtitle text', () => {
+    const request = makeRequest({
+      prompt: 'Create a title card saying Test with subtitle Test Sub',
+    });
+    const prompt = buildMotionDirectorPrompt(request);
+    expect(prompt).toMatch(/fading in from the left.*NOT subtitle text/i);
+    expect(prompt).toMatch(/fade in from the left.*NOT subtitle text/i);
+    expect(prompt).toMatch(/slides in from the left.*NOT subtitle text/i);
+    expect(prompt).toMatch(/comes in from the left.*NOT subtitle text/i);
+    expect(prompt).toMatch(/enters from the left.*NOT subtitle text/i);
+    expect(prompt).toMatch(/slides up from below.*NOT subtitle text/i);
+  });
+
+  it('prompt has subtitle extraction rule at end of MOTION section', () => {
+    const request = makeRequest({
+      prompt: 'Create a title card saying Test with subtitle Test Sub',
+    });
+    const prompt = buildMotionDirectorPrompt(request);
+    expect(prompt).toMatch(/SUBTITLE EXTRACTION RULE: When extracting SUBTITLE text, stop at the motion phrase/i);
+  });
+
+  it('prompt example 1 shows correct subtitle extraction (no motion phrase in subtitle)', () => {
+    const request = makeRequest({
+      prompt: 'Create a title card saying The Hidden Cost of Traffic with subtitle Why congestion wastes more than fuel, fading in from the left.',
+    });
+    const prompt = buildMotionDirectorPrompt(request);
+    const example1 = prompt.split('EXAMPLE 1')[1] || '';
+    expect(example1).toMatch(/SUBTITLE: Why congestion wastes more than fuel$/m);
+    expect(example1).not.toMatch(/SUBTITLE: Why congestion wastes more than fuel, fading in from the left/);
+  });
+
+  it('prompt example 2 shows correct subtitle extraction (no motion phrase in subtitle)', () => {
+    const request = makeRequest({
+      prompt: 'Create a red title card saying The Hidden Cost of Traffic with subtitle Why congestion wastes more than fuel, fading in from the left.',
+    });
+    const prompt = buildMotionDirectorPrompt(request);
+    const example2 = prompt.split('EXAMPLE 2')[1] || '';
+    expect(example2).toMatch(/SUBTITLE: Why congestion wastes more than fuel$/m);
+    expect(example2).not.toMatch(/SUBTITLE: Why congestion wastes more than fuel, fading in from the left/);
+  });
+});

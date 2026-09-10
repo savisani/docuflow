@@ -80,6 +80,11 @@ COMPONENT: titlecard — Use for title cards, headlines, section headers, or any
   ★ TEXT is NOT a valid titlecard field. Using TEXT for titlecard will be rejected by the parser.
   ★ For titlecard, the main text field is TITLE. For statistic, the main text field is TEXT. These are DIFFERENT fields for DIFFERENT components.
   SUBTITLE — CRITICAL: If the user provides any text after "with subtitle", "subtitle:", or similar phrasing, you MUST include it as the SUBTITLE field. Do NOT omit the subtitle when the user explicitly provides one. Do NOT truncate or ignore the subtitle text.
+  ★ SUBTITLE TEXT RULES — CRITICAL:
+  • Motion phrases such as "fading in from the left", "fade in from the left", "slides in from the left", "comes in from the left", "enters from the left", "slides up from below" are COMMANDS, NOT subtitle text.
+  • Extract ONLY the human-readable subtitle content. Do NOT include motion instructions in SUBTITLE.
+  • Example: "with subtitle Why congestion wastes more than fuel, fading in from the left" → SUBTITLE: Why congestion wastes more than fuel (NOT "Why congestion wastes more than fuel, fading in from the left")
+  • The comma before a motion phrase indicates the motion phrase is a separate command, not part of the subtitle text.
   TitleCard is for text-based titles, NOT for numerical statistics.
 
 COMPONENT: statistic — Use for numerical data, percentages, statistics, counts, or any "show X%" style requests.
@@ -160,16 +165,26 @@ COMPONENT INTENT RULES:
 MOTION INTENT INFERENCE:
 ═══════════════════════════════════════════════════════════════
 
-When the user describes HOW the element should appear, map their natural language to the correct MOTION value:
-- "from below", "slides up", "comes up from bottom", "rises" → MOTION: slideUp
-- "from the left", "slides in from left", "fading in from the left", "slide in from the left", "enter from the left", "comes in from the left" → MOTION: slideLeft
-- "from the right", "slides in from right", "fading in from the right" → MOTION: slideRight
-- "fade in", "appears", "fades", "gradually appears" → MOTION: fade
-- "pops", "bounces in", "springs", "pops in" → MOTION: pop
-- "zooms in", "grows", "scales up" → MOTION: zoom
-- "normal", "standard", "default" → omit MOTION field (uses fade for titlecard, fade for statistic)
+★ CRITICAL — Motion phrases are COMMANDS, not text content. Do NOT include motion phrases in TITLE or SUBTITLE fields.
+★ Recognized motion-command vocabulary (these are COMMANDS, not text):
+  • "fading in from the left" → MOTION: slideLeft (NOT subtitle text)
+  • "fade in from the left" → MOTION: slideLeft (NOT subtitle text)
+  • "slides in from the left" → MOTION: slideLeft (NOT subtitle text)
+  • "comes in from the left" → MOTION: slideLeft (NOT subtitle text)
+  • "enters from the left" → MOTION: slideLeft (NOT subtitle text)
+  • "appears from the left" → MOTION: slideLeft (NOT subtitle text)
+  • "slides up from below" → MOTION: slideUp (NOT subtitle text)
+  • "fading in from the right" → MOTION: slideRight (NOT subtitle text)
+  • "from below", "slides up", "comes up from bottom", "rises" → MOTION: slideUp
+  • "from the left", "slides in from left", "slide in from the left" → MOTION: slideLeft
+  • "from the right", "slides in from right" → MOTION: slideRight
+  • "fade in", "appears", "fades", "gradually appears" → MOTION: fade
+  • "pops", "bounces in", "springs", "pops in" → MOTION: pop
+  • "zooms in", "grows", "scales up" → MOTION: zoom
+  • "normal", "standard", "default" → omit MOTION field (uses fade for titlecard, fade for statistic)
 When no motion intent is expressed, omit the MOTION field.
 PRIORITY RULE: If a prompt contains BOTH a fade/appear word AND a directional phrase (e.g., "fading in from the left"), the directional phrase has priority. Use slideLeft, NOT fade.
+★ SUBTITLE EXTRACTION RULE: When extracting SUBTITLE text, stop at the motion phrase. The comma before a motion phrase indicates the end of the subtitle content.
 
 SIZE INTENT INFERENCE:
 When the user describes the size, map to FONT_SIZE:
