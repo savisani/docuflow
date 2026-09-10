@@ -1,0 +1,5 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]: Inspectable WebContents
+  - paragraph [ref=e4]:
+    - link "DocuFlow" [ref=e5] [cursor=pointer]:
+      - /url: https://chrome-devtools-frontend.appspot.com/serve_rev/@e5b6ff6092e5a34b909dbb422e16290c2983fe80/inspector.html?ws=localhost:9222/devtools/page/3CD9DC5F9C7C7A677AE7057AAD6810BB

@@ -18,7 +18,7 @@
 
 // ── Known Component Types ───────────────────────────────────────
 
-export const KNOWN_COMPONENT_TYPES = ['statistic', 'titlecard'] as const;
+export const KNOWN_COMPONENT_TYPES = ['statistic', 'titlecard', 'lowerthird'] as const;
 export type KnownComponentType = (typeof KNOWN_COMPONENT_TYPES)[number];
 
 // ── Known Fields Per Component ──────────────────────────────────
@@ -26,11 +26,13 @@ export type KnownComponentType = (typeof KNOWN_COMPONENT_TYPES)[number];
 export const COMPONENT_FIELDS: Record<KnownComponentType, readonly string[]> = {
   statistic: ['text', 'label', 'unit', 'source', 'position', 'duration', 'style', 'motion', 'start', 'fontsize', 'fontweight', 'color'],
   titlecard: ['title', 'subtitle', 'position', 'duration', 'style', 'motion', 'start', 'fontsize', 'fontweight', 'color'],
+  lowerthird: ['name', 'subtitle', 'position', 'duration', 'style', 'motion', 'start', 'fontsize', 'fontweight', 'color'],
 } as const;
 
 export const REQUIRED_FIELDS: Record<KnownComponentType, readonly string[]> = {
   statistic: ['text', 'duration'],
   titlecard: ['title', 'duration'],
+  lowerthird: ['name', 'duration'],
 } as const;
 
 // ── Known Operation Types ───────────────────────────────────────

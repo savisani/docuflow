@@ -442,6 +442,27 @@ function blockToComponent(
         },
       };
     }
+    case 'lowerthird': {
+      return {
+        type: 'lowerthird',
+        id: uuidv4(),
+        data: {
+          name: block.fields.name || '',
+          subtitle: block.fields.subtitle || undefined,
+          fontSize: block.fields.fontsize ? parseFloat(block.fields.fontsize) : undefined,
+          fontWeight: block.fields.fontweight || undefined,
+          color: block.fields.color || undefined,
+        },
+        timing: { start, duration },
+        style: {
+          position: position || 'bottom_left',
+          x: coords.x,
+          y: coords.y,
+          visual: visualStyle,
+          ...(motionStyle ? { motion: motionStyle } : {}),
+        },
+      };
+    }
     default:
       throw new Error(`Unknown component type: ${block.type}`);
   }
@@ -561,8 +582,8 @@ function postProcessComponents(
     }
 
     // 3. Fix subtitle: if user mentioned a subtitle but AI omitted it, restore it
-    if (userSubtitle && corrected.type === 'titlecard') {
-      const data = corrected.data as { title: string; subtitle?: string };
+    if (userSubtitle && (corrected.type === 'titlecard' || corrected.type === 'lowerthird')) {
+      const data = corrected.data as { title?: string; name?: string; subtitle?: string };
       if (!data.subtitle || data.subtitle.trim().length === 0) {
         corrected.data = { ...corrected.data, subtitle: userSubtitle } as typeof corrected.data;
       }

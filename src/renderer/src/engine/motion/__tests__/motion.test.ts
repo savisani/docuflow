@@ -5,6 +5,7 @@ import { getCapabilities, isCapabilityAllowed } from '../capabilities';
 import { ComponentRegistry } from '../components/registry';
 import { StatisticCompiler } from '../components/statistic/compiler';
 import { TitleCardCompiler } from '../components/titlecard/compiler';
+import { LowerThirdCompiler } from '../components/lowerthird/compiler';
 import { parseAIResponse } from '../director/parser';
 import { buildTimeline } from '../../timeline/builder';
 import { resolveLayerState } from '../../timeline/resolver';
@@ -175,7 +176,7 @@ describe('Gateway — Valid Operations', () => {
   it('processes getComponents', () => {
     const response = processMotionRequest(validRequest({ operation: 'getComponents' }));
     expect(response.status).toBe('success');
-    expect(response.data).toEqual([{ type: 'statistic' }, { type: 'titlecard' }]);
+    expect(response.data).toEqual([{ type: 'statistic' }, { type: 'titlecard' }, { type: 'lowerthird' }]);
   });
 
   it('processes validatePlan', () => {
@@ -3474,5 +3475,776 @@ describe('TitleCard — Layout (deterministic sizing and positioning)', () => {
     const subtitle = textCmds.find(c => c.content === 'Subtitle')!;
     const blockMidpoint = (title.y + subtitle.y) / 2;
     expect(Math.abs(blockMidpoint - 540)).toBeLessThan(20);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// LOWERTHIRD COMPONENT
+// ═════════════════════════════════════════════════════════════════
+
+describe('LowerThird — Component Registry', () => {
+  it('registers lowerthird component', () => {
+    expect(ComponentRegistry.isRegistered('lowerthird')).toBe(true);
+  });
+
+  it('returns lowerthird in registered types', () => {
+    const types = ComponentRegistry.getRegisteredTypes();
+    expect(types).toContain('lowerthird');
+  });
+
+  it('gets lowerthird compiler', () => {
+    const compiler = ComponentRegistry.get('lowerthird');
+    expect(compiler).toBeDefined();
+    expect(compiler?.componentType).toBe('lowerthird');
+  });
+});
+
+describe('LowerThird — Compiler', () => {
+  const compiler = new LowerThirdCompiler();
+
+  it('compiles name-only component to commands', () => {
+    const commands = compiler.compile(
+      {
+        type: 'lowerthird',
+        data: { name: 'Dr. Sarah Chen' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+
+    expect(commands.length).toBeGreaterThan(0);
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds).toHaveLength(1);
+    expect(textCmds[0].content).toBe('Dr. Sarah Chen');
+  });
+
+  it('compiles name + subtitle to two text commands', () => {
+    const commands = compiler.compile(
+      {
+        type: 'lowerthird',
+        data: {
+          name: 'Dr. Sarah Chen',
+          subtitle: 'Department of Physics',
+        },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds).toHaveLength(2);
+    expect(textCmds[0].content).toBe('Dr. Sarah Chen');
+    expect(textCmds[1].content).toBe('Department of Physics');
+  });
+
+  it('validates correct data', () => {
+    const errors = compiler.validate(
+      { name: 'Dr. Sarah Chen' },
+      1920,
+      1080
+    );
+    expect(errors).toHaveLength(0);
+  });
+
+  it('rejects empty name', () => {
+    const errors = compiler.validate({ name: '' }, 1920, 1080);
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects name exceeding max length', () => {
+    const errors = compiler.validate(
+      { name: 'x'.repeat(501) },
+      1920,
+      1080
+    );
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects subtitle exceeding max length', () => {
+    const errors = compiler.validate(
+      { name: 'Test', subtitle: 'x'.repeat(501) },
+      1920,
+      1080
+    );
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('produces fadeIn commands for name', () => {
+    const commands = compiler.compile(
+      {
+        type: 'lowerthird',
+        data: { name: 'Dr. Sarah Chen' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const fadeIns = commands.filter(c => c.type === 'fadeIn');
+    expect(fadeIns.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('produces fadeOut commands for name', () => {
+    const commands = compiler.compile(
+      {
+        type: 'lowerthird',
+        data: { name: 'Dr. Sarah Chen' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const fadeOuts = commands.filter(c => c.type === 'fadeOut');
+    expect(fadeOuts.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('animation commands target text command IDs', () => {
+    const commands = compiler.compile(
+      {
+        type: 'lowerthird',
+        data: { name: 'Dr. Sarah Chen', subtitle: 'Physicist' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const textIds = commands.filter(c => c.type === 'text').map(c => c.id);
+    const animCmds = commands.filter(c =>
+      c.type === 'fadeIn' || c.type === 'fadeOut' || c.type === 'scale' || c.type === 'move' || c.type === 'setKeyframes'
+    );
+    for (const cmd of animCmds) {
+      expect(textIds).toContain((cmd as any).target);
+    }
+  });
+
+  it('no animation exceeds the lowerthird duration', () => {
+    const duration = 4;
+    const commands = compiler.compile(
+      {
+        type: 'lowerthird',
+        data: { name: 'Dr. Sarah Chen' },
+        timing: { start: 0, duration },
+      },
+      1920,
+      1080
+    );
+    for (const cmd of commands) {
+      const cmdEnd = cmd.start + (cmd.duration || 0);
+      expect(cmdEnd).toBeLessThanOrEqual(duration + 0.01);
+    }
+  });
+
+  it('no new command types are introduced', () => {
+    const allowedTypes = ['text', 'fadeIn', 'fadeOut', 'scale', 'move', 'setKeyframes'];
+    const commands = compiler.compile(
+      {
+        type: 'lowerthird',
+        data: { name: 'Dr. Sarah Chen', subtitle: 'Physicist' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    for (const cmd of commands) {
+      expect(allowedTypes).toContain(cmd.type);
+    }
+  });
+});
+
+describe('LowerThird — Motion Vocabulary', () => {
+  const compiler = new LowerThirdCompiler();
+
+  function compileWithMotion(motion: string | undefined) {
+    return compiler.compile(
+      {
+        type: 'lowerthird',
+        data: { name: 'Dr. Sarah Chen', subtitle: 'Department of Physics' },
+        timing: { start: 0, duration: 4 },
+        ...(motion ? { style: { motion } } : {}),
+      },
+      1920,
+      1080
+    );
+  }
+
+  function getCommandTypes(commands: ReturnType<typeof compileWithMotion>) {
+    return commands.map(c => c.type);
+  }
+
+  it('zoom produces scale entrance', () => {
+    const commands = compileWithMotion('zoom');
+    const types = getCommandTypes(commands);
+    expect(types).toContain('scale');
+    expect(types).toContain('fadeIn');
+    expect(types).toContain('fadeOut');
+    expect(types).not.toContain('move');
+    expect(types).not.toContain('setKeyframes');
+  });
+
+  it('slideUp produces move commands with Y offset', () => {
+    const commands = compileWithMotion('slideUp');
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBe(2);
+    for (const cmd of moveCmds) {
+      const move = cmd as any;
+      expect(move.from.y).toBeGreaterThan(move.to.y);
+      expect(move.from.x).toBe(move.to.x);
+    }
+  });
+
+  it('slideLeft produces move commands with X offset', () => {
+    const commands = compileWithMotion('slideLeft');
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBe(2);
+    for (const cmd of moveCmds) {
+      const move = cmd as any;
+      expect(move.from.x).toBeLessThan(move.to.x);
+      expect(move.from.y).toBe(move.to.y);
+    }
+  });
+
+  it('slideRight produces move commands with X offset', () => {
+    const commands = compileWithMotion('slideRight');
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBe(2);
+    for (const cmd of moveCmds) {
+      const move = cmd as any;
+      expect(move.from.x).toBeGreaterThan(move.to.x);
+      expect(move.from.y).toBe(move.to.y);
+    }
+  });
+
+  it('fade produces only fadeIn/fadeOut', () => {
+    const commands = compileWithMotion('fade');
+    const types = getCommandTypes(commands);
+    expect(types).toContain('fadeIn');
+    expect(types).toContain('fadeOut');
+    expect(types).not.toContain('scale');
+    expect(types).not.toContain('move');
+    expect(types).not.toContain('setKeyframes');
+  });
+
+  it('pop produces setKeyframes for overshoot scale', () => {
+    const commands = compileWithMotion('pop');
+    const types = getCommandTypes(commands);
+    expect(types).toContain('setKeyframes');
+    expect(types).toContain('fadeIn');
+    expect(types).toContain('fadeOut');
+    expect(types).not.toContain('scale');
+    expect(types).not.toContain('move');
+  });
+
+  it('default (no motion) produces slideUp behavior', () => {
+    const commands = compileWithMotion(undefined);
+    const types = getCommandTypes(commands);
+    expect(types).toContain('fadeIn');
+    expect(types).toContain('move');
+    expect(types).toContain('fadeOut');
+    expect(types).not.toContain('scale');
+    expect(types).not.toContain('setKeyframes');
+  });
+
+  it('all motions produce text commands for name and subtitle', () => {
+    const motions = ['zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop'];
+    for (const motion of motions) {
+      const commands = compileWithMotion(motion);
+      const textCmds = commands.filter(c => c.type === 'text');
+      expect(textCmds.length).toBe(2);
+      expect(textCmds[0].content).toBe('Dr. Sarah Chen');
+      expect(textCmds[1].content).toBe('Department of Physics');
+    }
+  });
+
+  it('all motions produce fadeOut commands', () => {
+    const motions = ['zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop'];
+    for (const motion of motions) {
+      const commands = compileWithMotion(motion);
+      const fadeOuts = commands.filter(c => c.type === 'fadeOut');
+      expect(fadeOuts.length).toBe(2);
+    }
+  });
+
+  it('case-insensitive motion lookup', () => {
+    const commands = compiler.compile(
+      {
+        type: 'lowerthird',
+        data: { name: 'Test' },
+        timing: { start: 0, duration: 3 },
+        style: { motion: 'SLIDELEFT' },
+      },
+      1920,
+      1080
+    );
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('LowerThird — Visual Styling', () => {
+  const compiler = new LowerThirdCompiler();
+
+  it('default styling (fontSize=42, fontWeight=bold, color=#FFFFFF)', () => {
+    const commands = compiler.compile(
+      {
+        type: 'lowerthird',
+        data: { name: 'Dr. Sarah Chen' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const texts = commands.filter(c => c.type === 'text') as any[];
+    expect(texts[0].fontSize).toBe(42);
+    expect(texts[0].fontWeight).toBe('bold');
+    expect(texts[0].color).toBe('#FFFFFF');
+  });
+
+  it('custom fontSize is preserved', () => {
+    const commands = compiler.compile(
+      {
+        type: 'lowerthird',
+        data: { name: 'Dr. Sarah Chen', fontSize: 56 },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const texts = commands.filter(c => c.type === 'text') as any[];
+    expect(texts[0].fontSize).toBe(56);
+  });
+
+  it('custom fontWeight is preserved', () => {
+    const commands = compiler.compile(
+      {
+        type: 'lowerthird',
+        data: { name: 'Dr. Sarah Chen', fontWeight: 'semibold' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const texts = commands.filter(c => c.type === 'text') as any[];
+    expect(texts[0].fontWeight).toBe('semibold');
+  });
+
+  it('custom color is preserved', () => {
+    const commands = compiler.compile(
+      {
+        type: 'lowerthird',
+        data: { name: 'Dr. Sarah Chen', color: '#FF0000' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const texts = commands.filter(c => c.type === 'text') as any[];
+    expect(texts[0].color).toBe('#FF0000');
+  });
+
+  it('subtitle gets smaller derived fontSize', () => {
+    const commands = compiler.compile(
+      {
+        type: 'lowerthird',
+        data: { name: 'Big Name', subtitle: 'Small Role', fontSize: 56 },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const texts = commands.filter(c => c.type === 'text') as any[];
+    expect(texts).toHaveLength(2);
+    expect(texts[0].fontSize).toBe(56);
+    expect(texts[1].fontSize).toBeLessThan(56);
+  });
+
+  it('position is preserved through parser', () => {
+    const aiResponse = `COMPONENT: lowerthird
+NAME: Dr. Sarah Chen
+SUBTITLE: Department of Physics
+POSITION: bottom_left
+DURATION: 4
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+    });
+
+    expect(parseResult.success).toBe(true);
+    const comp = parseResult.plan!.components[0];
+    expect((comp.style as any).position).toBe('bottom_left');
+  });
+});
+
+describe('LowerThird — Parser', () => {
+  it('parses lowerthird from AI response', () => {
+    const aiResponse = `COMPONENT: lowerthird
+NAME: Dr. Sarah Chen
+SUBTITLE: Department of Physics
+POSITION: bottom_left
+DURATION: 4
+MOTION: slideUp
+STYLE: documentary
+END`;
+
+    const result = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.plan).toBeDefined();
+    expect(result.plan!.components).toHaveLength(1);
+    expect(result.plan!.components[0].type).toBe('lowerthird');
+    expect(result.plan!.components[0].data.name).toBe('Dr. Sarah Chen');
+    expect(result.plan!.components[0].data.subtitle).toBe('Department of Physics');
+  });
+
+  it('parses lowerthird without subtitle', () => {
+    const aiResponse = `COMPONENT: lowerthird
+NAME: The White House
+POSITION: bottom_left
+DURATION: 3
+STYLE: documentary
+END`;
+
+    const result = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 3,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.plan!.components[0].data.name).toBe('The White House');
+    expect(result.plan!.components[0].data.subtitle).toBeUndefined();
+  });
+
+  it('rejects lowerthird missing required NAME field', () => {
+    const aiResponse = `COMPONENT: lowerthird
+SUBTITLE: Just a subtitle
+DURATION: 4
+END`;
+
+    const result = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.errors.some(e => e.code === 'MISSING_FIELD' && e.field === 'name')).toBe(true);
+  });
+
+  it('rejects lowerthird missing required DURATION field', () => {
+    const aiResponse = `COMPONENT: lowerthird
+NAME: Dr. Sarah Chen
+END`;
+
+    const result = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.errors.some(e => e.code === 'MISSING_FIELD' && e.field === 'duration')).toBe(true);
+  });
+
+  it('rejects lowerthird with unknown field', () => {
+    const aiResponse = `COMPONENT: lowerthird
+NAME: Dr. Sarah Chen
+DURATION: 4
+INJECTED_FIELD: malicious
+END`;
+
+    const result = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.errors.some(e => e.code === 'UNKNOWN_FIELD')).toBe(true);
+  });
+
+  it('parses all optional fields', () => {
+    const aiResponse = `COMPONENT: lowerthird
+NAME: Dr. Sarah Chen
+SUBTITLE: Department of Physics
+POSITION: bottom_left
+DURATION: 4
+STYLE: documentary
+MOTION: slideUp
+FONTSIZE: 56
+FONTWEIGHT: semibold
+COLOR: #FF0000
+START: 1
+END`;
+
+    const result = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+    });
+
+    expect(result.success).toBe(true);
+    const comp = result.plan!.components[0];
+    expect(comp.data.name).toBe('Dr. Sarah Chen');
+    expect(comp.data.subtitle).toBe('Department of Physics');
+    expect(comp.data.fontSize).toBe(56);
+    expect(comp.data.fontWeight).toBe('semibold');
+    expect(comp.data.color).toBe('#FF0000');
+    expect(comp.timing.start).toBe(1);
+    expect(comp.timing.duration).toBe(4);
+    expect((comp.style as any).motion).toBe('slideup');
+  });
+});
+
+describe('LowerThird — Full Path', () => {
+  it('slideUp lowerthird compiles to valid move commands', () => {
+    const aiResponse = `COMPONENT: lowerthird
+NAME: Dr. Sarah Chen
+SUBTITLE: Department of Physics
+POSITION: bottom_left
+DURATION: 4
+MOTION: slideUp
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.plan).toBeDefined();
+
+    const result = processMotionRequest({
+      version: 1,
+      operation: 'compilePlan',
+      requestId: 'test-lowerthird-slideUp',
+      plan: parseResult.plan!,
+    });
+
+    expect(result.status).toBe('success');
+    const data = result.data as { commands: any[]; commandCount: number };
+    expect(data.commandCount).toBeGreaterThan(0);
+
+    const commandTypes = data.commands.map((c: any) => c.type);
+    expect(commandTypes).toContain('move');
+    expect(commandTypes).toContain('fadeIn');
+    expect(commandTypes).toContain('text');
+  });
+
+  it('fade lowerthird compiles without move or scale', () => {
+    const aiResponse = `COMPONENT: lowerthird
+NAME: The White House
+POSITION: bottom_left
+DURATION: 3
+MOTION: fade
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 3,
+    });
+
+    expect(parseResult.success).toBe(true);
+
+    const result = processMotionRequest({
+      version: 1,
+      operation: 'compilePlan',
+      requestId: 'test-lowerthird-fade',
+      plan: parseResult.plan!,
+    });
+
+    expect(result.status).toBe('success');
+    const data = result.data as { commands: any[]; commandCount: number };
+    const commandTypes = data.commands.map((c: any) => c.type);
+    expect(commandTypes).toContain('fadeIn');
+    expect(commandTypes).not.toContain('scale');
+    expect(commandTypes).not.toContain('move');
+  });
+
+  it('lowerthird with styling compiles correctly', () => {
+    const aiResponse = `COMPONENT: lowerthird
+NAME: Dr. Sarah Chen
+POSITION: bottom_left
+DURATION: 4
+FONTSIZE: 56
+FONTWEIGHT: semibold
+COLOR: #FF5500
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+    });
+
+    expect(parseResult.success).toBe(true);
+
+    const result = processMotionRequest({
+      version: 1,
+      operation: 'compilePlan',
+      requestId: 'test-lowerthird-styled',
+      plan: parseResult.plan!,
+    });
+
+    expect(result.status).toBe('success');
+    const data = result.data as { commands: any[]; commandCount: number };
+
+    const textCmds = data.commands.filter((c: any) => c.type === 'text');
+    expect(textCmds).toHaveLength(1);
+    expect(textCmds[0].content).toBe('Dr. Sarah Chen');
+    expect(textCmds[0].fontSize).toBe(56);
+    expect(textCmds[0].fontWeight).toBe('semibold');
+    expect(textCmds[0].color).toBe('#FF5500');
+  });
+
+  it('lowerthird with subtitle produces TWO text layers through buildTimeline', () => {
+    const aiResponse = `COMPONENT: lowerthird
+NAME: Dr. Sarah Chen
+SUBTITLE: Department of Physics
+POSITION: bottom_left
+DURATION: 4
+MOTION: slideUp
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.plan).toBeDefined();
+
+    const compileResult = processMotionRequest({
+      version: 1,
+      operation: 'compilePlan',
+      requestId: 'test-lowerthird-slideUp-buildTimeline',
+      plan: parseResult.plan!,
+    });
+
+    expect(compileResult.status).toBe('success');
+    const { commands } = compileResult.data as { commands: any[] };
+
+    const settings: ProjectSettings = { width: 1920, height: 1080, fps: 30 };
+    const timeline = buildTimeline(commands, [], settings);
+
+    expect(timeline.textLayers.length).toBe(2);
+
+    const nameLayer = timeline.textLayers.find(t => t.content === 'Dr. Sarah Chen');
+    const subtitleLayer = timeline.textLayers.find(t => t.content === 'Department of Physics');
+
+    expect(nameLayer).toBeDefined();
+    expect(subtitleLayer).toBeDefined();
+
+    // Name properties
+    expect(nameLayer!.fontSize).toBe(42);
+    expect(nameLayer!.fontWeight).toBe('bold');
+    expect(nameLayer!.color).toBe('#FFFFFF');
+
+    // Subtitle properties
+    expect(subtitleLayer!.fontSize).toBeLessThan(42);
+    expect(subtitleLayer!.fontWeight).toBe('normal');
+    expect(subtitleLayer!.color).toBe('#CCCCCC');
+
+    // Subtitle is below name
+    expect(subtitleLayer!.y).toBeGreaterThan(nameLayer!.y);
+
+    // Both have animations
+    expect(nameLayer!.animations.length).toBeGreaterThan(0);
+    expect(subtitleLayer!.animations.length).toBeGreaterThan(0);
+  });
+});
+
+describe('LowerThird — Positioning', () => {
+  const compiler = new LowerThirdCompiler();
+
+  it('default position is bottom-left', () => {
+    const commands = compiler.compile(
+      {
+        type: 'lowerthird',
+        data: { name: 'Dr. Sarah Chen' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text') as any[];
+    // Bottom-left: x=15% of 1920=288, y=82% of 1080=885.6
+    expect(textCmds[0].x).toBeCloseTo(288, 0);
+    expect(textCmds[0].y).toBeGreaterThan(700);
+  });
+
+  it('custom position from style is used', () => {
+    const commands = compiler.compile(
+      {
+        type: 'lowerthird',
+        data: { name: 'Dr. Sarah Chen' },
+        timing: { start: 0, duration: 4 },
+        style: { x: 100, y: 200 },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text') as any[];
+    expect(textCmds[0].x).toBe(100);
+    expect(textCmds[0].y).toBeLessThan(250);
+  });
+});
+
+describe('LowerThird — Regression: existing components unchanged', () => {
+  it('statistic still compiles with all original fields', () => {
+    const compiler = new StatisticCompiler();
+    const commands = compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '73%', label: 'of global traffic', unit: '%', source: 'research' },
+        timing: { start: 0, duration: 4 },
+        style: { motion: 'slideUp' },
+      },
+      1920,
+      1080
+    );
+
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds).toHaveLength(2);
+    expect(textCmds[0].content).toBe('73%');
+    expect(textCmds[1].content).toBe('of global traffic');
+
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('titlecard still compiles with all original fields', () => {
+    const compiler = new TitleCardCompiler();
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Test Title', subtitle: 'Test Subtitle' },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'slideLeft' },
+      },
+      1920,
+      1080
+    );
+
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds).toHaveLength(2);
+    expect(textCmds[0].content).toBe('Test Title');
+    expect(textCmds[1].content).toBe('Test Subtitle');
+
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('gateway getComponents includes all three types', () => {
+    const response = processMotionRequest(validRequest({ operation: 'getComponents' }));
+    expect(response.status).toBe('success');
+    expect(response.data).toEqual([{ type: 'statistic' }, { type: 'titlecard' }, { type: 'lowerthird' }]);
   });
 });

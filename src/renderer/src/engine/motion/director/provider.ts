@@ -51,9 +51,10 @@ export interface MotionDirectorProvider {
 // ── System Prompt Template ──────────────────────────────────────
 
 export function buildMotionDirectorPrompt(request: MotionDirectorRequest): string {
-  const componentList = `statistic, titlecard`;
+  const componentList = `statistic, titlecard, lowerthird`;
   const statisticFieldList = `text, label, unit, source, position, duration, style, motion, start, fontSize, fontWeight, color`;
   const titlecardFieldList = `title, subtitle, position, duration, style, motion, start, fontSize, fontWeight, color`;
+  const lowerthirdFieldList = `name, subtitle, position, duration, style, motion, start, fontSize, fontWeight, color`;
   const positionList = `center, top, bottom, left, right, top_left, top_right, bottom_left, bottom_right`;
   const styleList = `documentary, minimal, bold`;
   const motionList = `zoom, slideUp, slideLeft, slideRight, fade, pop`;
@@ -76,6 +77,13 @@ The TITLE field contains the main title text.
 SUBTITLE — CRITICAL: If the user provides any text after "with subtitle", "subtitle:", or similar phrasing, you MUST include it as the SUBTITLE field. Do NOT omit the subtitle when the user explicitly provides one. Do NOT truncate or ignore the subtitle text.
 TitleCard is for text-based titles, NOT for numerical statistics.
 
+COMPONENT: lowerthird
+FIELDS: ${lowerthirdFieldList}
+Use for speaker identification, expert identification, location tags, organization labels, or any "lower third" overlay.
+The NAME field contains the primary identification text (e.g., person name, location name, organization name).
+SUBTITLE — optional secondary line (e.g., title, role, department, description).
+Default position is bottom_left for documentary convention.
+
 POSITIONS: ${positionList}
 STYLES: ${styleList} (use ONLY these exact style names)
 MOTIONS: ${motionList} (use ONLY these exact motion names for animation style)
@@ -94,9 +102,14 @@ CRITICAL — COMPONENT INTENT RULES:
 - "add a subtitle..." in context of a title → COMPONENT: titlecard
 - "title: The Hidden Cost of Traffic" → COMPONENT: titlecard
 - "show 42%", "show a statistic", "show a number", percentage, count → COMPONENT: statistic
-- Do NOT use statistic for title cards
-- Do NOT use titlecard for numerical data/statistics
-- When the user says "title card" or "title", ALWAYS use titlecard, NEVER statistic
+- "lower third", "speaker identification", "expert name", "who is this person", "interview overlay" → COMPONENT: lowerthird
+- "identify the speaker", "name tag", "name overlay", "person identification" → COMPONENT: lowerthird
+- "location tag", "where is this" → COMPONENT: lowerthird
+- Do NOT use statistic for title cards or lower thirds
+- Do NOT use titlecard for numerical data/statistics or speaker identification
+- Do NOT use lowerthird for title cards or statistics
+- When the user says "title card" or "title", ALWAYS use titlecard, NEVER statistic or lowerthird
+- When the user says "lower third" or asks to identify a person/location, ALWAYS use lowerthird
 
 RULES:
 - Each component block starts with COMPONENT: <type> and ends with END.
@@ -247,6 +260,42 @@ COMPONENT: titlecard
 TITLE: Urban Planning
 POSITION: center
 DURATION: 5
+MOTION: fade
+STYLE: documentary
+END
+
+EXAMPLE — "lower third for Dr. Sarah Chen, Department of Physics":
+COMPONENT: lowerthird
+NAME: Dr. Sarah Chen
+SUBTITLE: Department of Physics
+POSITION: bottom_left
+DURATION: 4
+STYLE: documentary
+END
+
+EXAMPLE — "identify the speaker as John Smith, Reporter":
+COMPONENT: lowerthird
+NAME: John Smith
+SUBTITLE: Reporter
+POSITION: bottom_left
+DURATION: 4
+STYLE: documentary
+END
+
+EXAMPLE — "lower third for the White House, sliding up":
+COMPONENT: lowerthird
+NAME: The White House
+POSITION: bottom_left
+DURATION: 3
+MOTION: slideUp
+END
+
+EXAMPLE — "add a name tag for Maria Garcia, Environmental Scientist, fading in":
+COMPONENT: lowerthird
+NAME: Maria Garcia
+SUBTITLE: Environmental Scientist
+POSITION: bottom_left
+DURATION: 4
 MOTION: fade
 STYLE: documentary
 END

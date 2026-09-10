@@ -7,7 +7,7 @@
 
 export const MOTION_PLAN_VERSION = 1 as const;
 
-export type MotionComponentType = 'statistic' | 'titlecard';
+export type MotionComponentType = 'statistic' | 'titlecard' | 'lowerthird';
 
 export interface MotionCanvas {
   width: number;
@@ -42,7 +42,15 @@ export interface MotionTitleCardData {
   color?: string;
 }
 
-export type MotionComponentData = MotionStatisticData | MotionTitleCardData;
+export interface MotionLowerThirdData {
+  name: string;
+  subtitle?: string;
+  fontSize?: number;
+  fontWeight?: string;
+  color?: string;
+}
+
+export type MotionComponentData = MotionStatisticData | MotionTitleCardData | MotionLowerThirdData;
 
 export interface MotionComponent {
   type: MotionComponentType;
