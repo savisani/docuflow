@@ -767,6 +767,7 @@ export function buildTimeline(
           fontWeight: textCmd?.fontWeight ?? (isSub ? 'bold' : 'normal'),
           color: textCmd?.color ?? '#FFFFFF',
           isSubtitle: isSub,
+          centered: textCmd?.centered === true,
           zIndex: textZIndex,
           animations: [],
           keyframeTracks: [],

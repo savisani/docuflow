@@ -2517,3 +2517,134 @@ describe('Statistic — Regression: existing behavior unchanged', () => {
     }
   });
 });
+
+// ═════════════════════════════════════════════════════════════════
+// TITLECARD OUTPUT CORRECTNESS — centered metadata + positioning
+// ═════════════════════════════════════════════════════════════════
+
+describe('TitleCard — Output Correctness (centered metadata)', () => {
+  const compiler = new TitleCardCompiler();
+  const settings: ProjectSettings = { width: 1920, height: 1080, fps: 30 };
+
+  function compileWithTitleAndSubtitle(overrides?: Record<string, unknown>) {
+    return compiler.compile(
+      {
+        type: 'titlecard',
+        data: {
+          title: 'The Hidden Cost of Traffic',
+          subtitle: 'Why congestion wastes more than fuel',
+          ...overrides,
+        },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'slideLeft' },
+      },
+      1920,
+      1080
+    );
+  }
+
+  it('1. title command has centered: true', () => {
+    const commands = compileWithTitleAndSubtitle();
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds[0].centered).toBe(true);
+  });
+
+  it('2. subtitle command has centered: true', () => {
+    const commands = compileWithTitleAndSubtitle();
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds[1].centered).toBe(true);
+  });
+
+  it('3. title and subtitle have unique IDs', () => {
+    const commands = compileWithTitleAndSubtitle();
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds[0].id).not.toBe(textCmds[1].id);
+  });
+
+  it('4. subtitle Y is below title Y (centerY+40 vs centerY-30)', () => {
+    const commands = compileWithTitleAndSubtitle();
+    const textCmds = commands.filter(c => c.type === 'text');
+    const title = textCmds.find(c => c.content === 'The Hidden Cost of Traffic')!;
+    const subtitle = textCmds.find(c => c.content === 'Why congestion wastes more than fuel')!;
+    expect(subtitle.y).toBeGreaterThan(title.y);
+  });
+
+  it('5. default colors are #FFFFFF (title) and #CCCCCC (subtitle)', () => {
+    const commands = compileWithTitleAndSubtitle();
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds[0].color).toBe('#FFFFFF');
+    expect(textCmds[1].color).toBe('#CCCCCC');
+  });
+
+  it('6. explicit color is preserved', () => {
+    const commands = compileWithTitleAndSubtitle({ color: '#FF5500' });
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds[0].color).toBe('#FF5500');
+  });
+
+  it('7. default font sizes are 72 (title) and 28 (subtitle)', () => {
+    const commands = compileWithTitleAndSubtitle();
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds[0].fontSize).toBe(72);
+    expect(textCmds[1].fontSize).toBe(28);
+  });
+
+  it('8. explicit fontSize is preserved', () => {
+    const commands = compileWithTitleAndSubtitle({ fontSize: 120 });
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds[0].fontSize).toBe(120);
+    expect(textCmds[1].fontSize).toBe(Math.min(28, 120 * 0.4));
+  });
+
+  it('9. buildTimeline propagates centered to TextLayers', () => {
+    const commands = compileWithTitleAndSubtitle();
+    const timeline = buildTimeline(commands, [], settings);
+
+    expect(timeline.textLayers.length).toBe(2);
+    const titleLayer = timeline.textLayers.find(t => t.content === 'The Hidden Cost of Traffic')!;
+    const subtitleLayer = timeline.textLayers.find(t => t.content === 'Why congestion wastes more than fuel')!;
+
+    expect(titleLayer.centered).toBe(true);
+    expect(subtitleLayer.centered).toBe(true);
+  });
+
+  it('10. Statistic text commands do NOT have centered flag', () => {
+    const statCompiler = new StatisticCompiler();
+    const commands = statCompiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '42%', label: 'of traffic' },
+        timing: { start: 0, duration: 4 },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    for (const cmd of textCmds) {
+      expect((cmd as any).centered).toBeUndefined();
+    }
+
+    const timeline = buildTimeline(commands, [], settings);
+    for (const layer of timeline.textLayers) {
+      expect(layer.centered).toBe(false);
+    }
+  });
+
+  it('11. slideLeft produces correct animation commands targeting title and subtitle', () => {
+    const commands = compileWithTitleAndSubtitle();
+    const textCmds = commands.filter(c => c.type === 'text');
+    const textIds = textCmds.map(c => c.id);
+
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBeGreaterThanOrEqual(2);
+    for (const cmd of moveCmds) {
+      expect(textIds).toContain((cmd as any).target);
+    }
+
+    const fadeInCmds = commands.filter(c => c.type === 'fadeIn');
+    expect(fadeInCmds.length).toBeGreaterThanOrEqual(2);
+    for (const cmd of fadeInCmds) {
+      expect(textIds).toContain((cmd as any).target);
+    }
+  });
+});

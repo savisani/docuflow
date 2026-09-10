@@ -242,19 +242,26 @@ const RenderText: React.FC<{
 
   if (opacity <= 0) return null;
 
-  const positionStyle: React.CSSProperties = text.isSubtitle
+  const positionStyle: React.CSSProperties = text.centered
+    ? {
+        left: '50%',
+        top: posY,
+      }
+    : text.isSubtitle
     ? {
         bottom: text.y !== 950 ? text.y : undefined,
         top: text.y === 950 ? 'auto' : undefined,
         left: '50%',
-        transform: 'translateX(-50%)',
       }
     : {
         left: posX,
         top: posY,
       };
 
-  const scaleTransform = scale !== 1 ? ` scale(${scale})` : '';
+  const transformParts: string[] = [];
+  if (text.centered || text.isSubtitle) transformParts.push('translateX(-50%)');
+  if (scale !== 1) transformParts.push(`scale(${scale})`);
+  const combinedTransform = transformParts.length > 0 ? transformParts.join(' ') : undefined;
 
   return (
     <div
@@ -267,10 +274,10 @@ const RenderText: React.FC<{
         fontWeight: text.fontWeight as React.CSSProperties['fontWeight'],
         textShadow: '2px 2px 4px rgba(0,0,0,0.8)',
         opacity,
-        transform: scaleTransform || undefined,
+        transform: combinedTransform,
         whiteSpace: 'pre-wrap',
         textAlign: 'center',
-        maxWidth: text.isSubtitle ? '80%' : undefined,
+        maxWidth: (text.centered || text.isSubtitle) ? '80%' : undefined,
         zIndex: text.zIndex,
       }}
     >

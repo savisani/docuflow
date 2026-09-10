@@ -75,6 +75,7 @@ export class TitleCardCompiler implements ComponentCompiler {
       fontFamily: 'Arial',
       fontWeight: titleFontWeight,
       color: titleColor,
+      centered: true,
       start,
       duration,
     });
@@ -92,6 +93,7 @@ export class TitleCardCompiler implements ComponentCompiler {
         fontFamily: 'Arial',
         fontWeight: 'normal',
         color: '#CCCCCC',
+        centered: true,
         start,
         duration,
       });

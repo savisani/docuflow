@@ -224,6 +224,7 @@ const TextCommand = z.object({
   fontFamily: z.string().optional(),
   color: z.string().optional(),
   duration: z.number(),
+  centered: z.boolean().optional(),
 });
 
 const SubtitleCommand = z.object({

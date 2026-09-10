@@ -184,6 +184,7 @@ export interface TextCommand extends BaseCommand {
   fontWeight?: string;
   color?: string;
   duration: number;
+  centered?: boolean;
 }
 
 export interface SubtitleCommand extends BaseCommand {

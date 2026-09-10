@@ -82,6 +82,7 @@ export interface TextLayer {
   fontWeight: string;
   color: string;
   isSubtitle: boolean;
+  centered: boolean;
   zIndex: number;
   animations: AnimatedProperty[];
   keyframeTracks: KeyframeTrack[];
