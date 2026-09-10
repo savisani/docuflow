@@ -23,7 +23,7 @@ const MAX_WAIT_MS = 30_000;
 /**
  * Check if Ollama API is reachable.
  */
-export async function isOllamaRunning(): Promise<boolean> {
+export async function isOllamaRunning() {
   return new Promise((resolve) => {
     const req = http.get(`${OLLAMA_API_URL}/api/tags`, { timeout: 2000 }, (res) => {
       res.resume();
@@ -40,7 +40,7 @@ export async function isOllamaRunning(): Promise<boolean> {
 /**
  * Wait for Ollama API to become reachable.
  */
-export async function waitForOllama(timeoutMs: number = MAX_WAIT_MS): Promise<boolean> {
+export async function waitForOllama(timeoutMs = MAX_WAIT_MS) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     if (await isOllamaRunning()) return true;
@@ -53,7 +53,7 @@ export async function waitForOllama(timeoutMs: number = MAX_WAIT_MS): Promise<bo
  * Try to find the ollama executable path.
  * On Windows, it's typically in PATH or in standard install locations.
  */
-async function findOllamaPath(): Promise<string> {
+async function findOllamaPath() {
   // Try common Windows install locations
   const commonPaths = [
     'ollama',
@@ -79,10 +79,7 @@ async function findOllamaPath(): Promise<string> {
  * Spawn Ollama serve process.
  * Returns the child process and whether we spawned it ourselves.
  */
-export async function ensureOllamaRunning(): Promise<{
-  spawned: boolean;
-  process: ReturnType<typeof spawn> | null;
-}> {
+export async function ensureOllamaRunning() {
   // Already running?
   if (await isOllamaRunning()) {
     return { spawned: false, process: null };
@@ -127,7 +124,7 @@ export async function ensureOllamaRunning(): Promise<{
  * 2. Spawn the dev command
  * 3. Forward exit signals
  */
-async function main(): Promise<void> {
+async function main() {
   const ollama = await ensureOllamaRunning();
 
   // Run the dev command (electron-vite dev)
