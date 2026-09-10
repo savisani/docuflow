@@ -18,6 +18,29 @@ const MOTION_LOOKUP: Record<string, TitleCardMotion> = Object.fromEntries(
 );
 
 /**
+ * Estimate the number of lines text will wrap to when rendered.
+ * Uses average character width heuristic for proportional fonts.
+ * Text is constrained to 80% of canvas width with pre-wrap whitespace.
+ */
+function estimateLineCount(text: string, fontSize: number, canvasWidth: number): number {
+  const maxWidth = canvasWidth * 0.8;
+  // Average character width for proportional fonts (roughly 0.5-0.6x font size)
+  const avgCharWidth = fontSize * 0.55;
+  const charsPerLine = Math.floor(maxWidth / avgCharWidth);
+  // Handle explicit newlines and wrapping
+  const lines = text.split('\n');
+  let totalLines = 0;
+  for (const line of lines) {
+    if (line.length === 0) {
+      totalLines += 1; // Empty line still takes space
+    } else {
+      totalLines += Math.ceil(line.length / charsPerLine);
+    }
+  }
+  return Math.max(1, totalLines);
+}
+
+/**
  * TitleCardCompiler — compiles a TitleCard component into DocuFlow commands.
  *
  * Produces title text (large) and optional subtitle text (smaller).
@@ -70,18 +93,29 @@ export class TitleCardCompiler implements ComponentCompiler {
     const SUBTITLE_LINE_HEIGHT = 1.3;
     const SUBTITLE_GAP = 20;
 
+    // Estimate line counts to handle text wrapping
+    const titleLineCount = estimateLineCount(data.title, titleFontSize, canvasWidth);
+    const subtitleLineCount = data.subtitle
+      ? estimateLineCount(data.subtitle, subtitleFontSize, canvasWidth)
+      : 0;
+
     const titleLineHeight = titleFontSize * TITLE_LINE_HEIGHT;
     const subtitleLineHeight = subtitleFontSize * SUBTITLE_LINE_HEIGHT;
+
+    // Calculate actual rendered heights including wrapping
+    const titleBlockHeight = titleLineHeight * titleLineCount;
+    const subtitleBlockHeight = subtitleLineHeight * subtitleLineCount;
 
     let titleY: number;
     let subtitleY: number;
 
     if (data.subtitle) {
       // Center the title+subtitle block as a group around canvas midpoint
-      const totalHeight = titleLineHeight + SUBTITLE_GAP + subtitleLineHeight;
+      const totalHeight = titleBlockHeight + SUBTITLE_GAP + subtitleBlockHeight;
       titleY = centerY - totalHeight / 2;
-      subtitleY = titleY + titleLineHeight + SUBTITLE_GAP;
+      subtitleY = titleY + titleBlockHeight + SUBTITLE_GAP;
     } else {
+      // For title-only, center at canvas midpoint (single line assumed)
       titleY = centerY;
     }
 

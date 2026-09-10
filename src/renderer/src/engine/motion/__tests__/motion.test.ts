@@ -3476,6 +3476,127 @@ describe('TitleCard — Layout (deterministic sizing and positioning)', () => {
     const blockMidpoint = (title.y + subtitle.y) / 2;
     expect(Math.abs(blockMidpoint - 540)).toBeLessThan(20);
   });
+
+  it('16. long title with subtitle does not overlap (accounts for wrapping)', () => {
+    // Test with a very long title that would wrap to multiple lines
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: {
+          title: 'The Hidden Cost of Traffic in Modern Cities and Its Impact on Urban Planning',
+          subtitle: 'Why congestion wastes more than fuel',
+        },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    const title = textCmds.find(c => c.content?.startsWith('The Hidden Cost'))!;
+    const subtitle = textCmds.find(c => c.content === 'Why congestion wastes more than fuel')!;
+    // Subtitle must be below title with enough gap for wrapping
+    const gap = subtitle.y - title.y;
+    expect(gap).toBeGreaterThan(100); // Should account for multi-line title
+  });
+
+  it('17. large font title with subtitle does not overlap', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: {
+          title: 'Big Title',
+          subtitle: 'Subtitle',
+          fontSize: 200,
+        },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    const title = textCmds.find(c => c.content === 'Big Title')!;
+    const subtitle = textCmds.find(c => c.content === 'Subtitle')!;
+    // With large font, subtitle should still be below title
+    expect(subtitle.y).toBeGreaterThan(title.y);
+    // Gap should be substantial due to large title font
+    const gap = subtitle.y - title.y;
+    expect(gap).toBeGreaterThan(200);
+  });
+
+  it('18. small font title with subtitle does not overlap', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: {
+          title: 'Small Title',
+          subtitle: 'Subtitle',
+          fontSize: 36,
+        },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    const title = textCmds.find(c => c.content === 'Small Title')!;
+    const subtitle = textCmds.find(c => c.content === 'Subtitle')!;
+    // Subtitle must be below title
+    expect(subtitle.y).toBeGreaterThan(title.y);
+    // Gap should be reasonable for small font
+    const gap = subtitle.y - title.y;
+    expect(gap).toBeGreaterThan(50);
+  });
+
+  it('19. title-only with large font remains centered', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Big Title', fontSize: 200 },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds.length).toBe(1);
+    // Title-only should still be centered at canvas midpoint
+    expect(textCmds[0].y).toBe(540);
+  });
+
+  it('20. slideLeft animation preserves non-overlapping layout', () => {
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: {
+          title: 'The Hidden Cost of Traffic',
+          subtitle: 'Why congestion wastes more than fuel',
+        },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'slideLeft' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    const title = textCmds.find(c => c.content === 'The Hidden Cost of Traffic')!;
+    const subtitle = textCmds.find(c => c.content === 'Why congestion wastes more than fuel')!;
+    // Layout positions should be non-overlapping
+    expect(subtitle.y).toBeGreaterThan(title.y);
+    // Move commands should target these positions
+    const moveCmds = commands.filter(c => c.type === 'move') as Array<{
+      target: string;
+      from: { x: number; y: number };
+      to: { x: number; y: number };
+    }>;
+    const titleMove = moveCmds.find(m => m.target === title.id)!;
+    const subtitleMove = moveCmds.find(m => m.target === subtitle.id)!;
+    expect(titleMove.to.y).toBe(title.y);
+    expect(subtitleMove.to.y).toBe(subtitle.y);
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════
