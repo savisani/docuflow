@@ -246,8 +246,8 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({
   const scaledW = elementW * resolved.scale;
   const scaledH = elementH * resolved.scale;
 
-  const boxLeft = ((compositionWidth / 2) + resolved.x - scaledW / 2) * displayScale;
-  const boxTop = ((compositionHeight / 2) + resolved.y - scaledH / 2) * displayScale;
+  const boxLeft = ((compositionWidth / 2) + resolved.x - elementW / 2) * displayScale;
+  const boxTop = ((compositionHeight / 2) + resolved.y - elementH / 2) * displayScale;
   const boxWidth = scaledW * displayScale;
   const boxHeight = scaledH * displayScale;
 
