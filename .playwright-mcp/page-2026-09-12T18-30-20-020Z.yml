@@ -1,0 +1,108 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: D
+      - generic [ref=e8]: DocuFlow
+    - generic [ref=e10]:
+      - button "Studio" [ref=e11] [cursor=pointer]
+      - button "Image Gen" [ref=e15] [cursor=pointer]
+      - button "Scene Gen" [ref=e20] [cursor=pointer]
+      - button "Motion GFX" [ref=e27] [cursor=pointer]
+    - button "Unload All Models" [ref=e36] [cursor=pointer]
+    - button "File" [ref=e43] [cursor=pointer]
+    - generic [ref=e45]: ○ Unsaved
+    - generic [ref=e48]:
+      - button [disabled] [ref=e50]
+      - button [disabled] [ref=e55]
+      - button [ref=e61] [cursor=pointer]
+      - button [ref=e65] [cursor=pointer]
+      - button [ref=e71] [cursor=pointer]
+    - generic [ref=e73]:
+      - button "Minimize" [ref=e74] [cursor=pointer]
+      - button "Maximize" [ref=e76] [cursor=pointer]
+      - button "Close" [ref=e82] [cursor=pointer]
+  - generic [ref=e88]:
+    - generic [ref=e89]:
+      - generic [ref=e91]:
+        - generic [ref=e92]: Assets
+        - generic [ref=e98]:
+          - button "Import Assets" [ref=e99] [cursor=pointer]
+          - generic [ref=e106]:
+            - textbox "Search assets..." [ref=e111]
+            - button "Filter by type" [ref=e113] [cursor=pointer]
+          - generic [ref=e116]:
+            - button "All" [ref=e117] [cursor=pointer]
+            - button "Images" [ref=e118] [cursor=pointer]
+            - button "Video" [ref=e123] [cursor=pointer]
+            - button "Audio" [ref=e126] [cursor=pointer]
+          - generic [ref=e133]:
+            - paragraph [ref=e136]: No assets imported yet
+            - paragraph [ref=e137]: Click Import to get started
+      - generic "Resize assets panel" [ref=e138]
+      - generic [ref=e142]:
+        - generic [ref=e143]: Preview
+        - generic [ref=e149]:
+          - paragraph [ref=e153]: No Timeline
+          - paragraph [ref=e154]: Import assets, load commands, then click Build Timeline
+      - generic "Resize right panel" [ref=e155]
+      - generic [ref=e157]:
+        - generic [ref=e158]:
+          - button "Collapse right panel" [ref=e159] [cursor=pointer]
+          - button "Inspector" [ref=e163] [cursor=pointer]
+          - button "Animation" [ref=e169] [cursor=pointer]
+          - button "Commands" [ref=e175] [cursor=pointer]
+        - generic [ref=e182]:
+          - generic [ref=e183]: Inspector
+          - generic [ref=e187]:
+            - generic [ref=e188]: Inspector
+            - generic [ref=e190]:
+              - generic [ref=e191]:
+                - generic [ref=e192]: Project Settings
+                - generic [ref=e198]:
+                  - generic [ref=e199]:
+                    - generic [ref=e200]: Width
+                    - generic [ref=e201]:
+                      - button "−" [ref=e202] [cursor=pointer]
+                      - spinbutton "Width" [ref=e203]: "1920"
+                      - button "+" [ref=e204] [cursor=pointer]
+                  - generic [ref=e205]:
+                    - generic [ref=e206]: Height
+                    - generic [ref=e207]:
+                      - button "−" [ref=e208] [cursor=pointer]
+                      - spinbutton "Height" [ref=e209]: "1080"
+                      - button "+" [ref=e210] [cursor=pointer]
+                  - generic [ref=e211]:
+                    - generic [ref=e212]: FPS
+                    - generic [ref=e213]:
+                      - button "−" [ref=e214] [cursor=pointer]
+                      - spinbutton "FPS" [ref=e215]: "30"
+                      - button "+" [ref=e216] [cursor=pointer]
+              - generic [ref=e217]: Commands (0)
+              - generic [ref=e222]: Assets (0)
+    - generic "Resize timeline panel" [ref=e228]
+    - generic [ref=e231]:
+      - generic [ref=e232]: Timeline
+      - generic [ref=e237]:
+        - generic [ref=e238]:
+          - button "Play" [ref=e240] [cursor=pointer]
+          - generic [ref=e243]:
+            - generic [ref=e244]: Time
+            - generic [ref=e245]: 00:00.00
+          - button "Disable Snap" [ref=e248] [cursor=pointer]
+          - button "Undo" [disabled] [ref=e255]
+          - button "Redo" [disabled] [ref=e260]
+          - button "Duplicate" [disabled] [ref=e265]
+          - button "Toggle Waveforms" [ref=e270] [cursor=pointer]
+          - button "Zoom Out" [ref=e277] [cursor=pointer]
+          - generic [ref=e281]: 100%
+          - button "Zoom In" [ref=e283] [cursor=pointer]
+          - button "Reset Zoom" [ref=e288] [cursor=pointer]
+        - generic [ref=e295]:
+          - generic [ref=e296]:
+            - generic [ref=e298]:
+              - generic [ref=e299]:
+                - generic [ref=e303]: IMAGES & VIDEO
+                - generic [ref=e304]: "0"
+              - button "Hide" [ref=e306] [cursor=pointer]
+            - generic [ref=e310]: Empty
+          - generic [ref=e312]: 00:00.00

@@ -1,0 +1,13 @@
+- generic [ref=e5]:
+  - heading "CROWD RUNNER" [level=1] [ref=e6]: CROWDRUNNER
+  - generic [ref=e11]:
+    - generic [ref=e12]:
+      - generic [ref=e13]: ← →
+      - generic [ref=e14]: Swipe to switch lanes
+    - generic [ref=e15]:
+      - generic [ref=e16]: ↑
+      - generic [ref=e17]: Swipe up to jump
+    - generic [ref=e18]:
+      - generic [ref=e19]: ●
+      - generic [ref=e20]: Tap to change shape
+  - button "TAP TO PLAY" [ref=e21] [cursor=pointer]
