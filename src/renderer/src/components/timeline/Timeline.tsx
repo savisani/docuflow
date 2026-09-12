@@ -720,10 +720,20 @@ export const Timeline: React.FC = () => {
           allCmdLayers: state.commands.filter(c => c.type === 'show').map(c => ({ id: c.id, layer: (c as any).layer })),
         };
         if (needsLayer.length > 0) {
+          // Build a lookup: commandId → zIndex by scanning all layer segments.
+          // buildTimeline keys layers by the FIRST command's ID, so tl.layers[cmd.id]
+          // only works for the first command in each zIndex group. For others, we must
+          // search assetSegments to find which layer they belong to.
+          const cmdToZIndex = new Map<string, number>();
+          for (const layer of Object.values(tl.layers)) {
+            for (const seg of layer.assetSegments) {
+              if (seg.commandId) cmdToZIndex.set(seg.commandId, layer.zIndex);
+            }
+          }
           const newCmds = state.commands.map(c => {
             if (c.type === 'show' && (c as any).layer === undefined) {
-              const layer = tl.layers[c.id];
-              return { ...c, layer: layer?.zIndex ?? 0 } as any;
+              const z = cmdToZIndex.get(c.id) ?? 0;
+              return { ...c, layer: z } as any;
             }
             return c;
           });

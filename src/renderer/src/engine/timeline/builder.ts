@@ -86,9 +86,18 @@ export function buildTimeline(
   const sorted = [...commands].sort((a, b) => a.start - b.start);
 
   let maxFrame = 0;
-  let zIndex = 0;
   let textIndex = 0;
   let subtitleIndex = 0;
+
+  // Find the maximum explicit zIndex already in use so auto-assigned values never collide.
+  // This prevents track reordering when new commands are added without explicit layer fields.
+  let maxExplicitZ = -1;
+  for (const cmd of sorted) {
+    if (cmd.type === 'show' && typeof (cmd as any).layer === 'number') {
+      if ((cmd as any).layer > maxExplicitZ) maxExplicitZ = (cmd as any).layer;
+    }
+  }
+  let zIndex = maxExplicitZ + 1;
 
   // Group show commands by zIndex so multiple sequential clips share one layer/track
   const showByZIndex = new Map<number, typeof sorted>();
