@@ -16,6 +16,48 @@ const MIN_DURATION = 0.2;
 // Dynamic layer model: visible tracks are based on actual content.
 // Hidden drop layers are computed on-the-fly during drag operations.
 
+function hasOverlap(aStart: number, aDur: number, bStart: number, bDur: number): boolean {
+  return aStart < bStart + bDur && aStart + aDur > bStart;
+}
+
+function resolveCollision(
+  commands: { id: string; start: number; duration: number; layer: number; type: string }[],
+  candidate: { id: string; start: number; duration: number; layer: number; type: string }
+): { start: number; layer: number } {
+  if (candidate.type !== 'show') return { start: candidate.start, layer: candidate.layer };
+
+  let start = candidate.start;
+  let layer = candidate.layer;
+  const dur = candidate.duration;
+
+  for (let iter = 0; iter < 50; iter++) {
+    const layerClips = commands
+      .filter(c => c.id !== candidate.id && c.type === 'show' && c.layer === layer)
+      .sort((a, b) => a.start - b.start);
+
+    let pushed = false;
+    for (const clip of layerClips) {
+      if (hasOverlap(start, dur, clip.start, clip.duration)) {
+        if (layer === candidate.layer) {
+          // Same track: push forward
+          start = clip.start + clip.duration;
+          pushed = true;
+          break;
+        } else {
+          // Different track: move up
+          const maxZ = Math.max(...commands.map(c => c.layer), 0);
+          layer = maxZ + 1;
+          pushed = true;
+          break;
+        }
+      }
+    }
+    if (!pushed) break;
+  }
+
+  return { start, layer };
+}
+
 interface PlaybackClockSample {
   time: number;
   frame: number;
@@ -996,7 +1038,11 @@ export const Timeline: React.FC = () => {
           clientY: e?.clientY,
         };
 
-        currentUpdateCommand(state.clipId, { start: newStart, layer: targetZIndex });
+        // Resolve collision before applying
+        const storeCmds = useDocuFlowStore.getState().commands;
+        const candidate = { id: state.clipId, start: newStart, duration: state.originalDuration, layer: targetZIndex, type: 'show' as const };
+        const resolved = resolveCollision(storeCmds, candidate);
+        currentUpdateCommand(state.clipId, { start: resolved.start, layer: resolved.layer });
       } else if (state.mode === 'resize-right') {
         const rawEnd = state.originalStart + state.originalDuration + dt;
         const maxEnd = state.maxDuration != null
@@ -1080,13 +1126,18 @@ export const Timeline: React.FC = () => {
 
       const cmdDuration = asset.duration && asset.duration > 0 ? Math.min(asset.duration, 30) : 5;
 
+      // Resolve collision before adding
+      const cmdId = uuidv4();
+      const candidateForCollision = { id: cmdId, start: snapped, duration: cmdDuration, layer: nextZIndex, type: 'show' as const };
+      const resolved = resolveCollision(state.commands, candidateForCollision);
+
       const cmd = {
-        id: uuidv4(),
+        id: cmdId,
         type: 'show' as const,
         asset: asset.logicalId,
-        start: snapped,
+        start: resolved.start,
         duration: cmdDuration,
-        layer: nextZIndex,
+        layer: resolved.layer,
       };
       addCommand(cmd);
     } else if (asset.type === 'audio') {
