@@ -448,10 +448,11 @@ export const VideoPreview: React.FC = () => {
       <div className="flex-1 flex flex-col items-center justify-center bg-[var(--color-bg)] relative overflow-hidden">
         <div
           ref={containerRef}
-          className="relative bg-black rounded-df-lg overflow-hidden border border-[var(--color-border)] flex-1 flex items-center justify-center"
-          style={{ width: '100%', maxWidth: '95%', maxHeight: 'calc(100% - 52px)' }}
+          className="relative flex items-center justify-center"
+          style={{ width: '100%', height: '100%', position: 'absolute', inset: 0 }}
         >
           <div
+            className="bg-black rounded-df-lg overflow-hidden border border-[var(--color-border)]"
             style={{
               position: 'relative',
               width: `${settings.width * displayScale}px`,
