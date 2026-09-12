@@ -7,10 +7,10 @@ import type { MotionComponent, MotionStatisticData } from '../../types';
  * Supported animation motions for Statistic components.
  * Each maps to a deterministic sequence of existing DocuFlow commands.
  */
-type StatisticMotion = 'zoom' | 'slideUp' | 'slideLeft' | 'slideRight' | 'fade' | 'pop';
+type StatisticMotion = 'zoom' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'fade' | 'pop';
 
 const VALID_MOTIONS: readonly StatisticMotion[] = [
-  'zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop',
+  'zoom', 'slideUp', 'slideDown', 'slideLeft', 'slideRight', 'fade', 'pop',
 ];
 
 const MOTION_LOOKUP: Record<string, StatisticMotion> = Object.fromEntries(
@@ -128,6 +128,47 @@ export class StatisticCompiler implements ComponentCompiler {
             type: 'move',
             target: labelId,
             from: { x: centerX, y: centerY + 40 + slideOffset },
+            to: { x: centerX, y: centerY + 40 },
+            start,
+            duration: fadeInDuration,
+            easing: 'easeOut',
+          });
+          commands.push({
+            id: uuidv4(),
+            type: 'fadeIn',
+            target: labelId,
+            start,
+            duration: fadeInDuration,
+          });
+        }
+        break;
+      }
+
+      case 'slideDown': {
+        const slideOffset = 200;
+        commands.push({
+          id: uuidv4(),
+          type: 'move',
+          target: valueId,
+          from: { x: centerX, y: centerY - 30 - slideOffset },
+          to: { x: centerX, y: centerY - 30 },
+          start,
+          duration: fadeInDuration,
+          easing: 'easeOut',
+        });
+        commands.push({
+          id: uuidv4(),
+          type: 'fadeIn',
+          target: valueId,
+          start,
+          duration: fadeInDuration,
+        });
+        if (labelId) {
+          commands.push({
+            id: uuidv4(),
+            type: 'move',
+            target: labelId,
+            from: { x: centerX, y: centerY + 40 - slideOffset },
             to: { x: centerX, y: centerY + 40 },
             start,
             duration: fadeInDuration,

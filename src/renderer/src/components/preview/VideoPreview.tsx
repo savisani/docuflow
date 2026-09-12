@@ -241,13 +241,9 @@ export const VideoPreview: React.FC = () => {
     };
   }, [effectiveTimeline, setCurrentTime, setPlaying, settings.fps]);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts (Space is handled by Timeline component to avoid duplicate handlers)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && e.target === document.body) {
-        e.preventDefault();
-        handlePlayPause();
-      }
       if (e.code === 'Escape' && isFullscreen) {
         setIsFullscreen(false);
       }
@@ -257,7 +253,7 @@ export const VideoPreview: React.FC = () => {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handlePlayPause, isFullscreen]);
+  }, [isFullscreen]);
 
   // Custom seek/play events
   useEffect(() => {
@@ -371,6 +367,7 @@ export const VideoPreview: React.FC = () => {
               width: `${settings.width * displayScale}px`,
               height: `${settings.height * displayScale}px`,
               flexShrink: 0,
+              boxShadow: '0 0 0 1px rgba(255, 255, 255, 0.15)',
             }}
           >
             {playerContent}
@@ -460,6 +457,7 @@ export const VideoPreview: React.FC = () => {
               width: `${settings.width * displayScale}px`,
               height: `${settings.height * displayScale}px`,
               flexShrink: 0,
+              boxShadow: '0 0 0 1px rgba(255, 255, 255, 0.15)',
             }}
           >
             {playerContent}

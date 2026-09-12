@@ -1304,3 +1304,8 @@ function historySnapshotsEqual(a: HistoryState, b: HistoryState): boolean {
   if (JSON.stringify(a.settings) !== JSON.stringify(b.settings)) return false;
   return true;
 }
+
+// Expose store for automated testing (Playwright/Electron)
+if (typeof window !== 'undefined') {
+  (window as any).__docuflow_store = useDocuFlowStore;
+}

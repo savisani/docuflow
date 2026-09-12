@@ -13,22 +13,32 @@ const LABEL_WIDTH = 128;
 const RULER_HEIGHT = 28;
 const SNAP_THRESHOLD_PX = 5;
 const MIN_DURATION = 0.2;
+// Dynamic layer model: visible tracks are based on actual content.
+// Hidden drop layers are computed on-the-fly during drag operations.
+
+interface PlaybackClockSample {
+  time: number;
+  frame: number;
+  timestamp: number;
+}
 
 interface DragState {
   clipId: string;
   trackType: string;
   startX: number;
   startY: number;
+  startPointerLocalY: number;
   originalStart: number;
   originalDuration: number;
-  originalLayerIndex: number;
   originalZIndex: number;
+  originalTrackId: string | null;
+  originalTrackTop: number;
+  originalClipTop: number;
+  grabOffsetY: number;
   mode: 'move' | 'resize-left' | 'resize-right';
-  currentTrackIndex: number;
   hasMoved: boolean;
   maxDuration?: number;
   offsetToCenterX: number;
-  offsetToCenterY: number;
 }
 
 export const Timeline: React.FC = () => {
@@ -70,6 +80,7 @@ export const Timeline: React.FC = () => {
   const selectAllCommands = useDocuFlowStore((s) => s.selectAllCommands);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const trackRowsRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [dropTime, setDropTime] = useState<number | null>(null);
@@ -79,6 +90,8 @@ export const Timeline: React.FC = () => {
   const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
   const [containerWidth, setContainerWidth] = useState(0);
   const [dragOverTrackId, setDragOverTrackId] = useState<string | null>(null);
+  const [dragDestinationMessage, setDragDestinationMessage] = useState<string | null>(null);
+  const dragDestinationMessageRef = useRef<string | null>(null);
   // Visual-only drag offset: pixels moved during drag, not committed to store yet
   const [dragVisualOffset, setDragVisualOffset] = useState<{ clipId: string; dx: number; dy: number } | null>(null);
   const dragVisualOffsetRef = useRef<{ clipId: string; dx: number; dy: number } | null>(null);
@@ -89,6 +102,24 @@ export const Timeline: React.FC = () => {
   // Snap guide visual line position (ref to avoid re-renders during drag)
   const snapGuideXRef = useRef<number | null>(null);
   const snapGuideElementRef = useRef<HTMLDivElement>(null);
+  // Pending drag state: stores mousedown info before threshold is crossed
+  const pendingDragRef = useRef<{
+    clipId: string;
+    trackType: string;
+    startX: number;
+    startY: number;
+    startPointerLocalY: number;
+    originalStart: number;
+    originalDuration: number;
+    originalZIndex: number;
+    originalTrackId: string | null;
+    originalTrackTop: number;
+    originalClipTop: number;
+    grabOffsetY: number;
+    mode: 'move' | 'resize-left' | 'resize-right';
+    maxDuration?: number;
+    offsetToCenterX: number;
+  } | null>(null);
 
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -148,6 +179,7 @@ export const Timeline: React.FC = () => {
   const playheadRef = useRef<HTMLDivElement>(null);
   const playbackTimeRef = useRef(0);
 
+
   const scrollInnerWidth = useMemo(() => {
     const durationPixels = maxEndTime * PIXELS_PER_SECOND * zoom;
     return Math.max(containerWidth, durationPixels + 400);
@@ -155,12 +187,15 @@ export const Timeline: React.FC = () => {
 
   const videoTracks = useMemo(() => {
     if (!effectiveTimeline) return [];
+    // Only include layers with actual content — no empty phantom rows.
+    // Hidden drop layers are computed dynamically during drag operations.
     return Object.values(effectiveTimeline.layers)
       .filter((l) => l.visible && !hiddenAssetIds.has(l.assetId))
       .sort((a, b) => b.zIndex - a.zIndex);
   }, [effectiveTimeline, hiddenAssetIds]);
 
   const trackLayerMap = useMemo(() => {
+    // Direct map from populated video tracks: trackLayerMap[i] = zIndex of i-th visible track
     return videoTracks.map((t) => t.zIndex);
   }, [videoTracks]);
 
@@ -474,6 +509,30 @@ export const Timeline: React.FC = () => {
     return () => window.removeEventListener('docuflow:playback-frame', onPlaybackFrame);
   }, [zoom]);
 
+  // Sync playhead DOM position when NOT playing (seek, manual change, stop).
+  // During playback, the docuflow:playback-frame handler above takes over via direct DOM writes,
+  // avoiding React re-renders. This effect only fires when playing is false (or on mount).
+  const playheadSyncRafRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (playing) return; // playback-frame handler owns the position during playback
+    const syncPlayhead = () => {
+      if (playheadRef.current) {
+        playheadRef.current.style.left = `${currentTime * PIXELS_PER_SECOND * zoom}px`;
+      }
+      // Also sync the time display
+      const timeEl = document.querySelector('[data-timeline-time]');
+      if (timeEl) timeEl.textContent = formatTime(currentTime);
+    };
+    // Use rAF to batch with any pending layout
+    playheadSyncRafRef.current = requestAnimationFrame(syncPlayhead);
+    return () => {
+      if (playheadSyncRafRef.current !== null) {
+        cancelAnimationFrame(playheadSyncRafRef.current);
+        playheadSyncRafRef.current = null;
+      }
+    };
+  }, [playing, currentTime, zoom]);
+
   useEffect(() => {
     if (!playing) {
       hardStopRef.current = false;
@@ -554,19 +613,27 @@ export const Timeline: React.FC = () => {
         }
       }
 
-      // Calculate offset to center clip under mouse cursor
+      // Calculate offset from mouse to clip's grab point (preserves grab position during drag)
       let offsetToCenterX = 0;
       let offsetToCenterY = 0;
       if (mode === 'move') {
-        // Use the clip element's bounding rect for accurate positioning
+        // For move mode, offset is 0: clip moves by the same delta as the mouse.
+        // This preserves the grab point position — no teleport on drag start.
+        offsetToCenterX = 0;
+        offsetToCenterY = 0;
+      } else {
+        // For resize modes, use the mouse position relative to clip edge
         const clipRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        const clipCenterX = clipRect.left + clipRect.width / 2;
-        const clipCenterY = clipRect.top + clipRect.height / 2;
-        offsetToCenterX = e.clientX - clipCenterX;
-        offsetToCenterY = e.clientY - clipCenterY;
+        if (mode === 'resize-left') {
+          offsetToCenterX = e.clientX - clipRect.left;
+        } else {
+          offsetToCenterX = e.clientX - clipRect.right;
+        }
+        offsetToCenterY = 0;
       }
 
-      setDragState({
+      // Store pending drag info - drag state is set only after movement threshold is crossed
+      pendingDragRef.current = {
         clipId: cmdId,
         trackType,
         startX: e.clientX,
@@ -577,11 +644,10 @@ export const Timeline: React.FC = () => {
         originalZIndex: clip.zIndex ?? 0,
         mode,
         currentTrackIndex: layerIndex >= 0 ? layerIndex : 0,
-        hasMoved: false,
         maxDuration,
         offsetToCenterX,
         offsetToCenterY,
-      });
+      };
     },
     [selectedCommandId, selectCommand, toggleCommandSelection, commands, trackLayerMap, assets]
   );
@@ -626,41 +692,81 @@ export const Timeline: React.FC = () => {
   }, [fps]);
 
   useEffect(() => {
-      if (!dragState) {
-        dragStateRef.current = null;
-        prevDragStateRef.current = null;
-        dragVisualOffsetRef.current = null;
-        setDragVisualOffset(null);
-        return;
+    // Reset refs when drag ends (but do NOT return early — we must always register handlers)
+    if (!dragState) {
+      dragStateRef.current = null;
+      prevDragStateRef.current = null;
+      dragVisualOffsetRef.current = null;
+      setDragVisualOffset(null);
+    } else {
+      dragStateRef.current = dragState;
+
+      if (prevDragStateRef.current === null) {
+        beginBatchRef.current();
       }
+      prevDragStateRef.current = dragState;
 
-    dragStateRef.current = dragState;
-
-    if (prevDragStateRef.current === null) {
-      beginBatchRef.current();
-    }
-    prevDragStateRef.current = dragState;
-
-    {
-      const state = useDocuFlowStore.getState();
-      const voiceoverAsset = state.voiceover ? state.assets.find(a => a.id === state.voiceover!.assetId) : undefined;
-      const tl = state.timeline || buildTimeline(state.commands, state.assets, state.settings, voiceoverAsset?.duration);
-      const needsLayer = state.commands.filter(c => c.type === 'show' && (c as any).layer === undefined);
-      if (needsLayer.length > 0) {
-        const newCmds = state.commands.map(c => {
-          if (c.type === 'show' && (c as any).layer === undefined) {
-            const layer = tl.layers[c.id];
-            return { ...c, layer: layer?.zIndex ?? 0 } as any;
-          }
-          return c;
-        });
-        useDocuFlowStore.setState({ commands: newCmds });
+      {
+        const state = useDocuFlowStore.getState();
+        const voiceoverAsset = state.voiceover ? state.assets.find(a => a.id === state.voiceover!.assetId) : undefined;
+        const tl = state.timeline || buildTimeline(state.commands, state.assets, state.settings, voiceoverAsset?.duration);
+        const needsLayer = state.commands.filter(c => c.type === 'show' && (c as any).layer === undefined);
+        // Diagnostic: store layer lookup info for test debugging
+        (window as any).__needsLayerDiag = {
+          stateTimelineExists: !!state.timeline,
+          tlLayerKeys: Object.keys(tl.layers),
+          tlLayerEntries: Object.entries(tl.layers).map(([k, v]) => ({ key: k, zIndex: (v as any).zIndex })),
+          cmdsWithoutLayer: needsLayer.map(c => c.id),
+          allCmdLayers: state.commands.filter(c => c.type === 'show').map(c => ({ id: c.id, layer: (c as any).layer })),
+        };
+        if (needsLayer.length > 0) {
+          const newCmds = state.commands.map(c => {
+            if (c.type === 'show' && (c as any).layer === undefined) {
+              const layer = tl.layers[c.id];
+              return { ...c, layer: layer?.zIndex ?? 0 } as any;
+            }
+            return c;
+          });
+          (window as any).__needsLayerResult = newCmds.filter(c => c.type === 'show').map(c => ({ id: c.id, layer: (c as any).layer }));
+          useDocuFlowStore.setState({ commands: newCmds });
+        }
       }
     }
 
+    // ALWAYS register mouse handlers — needed for the pendingDrag → activeDrag transition.
+    // When dragState is null, handleMouseMove checks pendingDragRef to detect threshold crossing.
     let rafId: number | null = null;
 
     const handleMouseMove = (e: MouseEvent) => {
+      // Check if we have a pending drag that hasn't started yet
+      const pending = pendingDragRef.current;
+      if (pending && !dragStateRef.current) {
+        const dx = e.clientX - pending.startX;
+        const dy = e.clientY - pending.startY;
+        const hasMovedEnough = Math.abs(dx) > 3 || Math.abs(dy) > 3;
+
+        if (hasMovedEnough) {
+          // Threshold crossed - start the drag
+          const newDragState: DragState = {
+            ...pending,
+            hasMoved: true,
+          };
+          pendingDragRef.current = null;
+          // Compute initial visual offset immediately so handleMouseUp has it
+          const initialVisualDx = dx + pending.offsetToCenterX;
+          const initialVisualDy = dy + pending.offsetToCenterY;
+          dragVisualOffsetRef.current = { clipId: pending.clipId, dx: initialVisualDx, dy: initialVisualDy };
+          rafId = requestAnimationFrame(() => {
+            setDragVisualOffset(dragVisualOffsetRef.current);
+          });
+          setDragState(newDragState);
+          // The drag state effect will register proper handlers on re-render
+          return;
+        }
+        // Not enough movement yet - don't start drag
+        return;
+      }
+
       const state = dragStateRef.current;
       if (!state) return;
       const dx = e.clientX - state.startX;
@@ -668,7 +774,7 @@ export const Timeline: React.FC = () => {
       const hasMoved = Math.abs(dx) > 3 || Math.abs(dy) > 3;
 
       if (hasMoved) {
-        // Apply offset to center clip under mouse cursor
+        // Apply offset to preserve grab point position during drag
         const visualDx = dx + state.offsetToCenterX;
         const visualDy = dy + state.offsetToCenterY;
         dragVisualOffsetRef.current = { clipId: state.clipId, dx: visualDx, dy: visualDy };
@@ -717,8 +823,15 @@ export const Timeline: React.FC = () => {
       });
     };
 
-    const handleMouseUp = () => {
+    const handleMouseUp = (e: MouseEvent) => {
       if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+
+      // If there's a pending drag that never started, clean it up (was just a click)
+      if (pendingDragRef.current && !dragStateRef.current) {
+        pendingDragRef.current = null;
+        return;
+      }
+
       const visualOffset = dragVisualOffsetRef.current;
       dragVisualOffsetRef.current = null;
       setDragVisualOffset(null);
@@ -726,14 +839,13 @@ export const Timeline: React.FC = () => {
       const state = dragStateRef.current;
       if (!state) return;
 
-      // For resize modes, we must always commit the duration change even if visualOffset is null
-      // (user moved mouse less than 3 pixels threshold). For move mode, skip if no visual offset.
+      // For move mode with no visual offset, this was just a click - don't commit
       if (!visualOffset && state.mode === 'move') return;
 
       const dx = visualOffset?.dx ?? 0;
       const dy = visualOffset?.dy ?? 0;
       const rawDx = dx - state.offsetToCenterX;
-      const rawDy = dy - state.offsetToCenterY;
+        const rawDy = dy - ((state as any).offsetToCenterY || 0);
       const dt = rawDx / (PIXELS_PER_SECOND * zoomRef.current);
       const currentSnap = snapRef.current;
       const currentTrackLayerMap = trackLayerMapRef.current;
@@ -744,14 +856,154 @@ export const Timeline: React.FC = () => {
       if (state.mode === 'move') {
         const rawStart = state.originalStart + dt;
         const newStart = Math.max(0, currentSnap(rawStart, state.clipId));
-        const rawTrackIndex = state.originalLayerIndex + Math.round(rawDy / TRACK_HEIGHT);
-        const clampedTrackIndex = Math.max(0, Math.min(currentTrackLayerMap.length - 1, rawTrackIndex));
+        // Calculate target track by accounting for group headers in the visual layout.
+        // Build a flat list of all track rows with their DOM Y positions, then find the
+        // row closest to where the pointer has moved. This works symmetrically in both
+        // directions and handles edge cases (pointer in header area, above/below all tracks).
+        const currentTrackGroups = trackGroupsRef.current;
 
+        // Build flat list of track rows: { y (top of row), flatIdx, height }
+        const trackRows: { y: number; flatIdx: number }[] = [];
+        let firstTrackY = 0;
+        {
+          let y = 0;
+          let count = 0;
+          for (const g of currentTrackGroups) {
+            y += TRACK_HEIGHT; // group header
+            for (let i = 0; i < g.tracks.length; i++) {
+              trackRows.push({ y, flatIdx: count });
+              if (count === 0) firstTrackY = y;
+              y += TRACK_HEIGHT;
+              count++;
+            }
+          }
+        }
+
+        // Use the native mouseup event position to determine target track.
+        let targetLayerIndex = state.originalLayerIndex;
+        if (trackRows.length > 0 && e) {
+          const scrollContainer = scrollContainerRef.current;
+          if (scrollContainer) {
+            const containerRect = scrollContainer.getBoundingClientRect();
+            const localY = e.clientY - containerRect.top + scrollContainer.scrollTop - RULER_HEIGHT;
+
+            // Identify real content tracks (not group headers).
+            // A real track is one that belongs to a group with at least one track.
+            const realTrackRows: { flatIdx: number; y: number }[] = [];
+            for (const row of trackRows) {
+              // Check if this flatIdx corresponds to an actual track (not a header)
+              let cumIdx = 0;
+              let isRealTrack = false;
+              for (const g of currentTrackGroups) {
+                if (row.flatIdx >= cumIdx && row.flatIdx < cumIdx + g.tracks.length) {
+                  isRealTrack = true;
+                  break;
+                }
+                cumIdx += g.tracks.length;
+              }
+              if (isRealTrack) {
+                realTrackRows.push({ flatIdx: row.flatIdx, y: row.y });
+              }
+            }
+
+            // Build drop targets: real tracks + unlimited virtual layers above.
+            interface DropTarget { flatIdx: number; y: number; }
+            const dropTargets: DropTarget[] = [];
+
+            for (const row of realTrackRows) {
+              dropTargets.push({ flatIdx: row.flatIdx, y: row.y });
+            }
+
+            // Add virtual layers above the highest visible track.
+            // Each virtual layer occupies one TRACK_HEIGHT slot above the previous.
+            const highestRealY = realTrackRows.length > 0
+              ? realTrackRows[realTrackRows.length - 1].y
+              : 0;
+            for (let i = 0; i < 100; i++) {
+              const virtualFlatIdx = currentTrackLayerMap.length + i;
+              const virtualY = highestRealY - (i + 1) * TRACK_HEIGHT;
+              dropTargets.push({ flatIdx: virtualFlatIdx, y: virtualY });
+            }
+
+            let bestFlatIdx = state.originalLayerIndex;
+            let bestDist = Infinity;
+            for (const target of dropTargets) {
+              const rowCenter = target.y + TRACK_HEIGHT / 2;
+              const dist = Math.abs(localY - rowCenter);
+              if (dist <= bestDist) {
+                bestDist = dist;
+                bestFlatIdx = target.flatIdx;
+              }
+            }
+            targetLayerIndex = bestFlatIdx;
+          }
+        } else if (trackRows.length > 0) {
+          const originalRow = trackRows[state.originalLayerIndex];
+          if (originalRow) {
+            const pointerDomY = originalRow.y + rawDy;
+            let bestFlatIdx = state.originalLayerIndex;
+            let bestDist = Infinity;
+            for (const row of trackRows) {
+              const rowCenter = row.y + TRACK_HEIGHT / 2;
+              const dist = Math.abs(pointerDomY - rowCenter);
+              if (dist <= bestDist) {
+                bestDist = dist;
+                bestFlatIdx = row.flatIdx;
+              }
+            }
+            targetLayerIndex = bestFlatIdx;
+          }
+        }
+
+        // Compute target zIndex from the flat index.
+        // Indices 0..trackLayerMap.length-1 map to existing visible tracks.
+        // Indices >= trackLayerMap.length map to virtual layers above highest zIndex.
+        const clampedTrackIndex = Math.max(0, targetLayerIndex);
         let targetZIndex = state.originalZIndex;
         if (clampedTrackIndex !== state.originalLayerIndex && currentTrackLayerMap.length > 0) {
-          targetZIndex = currentTrackLayerMap[clampedTrackIndex];
+          if (clampedTrackIndex < currentTrackLayerMap.length) {
+            targetZIndex = currentTrackLayerMap[clampedTrackIndex];
+          } else {
+            const maxZ = Math.max(...currentTrackLayerMap);
+            targetZIndex = maxZ + (clampedTrackIndex - currentTrackLayerMap.length + 1);
+          }
         }
-        currentUpdateCommand(state.clipId, { start: newStart, layer: targetZIndex });
+        // Diagnostic: track what mouseup commits
+        (window as any).__mouseUpDiag = {
+          clipId: state.clipId,
+          mode: state.mode,
+          originalZIndex: state.originalZIndex,
+          originalLayerIndex: state.originalLayerIndex,
+          clampedTrackIndex,
+          targetLayerIndex,
+          targetZIndex,
+          trackLayerMapLen: currentTrackLayerMap.length,
+          trackLayerMapValues: currentTrackLayerMap,
+          trackRowsCount: trackRows.length,
+          dx, dy, rawDx, rawDy,
+          newStart,
+          clientY: e?.clientY,
+        };
+
+        const isNewLayer = targetZIndex !== state.originalZIndex &&
+          !currentTrackLayerMap.includes(targetZIndex);
+
+        let finalStart = newStart;
+        if (isNewLayer) {
+          // New (previously empty) layer — always append to end of timeline
+          finalStart = newStart;
+        } else if (targetZIndex !== state.originalZIndex) {
+          // Existing layer — auto-append if dropping near end of content
+          const trackCmds = currentCommands.filter((cmd: any) => cmd.layer === targetZIndex && cmd.id !== state.clipId);
+          if (trackCmds.length > 0) {
+            const lastCmdEnd = Math.max(...trackCmds.map((cmd: any) => cmd.start + (cmd.duration || 0)));
+            const SNAP_THRESHOLD = 1.0;
+            if (newStart >= lastCmdEnd - SNAP_THRESHOLD) {
+              finalStart = lastCmdEnd;
+            }
+          }
+        }
+        currentUpdateCommand(state.clipId, { start: finalStart, layer: targetZIndex });
       } else if (state.mode === 'resize-right') {
         const rawEnd = state.originalStart + state.originalDuration + dt;
         const maxEnd = state.maxDuration != null
@@ -784,6 +1036,8 @@ export const Timeline: React.FC = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
       if (rafId !== null) cancelAnimationFrame(rafId);
+      // Clean up pending drag if effect unmounts before drag starts
+      pendingDragRef.current = null;
     };
   }, [dragState, beginBatch, endBatch]);
 
@@ -833,10 +1087,36 @@ export const Timeline: React.FC = () => {
 
       const cmdDuration = asset.duration && asset.duration > 0 ? Math.min(asset.duration, 30) : 5;
 
+      const existingZIndices = Object.values(tl.layers).map(l => l.zIndex).sort((a, b) => a - b);
+
+      // If dropping onto a track with content, check if the drop position is near the end
+      // of existing content — if so, auto-append instead of overlapping
+      const trackCommands = state.commands.filter(cmd => cmd.layer === nextZIndex);
+      if (trackCommands.length > 0) {
+        const lastCmdEnd = Math.max(...trackCommands.map(cmd => cmd.start + (cmd.duration || 0)));
+        const SNAP_THRESHOLD = 1.0; // seconds
+        if (snapped >= lastCmdEnd - SNAP_THRESHOLD) {
+          // Drop is near or past the end of existing content — append after last clip
+          const newStart = lastCmdEnd;
+          const cmd = {
+            id: uuidv4(),
+            type: 'show' as const,
+            asset: asset.logicalId,
+            start: newStart,
+            duration: cmdDuration,
+            layer: nextZIndex,
+          };
+          addCommand(cmd);
+          const state = useDocuFlowStore.getState();
+          const tl = buildTimeline(state.commands, state.assets, state.settings, state.voiceover ? state.assets.find(a => a.id === state.voiceover!.assetId)?.duration : undefined);
+          state.setTimeline(tl);
+          return;
+        }
+      }
+
       // Check for time conflicts and find appropriate upper track
       const newClipStart = snapped;
       const newClipEnd = snapped + cmdDuration;
-      const existingZIndices = Object.values(tl.layers).map(l => l.zIndex).sort((a, b) => a - b);
 
       // Check if target track has a time conflict
       const hasConflict = state.commands.some(cmd => {
@@ -984,6 +1264,8 @@ export const Timeline: React.FC = () => {
 
     videoTracks.sort((a, b) => b.zIndex - a.zIndex);
 
+
+
     const audioTracks: { id: string; label: string; color: string; clips: any[]; type: string; zIndex: number }[] = [];
     for (const track of effectiveTimeline.audioTracks) {
       if (hiddenAssetIds.has(track.assetId)) continue;
@@ -1101,6 +1383,11 @@ export const Timeline: React.FC = () => {
     });
   }, [tracks, trackVisibility, voiceoverTrack, hasTextCommands, hasAudioCommands]);
 
+  const trackGroupsRef = useRef(trackGroups);
+  useEffect(() => {
+    trackGroupsRef.current = trackGroups;
+  }, [trackGroups]);
+
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
@@ -1139,8 +1426,6 @@ export const Timeline: React.FC = () => {
     }
     return marks;
   }, [totalSeconds, zoom]);
-
-  const playheadX = currentTime * PIXELS_PER_SECOND * zoom;
 
   return (
     <Panel title="Timeline" icon={<Film size={10} />} className="h-full min-h-0 flex flex-col relative overflow-hidden">
@@ -1420,14 +1705,18 @@ export const Timeline: React.FC = () => {
               />
             )}
 
-            {/* Playhead */}
+            {/* Playhead — main line is pointer-events-none so clips underneath are clickable */}
             <div
               ref={playheadRef}
-              className={`absolute top-0 bottom-0 w-0.5 bg-df-error z-30 ${isDraggingPlayhead ? 'shadow-[0_0_12px_rgba(239,83,80,0.8)]' : 'shadow-[0_0_8px_rgba(239,83,80,0.6)] pointer-events-auto cursor-ew-resize'}`}
-              style={{ left: playheadX }}
-              onMouseDown={handlePlayheadMouseDown}
+              className={`absolute top-0 bottom-0 w-0.5 bg-df-error z-30 pointer-events-none ${isDraggingPlayhead ? 'shadow-[0_0_12px_rgba(239,83,80,0.8)]' : 'shadow-[0_0_8px_rgba(239,83,80,0.6)]'}`}
             >
-              <div className={`absolute -top-0.5 -left-1.5 w-3 h-3 bg-df-error rotate-45 rounded-df-xs shadow-medium ${isDraggingPlayhead ? '' : 'cursor-grab active:cursor-grabbing'}`} />
+              {/* Diamond grab handle — this is the only interactive part */}
+              <div
+                className={`absolute -top-0.5 -left-3 w-7 h-7 flex items-center justify-center pointer-events-auto ${isDraggingPlayhead ? '' : 'cursor-ew-resize'}`}
+                onMouseDown={handlePlayheadMouseDown}
+              >
+                <div className={`w-3 h-3 bg-df-error rotate-45 rounded-df-xs shadow-medium ${isDraggingPlayhead ? '' : 'cursor-grab active:cursor-grabbing'}`} />
+              </div>
               <div className="absolute top-full left-0 w-px h-8 bg-df-error/30 pointer-events-none" style={{ transform: 'translateX(-50%)' }} />
             </div>
 
@@ -1461,7 +1750,23 @@ export const Timeline: React.FC = () => {
 
                   // Calculate visual position based on drag offset
                   const visualLeft = left + dragVisualOffset.dx;
-                  const visualTop = RULER_HEIGHT + (trackLayerMap.indexOf(draggedClip.zIndex) * TRACK_HEIGHT) + dragVisualOffset.dy;
+                  // Compute the DOM Y of the original track using canonical track-row lookup
+                  const flatIdx = trackLayerMap.indexOf(draggedClip.zIndex);
+                  let trackDomY = 0;
+                  {
+                    let y = 0;
+                    let count = 0;
+                    for (const g of trackGroups) {
+                      y += TRACK_HEIGHT; // group header
+                      for (let i = 0; i < g.tracks.length; i++) {
+                        if (count === flatIdx) { trackDomY = y; break; }
+                        y += TRACK_HEIGHT;
+                        count++;
+                      }
+                      if (count === flatIdx) break;
+                    }
+                  }
+                  const visualTop = RULER_HEIGHT + trackDomY + dragVisualOffset.dy;
 
                   return (
                     <div

@@ -67,6 +67,44 @@ function normalizeStyle(raw: string | undefined): string | undefined {
   return STYLE_ALIASES[lower] ?? lower;
 }
 
+// ── Color Name → Hex Normalization ────────────────────────────
+// Maps common named colors to hex values before hex validation.
+// The AI may emit COLOR: purple instead of COLOR: #800080.
+
+const COLOR_NAME_TO_HEX: Record<string, string> = {
+  red: '#FF0000',
+  green: '#008000',
+  blue: '#0000FF',
+  yellow: '#FFFF00',
+  orange: '#FFA500',
+  purple: '#800080',
+  pink: '#FFC0CB',
+  black: '#000000',
+  white: '#FFFFFF',
+  gray: '#808080',
+  grey: '#808080',
+  cyan: '#00FFFF',
+  teal: '#008080',
+  navy: '#000080',
+};
+
+/**
+ * Normalize a color value to hex format.
+ * If the value is already a valid hex color, returns it unchanged.
+ * If it's a recognized named color, returns the corresponding hex value.
+ * Otherwise returns the input unchanged (validation will catch it).
+ */
+function normalizeColorToHex(raw: string): string {
+  const trimmed = raw.trim();
+  // Already hex? Pass through.
+  if (/^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$/.test(trimmed)) {
+    return trimmed;
+  }
+  // Named color? Normalize.
+  const hex = COLOR_NAME_TO_HEX[trimmed.toLowerCase()];
+  return hex ?? trimmed;
+}
+
 // ── Block Parsing ───────────────────────────────────────────────
 
 function parseBlocks(text: string): ParsedAIResponse {
@@ -487,7 +525,10 @@ function inferMotionFromPrompt(prompt: string): string | undefined {
   if (/\bfrom\s+the\s+right\b|\bslide[s]?\s+in\s+from\s+right\b|\benter\s+from\s+the\s+right\b|\bcomes?\s+in\s+from\s+the\s+right\b/i.test(lower)) {
     return 'slideRight';
   }
-  if (/\bfrom\s+below\b|\bslide[s]?\s+up\b|\bcomes?\s+up\s+from\s+bottom\b|\brises?\b/i.test(lower)) {
+  if (/\bfrom\s+(?:the\s+)?(?:top|above)\b|\bslide[s]?\s+down\b|\bcomes?\s+down\s+from\s+(?:top|above)\b/i.test(lower)) {
+    return 'slideDown';
+  }
+  if (/\bfrom\s+(?:the\s+)?(?:below|bottom)\b|\bslide[s]?\s+up\b|\bcomes?\s+up\s+from\s+(?:the\s+)?bottom\b|\brises?\b/i.test(lower)) {
     return 'slideUp';
   }
 
@@ -527,12 +568,12 @@ function stripMotionPhrasesFromText(text: string): string {
   // Patterns include optional trailing punctuation (periods, commas, etc.)
   const motionPhrasePatterns = [
     // Directional with "fading/fade" prefix
-    /,\s*(?:fading|fade)\s+(?:in\s+)?from\s+the\s+(?:left|right|bottom)\s*[.,;:!?]?\s*$/i,
-    /,\s*(?:fading|fade)\s+(?:in\s+)?from\s+(?:left|right|bottom)\s*[.,;:!?]?\s*$/i,
+    /,\s*(?:fading|fade)\s+(?:in\s+)?from\s+the\s+(?:left|right|top|above|bottom)\s*[.,;:!?]?\s*$/i,
+    /,\s*(?:fading|fade)\s+(?:in\s+)?from\s+(?:left|right|top|above|bottom)\s*[.,;:!?]?\s*$/i,
 
     // Directional with "slides/slide/coming/comes/enters/enter/appears/appear" prefix
-    /,\s*(?:slides?|coming|comes?|enters?|appears?)\s+(?:in\s+)?from\s+the\s+(?:left|right|bottom)\s*[.,;:!?]?\s*$/i,
-    /,\s*(?:slides?|coming|comes?|enters?|appears?)\s+(?:in\s+)?from\s+(?:left|right|bottom)\s*[.,;:!?]?\s*$/i,
+    /,\s*(?:slides?|coming|comes?|enters?|appears?)\s+(?:in\s+)?from\s+the\s+(?:left|right|top|above|bottom)\s*[.,;:!?]?\s*$/i,
+    /,\s*(?:slides?|coming|comes?|enters?|appears?)\s+(?:in\s+)?from\s+(?:left|right|top|above|bottom)\s*[.,;:!?]?\s*$/i,
 
     // Directional with "rises/rise"
     /,\s*(?:rises?|rising)\s+from\s+(?:the\s+)?(?:below|bottom)\s*[.,;:!?]?\s*$/i,
@@ -540,9 +581,9 @@ function stripMotionPhrasesFromText(text: string): string {
     // Directional with "slides up from below"
     /,\s*(?:slides?|coming|comes?|enters?|appears?)\s+up\s+from\s+(?:the\s+)?(?:below|bottom)\s*[.,;:!?]?\s*$/i,
 
-    // Directional without prefix: "from the left", "from the right", "from below"
-    /,\s*from\s+the\s+(?:left|right|bottom|below)\s*[.,;:!?]?\s*$/i,
-    /,\s*from\s+(?:left|right|bottom|below)\s*[.,;:!?]?\s*$/i,
+    // Directional without prefix: "from the left", "from the right", "from the top", "from above", "from below"
+    /,\s*from\s+the\s+(?:left|right|top|above|bottom|below)\s*[.,;:!?]?\s*$/i,
+    /,\s*from\s+(?:left|right|top|above|bottom|below)\s*[.,;:!?]?\s*$/i,
 
     // Generic motions with "in" suffix
     /,\s*(?:fading|fade)\s+in\s*[.,;:!?]?\s*$/i,
@@ -582,7 +623,7 @@ function detectColorInPrompt(prompt: string): string | undefined {
   if (hexMatch) return hexMatch[0];
 
   // Check for named colors
-  const colorNames = ['white', 'red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink', 'black', 'gray', 'grey'];
+  const colorNames = ['white', 'red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink', 'black', 'gray', 'grey', 'cyan', 'teal', 'navy'];
   for (const name of colorNames) {
     // Match color names as whole words, but not in contexts like "from the left"
     if (new RegExp(`\\b${name}\\b`).test(lower)) {
@@ -736,6 +777,13 @@ export function parseAIResponse(
       ],
       rawResponse: response,
     };
+  }
+
+  // 2c. Normalize named colors to hex before validation
+  for (const block of parsed.components) {
+    if (block.fields.color) {
+      block.fields.color = normalizeColorToHex(block.fields.color);
+    }
   }
 
   // 3. Validate each component block

@@ -7,10 +7,10 @@ import type { MotionComponent, MotionLowerThirdData } from '../../types';
  * Supported animation motions for LowerThird components.
  * Each maps to a deterministic sequence of existing DocuFlow commands.
  */
-type LowerThirdMotion = 'zoom' | 'slideUp' | 'slideLeft' | 'slideRight' | 'fade' | 'pop';
+type LowerThirdMotion = 'zoom' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'fade' | 'pop';
 
 const VALID_MOTIONS: readonly LowerThirdMotion[] = [
-  'zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop',
+  'zoom', 'slideUp', 'slideDown', 'slideLeft', 'slideRight', 'fade', 'pop',
 ];
 
 const MOTION_LOOKUP: Record<string, LowerThirdMotion> = Object.fromEntries(
@@ -149,6 +149,47 @@ export class LowerThirdCompiler implements ComponentCompiler {
             type: 'move',
             target: subtitleId,
             from: { x: nameX, y: subtitleYPos + slideOffset },
+            to: { x: nameX, y: subtitleYPos },
+            start,
+            duration: fadeInDuration,
+            easing: 'easeOut',
+          });
+          commands.push({
+            id: uuidv4(),
+            type: 'fadeIn',
+            target: subtitleId,
+            start,
+            duration: fadeInDuration,
+          });
+        }
+        break;
+      }
+
+      case 'slideDown': {
+        const slideOffset = 150;
+        commands.push({
+          id: uuidv4(),
+          type: 'move',
+          target: nameId,
+          from: { x: nameX, y: nameYPos - slideOffset },
+          to: { x: nameX, y: nameYPos },
+          start,
+          duration: fadeInDuration,
+          easing: 'easeOut',
+        });
+        commands.push({
+          id: uuidv4(),
+          type: 'fadeIn',
+          target: nameId,
+          start,
+          duration: fadeInDuration,
+        });
+        if (subtitleId) {
+          commands.push({
+            id: uuidv4(),
+            type: 'move',
+            target: subtitleId,
+            from: { x: nameX, y: subtitleYPos - slideOffset },
             to: { x: nameX, y: subtitleYPos },
             start,
             duration: fadeInDuration,

@@ -7,10 +7,10 @@ import type { MotionComponent, MotionTitleCardData } from '../../types';
  * Supported animation motions for TitleCard components.
  * Each maps to a deterministic sequence of existing DocuFlow commands.
  */
-type TitleCardMotion = 'zoom' | 'slideUp' | 'slideLeft' | 'slideRight' | 'fade' | 'pop';
+type TitleCardMotion = 'zoom' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'fade' | 'pop';
 
 const VALID_MOTIONS: readonly TitleCardMotion[] = [
-  'zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop',
+  'zoom', 'slideUp', 'slideDown', 'slideLeft', 'slideRight', 'fade', 'pop',
 ];
 
 const MOTION_LOOKUP: Record<string, TitleCardMotion> = Object.fromEntries(
@@ -184,6 +184,47 @@ export class TitleCardCompiler implements ComponentCompiler {
             type: 'move',
             target: subtitleId,
             from: { x: centerX, y: subtitleY + slideOffset },
+            to: { x: centerX, y: subtitleY },
+            start,
+            duration: fadeInDuration,
+            easing: 'easeOut',
+          });
+          commands.push({
+            id: uuidv4(),
+            type: 'fadeIn',
+            target: subtitleId,
+            start,
+            duration: fadeInDuration,
+          });
+        }
+        break;
+      }
+
+      case 'slideDown': {
+        const slideOffset = 200;
+        commands.push({
+          id: uuidv4(),
+          type: 'move',
+          target: titleId,
+          from: { x: centerX, y: titleY - slideOffset },
+          to: { x: centerX, y: titleY },
+          start,
+          duration: fadeInDuration,
+          easing: 'easeOut',
+        });
+        commands.push({
+          id: uuidv4(),
+          type: 'fadeIn',
+          target: titleId,
+          start,
+          duration: fadeInDuration,
+        });
+        if (subtitleId) {
+          commands.push({
+            id: uuidv4(),
+            type: 'move',
+            target: subtitleId,
+            from: { x: centerX, y: subtitleY - slideOffset },
             to: { x: centerX, y: subtitleY },
             start,
             duration: fadeInDuration,

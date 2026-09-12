@@ -814,6 +814,19 @@ describe('Statistic Compiler — Motion Vocabulary', () => {
     expect(getCommandTypes(commands)).not.toContain('scale');
   });
 
+  it('slideDown produces move commands with Y offset (from above)', () => {
+    const commands = compileWithMotion('slideDown');
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBe(2); // value + label
+    for (const cmd of moveCmds) {
+      const move = cmd as any;
+      expect(move.from.y).toBeLessThan(move.to.y);
+      expect(move.from.x).toBe(move.to.x);
+    }
+    expect(getCommandTypes(commands)).toContain('fadeIn');
+    expect(getCommandTypes(commands)).not.toContain('scale');
+  });
+
   it('slideLeft produces move commands with X offset', () => {
     const commands = compileWithMotion('slideLeft');
     const moveCmds = commands.filter(c => c.type === 'move');
@@ -892,6 +905,7 @@ describe('Statistic Compiler — Motion Vocabulary', () => {
   it('each motion produces a different command set', () => {
     const zoom = compileWithMotion('zoom');
     const slideUp = compileWithMotion('slideUp');
+    const slideDown = compileWithMotion('slideDown');
     const slideLeft = compileWithMotion('slideLeft');
     const slideRight = compileWithMotion('slideRight');
     const fade = compileWithMotion('fade');
@@ -907,13 +921,13 @@ describe('Statistic Compiler — Motion Vocabulary', () => {
       }).join(',');
     }
 
-    const sigs = [zoom, slideUp, slideLeft, slideRight, fade, pop].map(commandSignature);
+    const sigs = [zoom, slideUp, slideDown, slideLeft, slideRight, fade, pop].map(commandSignature);
     const unique = new Set(sigs);
-    expect(unique.size).toBe(6);
+    expect(unique.size).toBe(7);
   });
 
   it('all motions produce text commands for value and label', () => {
-    const motions = ['zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop'];
+    const motions = ['zoom', 'slideUp', 'slideDown', 'slideLeft', 'slideRight', 'fade', 'pop'];
     for (const motion of motions) {
       const commands = compileWithMotion(motion);
       const textCmds = commands.filter(c => c.type === 'text');
@@ -924,7 +938,7 @@ describe('Statistic Compiler — Motion Vocabulary', () => {
   });
 
   it('all motions produce fadeOut commands', () => {
-    const motions = ['zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop'];
+    const motions = ['zoom', 'slideUp', 'slideDown', 'slideLeft', 'slideRight', 'fade', 'pop'];
     for (const motion of motions) {
       const commands = compileWithMotion(motion);
       const fadeOuts = commands.filter(c => c.type === 'fadeOut');
@@ -933,7 +947,7 @@ describe('Statistic Compiler — Motion Vocabulary', () => {
   });
 
   it('all motions produce animation commands targeting text IDs', () => {
-    const motions = ['zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop'];
+    const motions = ['zoom', 'slideUp', 'slideDown', 'slideLeft', 'slideRight', 'fade', 'pop'];
     for (const motion of motions) {
       const commands = compileWithMotion(motion);
       const textIds = commands.filter(c => c.type === 'text').map(c => c.id);
@@ -947,7 +961,7 @@ describe('Statistic Compiler — Motion Vocabulary', () => {
   });
 
   it('compiled plan can reach Add to Timeline via gateway', () => {
-    const motions = ['zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop'];
+    const motions = ['zoom', 'slideUp', 'slideDown', 'slideLeft', 'slideRight', 'fade', 'pop'];
     for (const motion of motions) {
       const plan: MotionPlanV1 = {
         version: 1,
@@ -1044,6 +1058,24 @@ describe('Regression — duplicate text and motion differentiation', () => {
     const fadeInCmds = commands.filter((c) => c.type === 'fadeIn');
     expect(moveCmds.length).toBeGreaterThanOrEqual(1);
     expect(fadeInCmds.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('slideDown: move + fadeIn (from above)', () => {
+    const commands = compiler.compile(
+      {
+        type: 'statistic',
+        data: { value: '42%' },
+        timing: { start: 0, duration: 3 },
+        style: { motion: 'slideDown' },
+      },
+      1920, 1080
+    );
+    const moveCmds = commands.filter((c) => c.type === 'move');
+    const fadeInCmds = commands.filter((c) => c.type === 'fadeIn');
+    expect(moveCmds.length).toBeGreaterThanOrEqual(1);
+    expect(fadeInCmds.length).toBeGreaterThanOrEqual(1);
+    // from.y < to.y means element starts above final position
+    expect(moveCmds[0].from.y).toBeLessThan(moveCmds[0].to.y);
   });
 
   it('slideLeft: move + fadeIn', () => {
@@ -1413,6 +1445,7 @@ END`);
   it('each natural-language intent produces distinct command signatures', () => {
     const responses = {
       slideUp: `COMPONENT: statistic\nTEXT: 1\nMOTION: slideUp\nPOSITION: center\nDURATION: 4\nEND`,
+      slideDown: `COMPONENT: statistic\nTEXT: 7\nMOTION: slideDown\nPOSITION: center\nDURATION: 4\nEND`,
       slideLeft: `COMPONENT: statistic\nTEXT: 2\nMOTION: slideLeft\nPOSITION: center\nDURATION: 4\nEND`,
       slideRight: `COMPONENT: statistic\nTEXT: 3\nMOTION: slideRight\nPOSITION: center\nDURATION: 4\nEND`,
       fade: `COMPONENT: statistic\nTEXT: 4\nMOTION: fade\nPOSITION: center\nDURATION: 4\nEND`,
@@ -1427,7 +1460,7 @@ END`);
     });
 
     const unique = new Set(signatures);
-    expect(unique.size).toBe(6);
+    expect(unique.size).toBe(7);
   });
 });
 
@@ -2853,6 +2886,376 @@ END`;
     const component = parseResult.plan!.components[0];
     const data = component.data as { color?: string };
     expect(data.color).toBe('#AABBCC');
+  });
+});
+
+describe('TitleCard — Named Color Normalization', () => {
+  it('1. AI emits COLOR: purple → normalized to #800080', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Emergency Broadcast
+COLOR: purple
+POSITION: center
+DURATION: 5
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a purple title card saying Emergency Broadcast',
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.errors).toHaveLength(0);
+    const component = parseResult.plan!.components[0];
+    const data = component.data as { color?: string };
+    expect(data.color).toBe('#800080');
+  });
+
+  it('2. all 14 named colors normalize correctly', () => {
+    const cases: Array<[string, string]> = [
+      ['red', '#FF0000'],
+      ['green', '#008000'],
+      ['blue', '#0000FF'],
+      ['yellow', '#FFFF00'],
+      ['orange', '#FFA500'],
+      ['purple', '#800080'],
+      ['pink', '#FFC0CB'],
+      ['black', '#000000'],
+      ['white', '#FFFFFF'],
+      ['gray', '#808080'],
+      ['grey', '#808080'],
+      ['cyan', '#00FFFF'],
+      ['teal', '#008080'],
+      ['navy', '#000080'],
+    ];
+
+    for (const [name, expectedHex] of cases) {
+      const aiResponse = `COMPONENT: titlecard
+TITLE: Test ${name}
+COLOR: ${name}
+POSITION: center
+DURATION: 5
+STYLE: documentary
+END`;
+
+      const parseResult = parseAIResponse(aiResponse, {
+        canvasWidth: 1920,
+        canvasHeight: 1080,
+        defaultDuration: 5,
+        userPrompt: `Create a ${name} title card saying Test ${name}`,
+      });
+
+      expect(parseResult.success).toBe(true, `Failed for color "${name}": ${JSON.stringify(parseResult.errors)}`);
+      const data = parseResult.plan!.components[0].data as { color?: string };
+      expect(data.color).toBe(expectedHex);
+    }
+  });
+
+  it('3. case insensitivity: Purple, PURPLE, pUrPlE all normalize', () => {
+    const variants = ['Purple', 'PURPLE', 'pUrPlE', 'purple'];
+    for (const variant of variants) {
+      const aiResponse = `COMPONENT: titlecard
+TITLE: Test Case
+COLOR: ${variant}
+POSITION: center
+DURATION: 5
+STYLE: documentary
+END`;
+
+      const parseResult = parseAIResponse(aiResponse, {
+        canvasWidth: 1920,
+        canvasHeight: 1080,
+        defaultDuration: 5,
+        userPrompt: 'Create a purple title card saying Test Case',
+      });
+
+      expect(parseResult.success).toBe(true, `Failed for variant "${variant}": ${JSON.stringify(parseResult.errors)}`);
+      const data = parseResult.plan!.components[0].data as { color?: string };
+      expect(data.color).toBe('#800080');
+    }
+  });
+
+  it('4. hex colors still pass through unchanged', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Hex Test
+COLOR: #AABBCC
+POSITION: center
+DURATION: 5
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card in #AABBCC saying Hex Test',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const data = parseResult.plan!.components[0].data as { color?: string };
+    expect(data.color).toBe('#AABBCC');
+  });
+
+  it('5. unknown color name still produces validation error', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Test
+COLOR: mauve
+POSITION: center
+DURATION: 5
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a title card saying Test',
+    });
+
+    expect(parseResult.success).toBe(false);
+    expect(parseResult.errors.some(e => e.field === 'color')).toBe(true);
+  });
+
+  it('6. COLOR with whitespace around it normalizes correctly', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: Spaced
+COLOR:   purple  
+POSITION: center
+DURATION: 5
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt: 'Create a purple title card saying Spaced',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const data = parseResult.plan!.components[0].data as { color?: string };
+    expect(data.color).toBe('#800080');
+  });
+
+  it('7. named color survives to compiled commands', () => {
+    const compiler = new TitleCardCompiler();
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Orange Alert', color: '#FFA500' },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds[0].color).toBe('#FFA500');
+  });
+
+  it('8. user prompt: purple title card "The Psychology of Money"', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: The Psychology of Money
+SUBTITLE: Why we spend
+POSITION: center
+DURATION: 7
+MOTION: slideUp
+COLOR: purple
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 7,
+      userPrompt: 'Create a purple title card saying The Psychology of Money with subtitle Why we spend',
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.errors).toHaveLength(0);
+    const data = parseResult.plan!.components[0].data as { title: string; subtitle?: string; color?: string };
+    expect(data.title).toBe('The Psychology of Money');
+    expect(data.subtitle).toBe('Why we spend');
+    expect(data.color).toBe('#800080');
+  });
+
+  it('9. user prompt: green title card "The Hidden Cost of Fast Food"', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: The Hidden Cost of Fast Food
+SUBTITLE: What the price tag doesn't tell you
+POSITION: center
+DURATION: 7
+MOTION: slideLeft
+COLOR: green
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 7,
+      userPrompt: 'Create a green title card saying The Hidden Cost of Fast Food with subtitle What the price tag doesn\'t tell you',
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.errors).toHaveLength(0);
+    const data = parseResult.plan!.components[0].data as { title: string; subtitle?: string; color?: string };
+    expect(data.title).toBe('The Hidden Cost of Fast Food');
+    expect(data.color).toBe('#008000');
+  });
+
+  it('10. user prompt: blue title card "The Future of Energy"', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: The Future of Energy
+SUBTITLE: What happens next
+POSITION: center
+DURATION: 7
+MOTION: fade
+COLOR: blue
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 7,
+      userPrompt: 'Create a blue title card saying The Future of Energy with subtitle What happens next',
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.errors).toHaveLength(0);
+    const data = parseResult.plan!.components[0].data as { title: string; subtitle?: string; color?: string };
+    expect(data.title).toBe('The Future of Energy');
+    expect(data.color).toBe('#0000FF');
+  });
+
+  it('11. user prompt: orange title card "The Rise of Artificial Intelligence"', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: The Rise of Artificial Intelligence
+SUBTITLE: How machines are changing work
+POSITION: center
+DURATION: 7
+MOTION: slideUp
+COLOR: orange
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 7,
+      userPrompt: 'Create an orange title card saying The Rise of Artificial Intelligence with subtitle How machines are changing work',
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.errors).toHaveLength(0);
+    const data = parseResult.plan!.components[0].data as { title: string; subtitle?: string; color?: string };
+    expect(data.title).toBe('The Rise of Artificial Intelligence');
+    expect(data.color).toBe('#FFA500');
+  });
+
+  it('12. user prompt: yellow title card "The Hidden Cost of Convenience"', () => {
+    const aiResponse = `COMPONENT: titlecard
+TITLE: The Hidden Cost of Convenience
+SUBTITLE: What we don't see
+POSITION: center
+DURATION: 7
+MOTION: fade
+COLOR: yellow
+STYLE: documentary
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 7,
+      userPrompt: 'Create a yellow title card saying The Hidden Cost of Convenience with subtitle What we don\'t see',
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.errors).toHaveLength(0);
+    const data = parseResult.plan!.components[0].data as { title: string; subtitle?: string; color?: string };
+    expect(data.title).toBe('The Hidden Cost of Convenience');
+    expect(data.color).toBe('#FFFF00');
+  });
+
+  it('13. hex colors #FFF, #FFFFFF, #000, #000000 all pass through unchanged', () => {
+    const cases: Array<[string, string]> = [
+      ['#FFF', '#FFF'],
+      ['#FFFFFF', '#FFFFFF'],
+      ['#000', '#000'],
+      ['#000000', '#000000'],
+    ];
+
+    for (const [input, expected] of cases) {
+      const aiResponse = `COMPONENT: titlecard
+TITLE: Hex Test
+COLOR: ${input}
+POSITION: center
+DURATION: 5
+STYLE: documentary
+END`;
+
+      const parseResult = parseAIResponse(aiResponse, {
+        canvasWidth: 1920,
+        canvasHeight: 1080,
+        defaultDuration: 5,
+        userPrompt: `Create a title card in ${input} saying Hex Test`,
+      });
+
+      expect(parseResult.success).toBe(true, `Failed for hex "${input}": ${JSON.stringify(parseResult.errors)}`);
+      const data = parseResult.plan!.components[0].data as { color?: string };
+      expect(data.color).toBe(expected);
+    }
+  });
+
+  it('14. case variations: Purple, PURPLE, purple, green, GREEN all normalize', () => {
+    const cases: Array<[string, string]> = [
+      ['Purple', '#800080'],
+      ['PURPLE', '#800080'],
+      ['purple', '#800080'],
+      ['green', '#008000'],
+      ['GREEN', '#008000'],
+    ];
+
+    for (const [input, expected] of cases) {
+      const aiResponse = `COMPONENT: titlecard
+TITLE: Case Test
+COLOR: ${input}
+POSITION: center
+DURATION: 5
+STYLE: documentary
+END`;
+
+      const parseResult = parseAIResponse(aiResponse, {
+        canvasWidth: 1920,
+        canvasHeight: 1080,
+        defaultDuration: 5,
+        userPrompt: `Create a ${input.toLowerCase()} title card saying Case Test`,
+      });
+
+      expect(parseResult.success).toBe(true, `Failed for "${input}": ${JSON.stringify(parseResult.errors)}`);
+      const data = parseResult.plan!.components[0].data as { color?: string };
+      expect(data.color).toBe(expected);
+    }
+  });
+
+  it('15. color normalization survives through compiler to rendered commands', () => {
+    const compiler = new TitleCardCompiler();
+    const commands = compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Purple Test', color: '#800080' },
+        timing: { start: 0, duration: 5 },
+        style: { motion: 'fade' },
+      },
+      1920,
+      1080
+    );
+    const textCmds = commands.filter(c => c.type === 'text');
+    expect(textCmds[0].color).toBe('#800080');
   });
 });
 
@@ -4609,5 +5012,239 @@ describe('LowerThird — Regression: existing components unchanged', () => {
     const response = processMotionRequest(validRequest({ operation: 'getComponents' }));
     expect(response.status).toBe('success');
     expect(response.data).toEqual([{ type: 'statistic' }, { type: 'titlecard' }, { type: 'lowerthird' }]);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// Direction Regression Tests — all 4 cardinal directions
+// These verify the full pipeline: NL prompt → parser → compiler → commands
+// ═════════════════════════════════════════════════════════════════
+describe('Direction Regression — all 4 cardinal directions', () => {
+  const compiler = new TitleCardCompiler();
+  const settings: ProjectSettings = { width: 1920, height: 1080, fps: 30 };
+
+  function compileWithMotion(motion: string) {
+    return compiler.compile(
+      {
+        type: 'titlecard',
+        data: { title: 'Test Title', subtitle: 'Test Subtitle' },
+        timing: { start: 0, duration: 5 },
+        style: { motion },
+      },
+      1920,
+      1080
+    );
+  }
+
+  it('"from the top" → slideDown motion → element starts ABOVE final position', () => {
+    const commands = compileWithMotion('slideDown');
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBe(2); // title + subtitle
+    for (const cmd of moveCmds) {
+      const move = cmd as any;
+      // from.y < to.y means element starts above final position (slides down)
+      expect(move.from.y).toBeLessThan(move.to.y);
+      expect(move.from.x).toBe(move.to.x);
+    }
+    expect(commands.some(c => c.type === 'fadeIn')).toBe(true);
+  });
+
+  it('"from the bottom" → slideUp motion → element starts BELOW final position', () => {
+    const commands = compileWithMotion('slideUp');
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBe(2); // title + subtitle
+    for (const cmd of moveCmds) {
+      const move = cmd as any;
+      // from.y > to.y means element starts below final position (slides up)
+      expect(move.from.y).toBeGreaterThan(move.to.y);
+      expect(move.from.x).toBe(move.to.x);
+    }
+    expect(commands.some(c => c.type === 'fadeIn')).toBe(true);
+  });
+
+  it('"from the left" → slideLeft motion → element starts LEFT of final position', () => {
+    const commands = compileWithMotion('slideLeft');
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBe(2); // title + subtitle
+    for (const cmd of moveCmds) {
+      const move = cmd as any;
+      // from.x < to.x means element starts left of final position (slides right)
+      expect(move.from.x).toBeLessThan(move.to.x);
+      expect(move.from.y).toBe(move.to.y);
+    }
+    expect(commands.some(c => c.type === 'fadeIn')).toBe(true);
+  });
+
+  it('"from the right" → slideRight motion → element starts RIGHT of final position', () => {
+    const commands = compileWithMotion('slideRight');
+    const moveCmds = commands.filter(c => c.type === 'move');
+    expect(moveCmds.length).toBe(2); // title + subtitle
+    for (const cmd of moveCmds) {
+      const move = cmd as any;
+      // from.x > to.x means element starts right of final position (slides left)
+      expect(move.from.x).toBeGreaterThan(move.to.x);
+      expect(move.from.y).toBe(move.to.y);
+    }
+    expect(commands.some(c => c.type === 'fadeIn')).toBe(true);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// Original failing prompt regression test
+// Verifies the exact prompt that was reported as broken
+// ═════════════════════════════════════════════════════════════════
+describe('Original failing prompt regression', () => {
+  it('green title card "fading in from the top" produces slideDown motion', () => {
+    // The user's prompt was processed through the motion director (AI → parser)
+    // But we can test the parser's inferMotionFromPrompt directly via the
+    // postProcessComponents path. Here we simulate what happens after the AI
+    // returns a response and the parser corrects it using the user prompt.
+    const userPrompt = 'Create a green title card saying The Hidden Cost of Fast Food with subtitle What the price tag doesn\'t tell you, fading in from the top';
+
+    // Simulate the parser inferring motion from the user prompt
+    // The key function is inferMotionFromPrompt (private), but we can test
+    // via parseAIResponse with userPrompt option
+    const aiResponse = `COMPONENT: titlecard
+TITLE: The Hidden Cost of Fast Food
+SUBTITLE: What the price tag doesn't tell you
+POSITION: center
+DURATION: 5
+MOTION: fade
+STYLE: documentary
+COLOR: #00FF00
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 5,
+      userPrompt,
+    });
+
+    expect(parseResult.success).toBe(true);
+    expect(parseResult.plan).toBeDefined();
+
+    // The parser should have corrected the motion from 'fade' to 'slideDown'
+    const comp = parseResult.plan!.components[0];
+    expect(comp.style?.motion).toBe('slideDown');
+
+    // Compile and verify the commands produce downward movement
+    const result = processMotionRequest({
+      version: 1,
+      operation: 'compilePlan',
+      requestId: 'test-regression-failing-prompt',
+      plan: parseResult.plan!,
+    });
+
+    expect(result.status).toBe('success');
+    const data = result.data as { commands: any[]; commandCount: number };
+    const commandTypes = data.commands.map((c: any) => c.type);
+    expect(commandTypes).toContain('move');
+    expect(commandTypes).toContain('fadeIn');
+
+    // Verify the movement is from above (slideDown)
+    const moveCmds = data.commands.filter((c: any) => c.type === 'move');
+    expect(moveCmds.length).toBeGreaterThanOrEqual(2);
+    for (const cmd of moveCmds) {
+      const move = cmd as any;
+      // from.y < to.y means element starts above final position
+      expect(move.from.y).toBeLessThan(move.to.y);
+    }
+  });
+
+  it('"fading in from the top" NL inference → slideDown', () => {
+    // Test the parser's motion inference directly
+    const aiResponse = `COMPONENT: statistic
+TEXT: 42%
+POSITION: center
+DURATION: 4
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+      userPrompt: 'Show a statistic, fading in from the top',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const comp = parseResult.plan!.components[0];
+    expect(comp.style?.motion).toBe('slideDown');
+  });
+
+  it('"fading in from the bottom" NL inference → slideUp', () => {
+    const aiResponse = `COMPONENT: statistic
+TEXT: 42%
+POSITION: center
+DURATION: 4
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+      userPrompt: 'Show a statistic, fading in from the bottom',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const comp = parseResult.plan!.components[0];
+    expect(comp.style?.motion).toBe('slideUp');
+  });
+
+  it('"fading in from the left" NL inference → slideLeft', () => {
+    const aiResponse = `COMPONENT: statistic
+TEXT: 42%
+POSITION: center
+DURATION: 4
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+      userPrompt: 'Show a statistic, fading in from the left',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const comp = parseResult.plan!.components[0];
+    expect(comp.style?.motion).toBe('slideLeft');
+  });
+
+  it('"fading in from the right" NL inference → slideRight', () => {
+    const aiResponse = `COMPONENT: statistic
+TEXT: 42%
+POSITION: center
+DURATION: 4
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+      userPrompt: 'Show a statistic, fading in from the right',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const comp = parseResult.plan!.components[0];
+    expect(comp.style?.motion).toBe('slideRight');
+  });
+
+  it('"fading in from above" NL inference → slideDown', () => {
+    const aiResponse = `COMPONENT: statistic
+TEXT: 42%
+POSITION: center
+DURATION: 4
+END`;
+
+    const parseResult = parseAIResponse(aiResponse, {
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      defaultDuration: 4,
+      userPrompt: 'Show a statistic, fading in from above',
+    });
+
+    expect(parseResult.success).toBe(true);
+    const comp = parseResult.plan!.components[0];
+    expect(comp.style?.motion).toBe('slideDown');
   });
 });

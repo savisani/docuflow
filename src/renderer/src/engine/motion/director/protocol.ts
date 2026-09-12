@@ -62,7 +62,7 @@ export type KnownFontWeight = (typeof KNOWN_FONT_WEIGHTS)[number];
 // Semantic motion styles for component animation.
 // The compiler maps these to deterministic command sequences.
 
-export const KNOWN_ANIMATION_MOTIONS = ['zoom', 'slideUp', 'slideLeft', 'slideRight', 'fade', 'pop'] as const;
+export const KNOWN_ANIMATION_MOTIONS = ['zoom', 'slideUp', 'slideDown', 'slideLeft', 'slideRight', 'fade', 'pop'] as const;
 export type KnownAnimationMotion = (typeof KNOWN_ANIMATION_MOTIONS)[number];
 
 // ── Style Aliases (weak model normalization) ────────────────────
