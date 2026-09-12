@@ -12,6 +12,20 @@ import { TransformOverlay } from './TransformOverlay';
 
 const ZOOM_LEVELS = [25, 50, 75, 100, 150, 200];
 
+function getZoomInLevel(current: number | 'fit'): number {
+  if (current === 'fit') return 100;
+  const idx = ZOOM_LEVELS.findIndex((z) => z >= current);
+  if (idx === -1) return ZOOM_LEVELS[ZOOM_LEVELS.length - 1];
+  return ZOOM_LEVELS[Math.min(idx + 1, ZOOM_LEVELS.length - 1)];
+}
+
+function getZoomOutLevel(current: number | 'fit'): number {
+  if (current === 'fit') return 100;
+  const idx = ZOOM_LEVELS.findIndex((z) => z >= current);
+  if (idx <= 0) return ZOOM_LEVELS[0];
+  return ZOOM_LEVELS[idx - 1];
+}
+
 export const VideoPreview: React.FC = () => {
   // Narrow selectors to prevent full rerenders on unrelated state changes
   const assets = useDocuFlowStore((s) => s.assets);
@@ -26,6 +40,7 @@ export const VideoPreview: React.FC = () => {
 
   const playerRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const fullscreenWrapperRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
   const [previewZoom, setPreviewZoom] = useState<number | 'fit'>('fit');
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -245,7 +260,7 @@ export const VideoPreview: React.FC = () => {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Escape' && isFullscreen) {
-        setIsFullscreen(false);
+        document.exitFullscreen().catch(() => {});
       }
       if (e.code === 'Escape' && !isFullscreen) {
         useDocuFlowStore.getState().selectCommand(null);
@@ -292,9 +307,25 @@ export const VideoPreview: React.FC = () => {
     };
   }, [isFullscreen]);
 
-  // Fullscreen
+  // Fullscreen - use real browser/Electron fullscreen API
   const toggleFullscreen = useCallback(() => {
-    setIsFullscreen((prev) => !prev);
+    if (isFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    } else {
+      const el = fullscreenWrapperRef.current;
+      if (el) {
+        el.requestFullscreen().catch(() => {});
+      }
+    }
+  }, [isFullscreen]);
+
+  // Sync React state with actual fullscreen changes
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement != null);
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
   }, []);
 
   const handleZoomChange = useCallback((level: number | 'fit') => {
@@ -355,7 +386,7 @@ export const VideoPreview: React.FC = () => {
   // Fullscreen mode
   if (isFullscreen) {
     return (
-      <div className="fixed inset-0 z-50 bg-black flex flex-col">
+      <div ref={fullscreenWrapperRef} className="fixed inset-0 z-50 bg-black flex flex-col">
         <div
           ref={containerRef}
           className="flex-1 relative overflow-hidden flex items-center justify-center cursor-none"
@@ -408,7 +439,7 @@ export const VideoPreview: React.FC = () => {
               </div>
               <div className="w-px h-5 bg-white/20 mx-1" />
               <Tooltip content="Zoom Out">
-                <IconButton size="sm" variant="ghost" aria-label="Zoom Out" onClick={() => handleZoomChange(previewZoom === 'fit' ? 100 : Math.max(25, (previewZoom as number) - 25))} className="text-white hover:text-df-text-primary hover:bg-white/10">
+                <IconButton size="sm" variant="ghost" aria-label="Zoom Out" onClick={() => handleZoomChange(getZoomOutLevel(previewZoom))} className="text-white hover:text-df-text-primary hover:bg-white/10">
                   <ZoomOut size={14} />
                 </IconButton>
               </Tooltip>
@@ -419,13 +450,13 @@ export const VideoPreview: React.FC = () => {
                 {zoomLabel}
               </button>
               <Tooltip content="Zoom In">
-                <IconButton size="sm" variant="ghost" aria-label="Zoom In" onClick={() => handleZoomChange(previewZoom === 'fit' ? 100 : Math.min(200, (previewZoom as number) + 25))} className="text-white hover:text-df-text-primary hover:bg-white/10">
+                <IconButton size="sm" variant="ghost" aria-label="Zoom In" onClick={() => handleZoomChange(getZoomInLevel(previewZoom))} className="text-white hover:text-df-text-primary hover:bg-white/10">
                   <ZoomIn size={14} />
                 </IconButton>
               </Tooltip>
               <div className="w-px h-5 bg-white/20 mx-1" />
               <Tooltip content="Exit Fullscreen (Esc)">
-                <IconButton size="sm" variant="ghost" aria-label="Exit Fullscreen" onClick={toggleFullscreen} className="text-white hover:text-df-text-primary hover:bg-white/10">
+                <IconButton size="sm" variant="ghost" aria-label="Exit Fullscreen" onClick={() => document.exitFullscreen().catch(() => {})} className="text-white hover:text-df-text-primary hover:bg-white/10">
                   <Minimize2 size={14} />
                 </IconButton>
               </Tooltip>
@@ -506,7 +537,7 @@ export const VideoPreview: React.FC = () => {
         {/* Zoom controls - bottom right */}
         <div className="absolute bottom-2 right-2 flex items-center gap-1 bg-[var(--color-bg-elevated)]/80 backdrop-blur-sm px-2 py-1 rounded-df-lg z-10">
           <Tooltip content="Zoom Out">
-            <IconButton size="sm" variant="ghost" aria-label="Zoom Out" onClick={() => handleZoomChange(previewZoom === 'fit' ? 100 : Math.max(25, (previewZoom as number) - 25))}>
+            <IconButton size="sm" variant="ghost" aria-label="Zoom Out" onClick={() => handleZoomChange(getZoomOutLevel(previewZoom))}>
               <ZoomOut size={12} />
             </IconButton>
           </Tooltip>
@@ -517,7 +548,7 @@ export const VideoPreview: React.FC = () => {
             {zoomLabel}
           </button>
           <Tooltip content="Zoom In">
-            <IconButton size="sm" variant="ghost" aria-label="Zoom In" onClick={() => handleZoomChange(previewZoom === 'fit' ? 100 : Math.min(200, (previewZoom as number) + 25))}>
+            <IconButton size="sm" variant="ghost" aria-label="Zoom In" onClick={() => handleZoomChange(getZoomInLevel(previewZoom))}>
               <ZoomIn size={12} />
             </IconButton>
           </Tooltip>
