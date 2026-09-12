@@ -926,8 +926,9 @@ export const Timeline: React.FC = () => {
 
             // Add virtual layers above the highest visible track.
             // Each virtual layer occupies one TRACK_HEIGHT slot above the previous.
+            // realTrackRows[0] is the topmost track (highest zIndex, smallest Y).
             const highestRealY = realTrackRows.length > 0
-              ? realTrackRows[realTrackRows.length - 1].y
+              ? realTrackRows[0].y
               : 0;
             for (let i = 0; i < 100; i++) {
               const virtualFlatIdx = currentTrackLayerMap.length + i;
@@ -940,7 +941,7 @@ export const Timeline: React.FC = () => {
             for (const target of dropTargets) {
               const rowCenter = target.y + TRACK_HEIGHT / 2;
               const dist = Math.abs(localY - rowCenter);
-              if (dist <= bestDist) {
+              if (dist < bestDist) {
                 bestDist = dist;
                 bestFlatIdx = target.flatIdx;
               }
