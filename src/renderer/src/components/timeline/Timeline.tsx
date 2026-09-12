@@ -995,25 +995,7 @@ export const Timeline: React.FC = () => {
           clientY: e?.clientY,
         };
 
-        const isNewLayer = targetZIndex !== state.originalZIndex &&
-          !currentTrackLayerMap.includes(targetZIndex);
-
-        let finalStart = newStart;
-        if (isNewLayer) {
-          // New (previously empty) layer — always append to end of timeline
-          finalStart = newStart;
-        } else if (targetZIndex !== state.originalZIndex) {
-          // Existing layer — auto-append if dropping near end of content
-          const trackCmds = currentCommands.filter((cmd: any) => cmd.layer === targetZIndex && cmd.id !== state.clipId);
-          if (trackCmds.length > 0) {
-            const lastCmdEnd = Math.max(...trackCmds.map((cmd: any) => cmd.start + (cmd.duration || 0)));
-            const SNAP_THRESHOLD = 1.0;
-            if (newStart >= lastCmdEnd - SNAP_THRESHOLD) {
-              finalStart = lastCmdEnd;
-            }
-          }
-        }
-        currentUpdateCommand(state.clipId, { start: finalStart, layer: targetZIndex });
+        currentUpdateCommand(state.clipId, { start: newStart, layer: targetZIndex });
       } else if (state.mode === 'resize-right') {
         const rawEnd = state.originalStart + state.originalDuration + dt;
         const maxEnd = state.maxDuration != null
@@ -1096,68 +1078,6 @@ export const Timeline: React.FC = () => {
       }
 
       const cmdDuration = asset.duration && asset.duration > 0 ? Math.min(asset.duration, 30) : 5;
-
-      const existingZIndices = Object.values(tl.layers).map(l => l.zIndex).sort((a, b) => a - b);
-
-      // If dropping onto a track with content, check if the drop position is near the end
-      // of existing content — if so, auto-append instead of overlapping
-      const trackCommands = state.commands.filter(cmd => cmd.layer === nextZIndex);
-      if (trackCommands.length > 0) {
-        const lastCmdEnd = Math.max(...trackCommands.map(cmd => cmd.start + (cmd.duration || 0)));
-        const SNAP_THRESHOLD = 1.0; // seconds
-        if (snapped >= lastCmdEnd - SNAP_THRESHOLD) {
-          // Drop is near or past the end of existing content — append after last clip
-          const newStart = lastCmdEnd;
-          const cmd = {
-            id: uuidv4(),
-            type: 'show' as const,
-            asset: asset.logicalId,
-            start: newStart,
-            duration: cmdDuration,
-            layer: nextZIndex,
-          };
-          addCommand(cmd);
-          const state = useDocuFlowStore.getState();
-          const tl = buildTimeline(state.commands, state.assets, state.settings, state.voiceover ? state.assets.find(a => a.id === state.voiceover!.assetId)?.duration : undefined);
-          state.setTimeline(tl);
-          return;
-        }
-      }
-
-      // Check for time conflicts and find appropriate upper track
-      const newClipStart = snapped;
-      const newClipEnd = snapped + cmdDuration;
-
-      // Check if target track has a time conflict
-      const hasConflict = state.commands.some(cmd => {
-        if (cmd.layer !== nextZIndex) return false;
-        const cmdStart = cmd.start;
-        const cmdEnd = cmd.start + (cmd.duration || 0);
-        return cmdStart < newClipEnd && cmdEnd > newClipStart;
-      });
-
-      if (hasConflict) {
-        // Search upward for an available track without conflict
-        let foundTrack = false;
-        for (const zIndex of existingZIndices) {
-          if (zIndex <= nextZIndex) continue;
-          const conflictOnTrack = state.commands.some(cmd => {
-            if (cmd.layer !== zIndex) return false;
-            const cmdStart = cmd.start;
-            const cmdEnd = cmd.start + (cmd.duration || 0);
-            return cmdStart < newClipEnd && cmdEnd > newClipStart;
-          });
-          if (!conflictOnTrack) {
-            nextZIndex = zIndex;
-            foundTrack = true;
-            break;
-          }
-        }
-        if (!foundTrack) {
-          // Create a new track above the highest existing track
-          nextZIndex = existingZIndices.length > 0 ? Math.max(...existingZIndices) + 1 : 0;
-        }
-      }
 
       const cmd = {
         id: uuidv4(),
