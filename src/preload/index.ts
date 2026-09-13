@@ -342,6 +342,50 @@ const docuflowAPI = {
     ipcRenderer.on('local-generation:progress', handler)
     return () => ipcRenderer.removeListener('local-generation:progress', handler)
   },
+
+  // Media probing and conversion
+  probeMedia: (filePath: string): Promise<{
+    success: boolean;
+    format?: string;
+    duration?: number;
+    size?: number;
+    videoCodec?: string;
+    videoProfile?: string;
+    videoWidth?: number;
+    videoHeight?: number;
+    videoPixFmt?: string;
+    videoFps?: number;
+    audioCodec?: string;
+    audioProfile?: string;
+    audioSampleRate?: number;
+    audioChannels?: number;
+    audioChannelLayout?: string;
+    error?: string;
+  }> => {
+    return ipcRenderer.invoke('media:probe', filePath)
+  },
+
+  convertMedia: (params: {
+    inputPath: string;
+    outputPath: string;
+    videoCodec?: string;
+    audioCodec?: string;
+    videoBitrate?: string;
+    audioBitrate?: string;
+    maxWidth?: number;
+    maxHeight?: number;
+    pixelFormat?: string;
+  }): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
+    return ipcRenderer.invoke('media:convert', params)
+  },
+
+  getProxyDir: (projectAssetsDir: string): Promise<string> => {
+    return ipcRenderer.invoke('media:getProxyDir', projectAssetsDir)
+  },
+
+  proxyExists: (proxyPath: string): Promise<boolean> => {
+    return ipcRenderer.invoke('media:proxyExists', proxyPath)
+  },
 }
 
 // Always use contextBridge when contextIsolation is on

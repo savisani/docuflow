@@ -43,7 +43,12 @@ export function findAsset(assets: Asset[], name: string): Asset | undefined {
 
 export function getAssetUrl(assets: Asset[], name: string): string {
   const asset = findAsset(assets, name);
-  return asset?.url || '';
+  if (!asset) return '';
+  // Prefer proxy URL for media assets that have proxies (browser-compatible version)
+  if (asset.proxyUrl && (asset.type === 'video' || asset.type === 'audio')) {
+    return asset.proxyUrl;
+  }
+  return asset.url || '';
 }
 
 export function getAssetById(assets: Asset[], id: string): Asset | undefined {

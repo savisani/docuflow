@@ -122,6 +122,72 @@ describe('getAssetUrl', () => {
   test('returns empty string for nonexistent', () => {
     expect(getAssetUrl(assets, 'nonexistent')).toBe('');
   });
+
+  test('prefers proxyUrl for video assets', () => {
+    const videoAssets: Asset[] = [{
+      id: 'v1',
+      logicalId: 'video1',
+      filename: 'test.mp4',
+      type: 'video',
+      mimeType: 'video/mp4',
+      url: 'docuflow-asset://localhost/original.mp4',
+      proxyUrl: 'docuflow-asset://localhost/proxy.mp4',
+      hasProxy: true,
+    }];
+    expect(getAssetUrl(videoAssets, 'video1')).toBe('docuflow-asset://localhost/proxy.mp4');
+  });
+
+  test('prefers proxyUrl for audio assets', () => {
+    const audioAssets: Asset[] = [{
+      id: 'a1',
+      logicalId: 'audio1',
+      filename: 'test.wma',
+      type: 'audio',
+      mimeType: 'audio/x-ms-wma',
+      url: 'docuflow-asset://localhost/original.wma',
+      proxyUrl: 'docuflow-asset://localhost/proxy.mp3',
+      hasProxy: true,
+    }];
+    expect(getAssetUrl(audioAssets, 'audio1')).toBe('docuflow-asset://localhost/proxy.mp3');
+  });
+
+  test('does NOT use proxyUrl for image assets', () => {
+    const imageAssets: Asset[] = [{
+      id: 'i1',
+      logicalId: 'image1',
+      filename: 'test.jpg',
+      type: 'image',
+      mimeType: 'image/jpeg',
+      url: 'docuflow-asset://localhost/test.jpg',
+      proxyUrl: 'docuflow-asset://localhost/proxy.jpg',
+      hasProxy: true,
+    }];
+    expect(getAssetUrl(imageAssets, 'image1')).toBe('docuflow-asset://localhost/test.jpg');
+  });
+
+  test('falls back to url when proxyUrl is empty', () => {
+    const videoAssets: Asset[] = [{
+      id: 'v1',
+      logicalId: 'video1',
+      filename: 'test.mp4',
+      type: 'video',
+      mimeType: 'video/mp4',
+      url: 'docuflow-asset://localhost/original.mp4',
+      proxyUrl: '',
+    }];
+    expect(getAssetUrl(videoAssets, 'video1')).toBe('docuflow-asset://localhost/original.mp4');
+  });
+
+  test('returns empty when both url and proxyUrl are missing', () => {
+    const videoAssets: Asset[] = [{
+      id: 'v1',
+      logicalId: 'video1',
+      filename: 'test.mp4',
+      type: 'video',
+      mimeType: 'video/mp4',
+    }];
+    expect(getAssetUrl(videoAssets, 'video1')).toBe('');
+  });
 });
 
 describe('getAssetById', () => {

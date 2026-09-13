@@ -14,6 +14,7 @@ import {
 } from './services/projectFolder'
 import { registerAssetIpc } from './ipc/assets'
 import { registerPipelineIpc } from './ipc/pipeline'
+import { registerMediaIpc } from './ipc/media'
 import { getModelManager, ModelManagerRunner } from './modelManager'
 import { normalizeError, createLogger, ErrorCode } from '../core/errors'
 
@@ -28,6 +29,7 @@ const MIME_TYPES: Record<string, string> = {
   '.bmp': 'image/bmp',
   '.svg': 'image/svg+xml',
   '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
   '.webm': 'video/webm',
   '.mov': 'video/quicktime',
   '.avi': 'video/x-msvideo',
@@ -37,6 +39,12 @@ const MIME_TYPES: Record<string, string> = {
   '.ogg': 'audio/ogg',
   '.flac': 'audio/flac',
   '.aac': 'audio/aac',
+  '.m4a': 'audio/mp4',
+  '.opus': 'audio/opus',
+  '.wma': 'audio/x-ms-wma',
+  '.ts': 'video/mp2t',
+  '.mts': 'video/mp2t',
+  '.m2ts': 'video/mp2t',
 }
 
 function getMimeType(filePath: string): string {
@@ -74,32 +82,50 @@ function registerAssetProtocol(): void {
         filePath = filePath.slice(1)
       }
 
+      // Handle HEAD requests (browsers send these before GET for media)
+      if (request.method === 'HEAD') {
+        try {
+          const fileStat = await stat(filePath)
+          const mimeType = getMimeType(filePath)
+          return new Response(null, {
+            headers: {
+              'Content-Type': mimeType,
+              'Content-Length': String(fileStat.size),
+              'Accept-Ranges': 'bytes',
+            },
+          })
+        } catch {
+          return new Response(null, { status: 404 })
+        }
+      }
+
       const mimeType = getMimeType(filePath)
       const isMedia = mimeType.startsWith('video/') || mimeType.startsWith('audio/')
 
-      // For media files, support range requests for efficient seeking
       if (isMedia) {
         const fileStat = await stat(filePath)
         const fileSize = fileStat.size
         const rangeHeader = request.headers.get('range')
 
         if (rangeHeader) {
-          // Parse Range: bytes=start-end
           const match = rangeHeader.match(/bytes=(\d*)-(\d*)/)
           if (match) {
             const start = match[1] ? parseInt(match[1], 10) : 0
             const end = match[2] ? parseInt(match[2], 10) : fileSize - 1
             const chunkSize = end - start + 1
 
-            // Stream the requested range using createReadStream
-            const stream = createReadStream(filePath, { start, end })
-            const chunks: Buffer[] = []
-            for await (const chunk of stream) {
-              chunks.push(chunk)
-            }
-            const buffer = Buffer.concat(chunks)
+            const body = new ReadableStream({
+              start(controller) {
+                const fileStream = createReadStream(filePath, { start, end })
+                fileStream.on('data', (chunk: Buffer) => {
+                  controller.enqueue(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength))
+                })
+                fileStream.on('end', () => controller.close())
+                fileStream.on('error', (err) => controller.error(err))
+              },
+            })
 
-            return new Response(buffer, {
+            return new Response(body, {
               status: 206,
               headers: {
                 'Content-Type': mimeType,
@@ -112,9 +138,19 @@ function registerAssetProtocol(): void {
           }
         }
 
-        // No range header: return full file with Accept-Ranges support
-        const buffer = await readFile(filePath)
-        return new Response(buffer, {
+        // Full media response — stream the entire file without buffering in memory
+        const body = new ReadableStream({
+          start(controller) {
+            const fileStream = createReadStream(filePath)
+            fileStream.on('data', (chunk: Buffer) => {
+              controller.enqueue(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength))
+            })
+            fileStream.on('end', () => controller.close())
+            fileStream.on('error', (err) => controller.error(err))
+          },
+        })
+
+        return new Response(body, {
           headers: {
             'Content-Type': mimeType,
             'Content-Length': String(fileSize),
@@ -124,7 +160,7 @@ function registerAssetProtocol(): void {
         })
       }
 
-      // Non-media files: return full content
+      // Non-media files: small enough to buffer
       const buffer = await readFile(filePath)
       return new Response(buffer, {
         headers: {
@@ -1584,6 +1620,7 @@ app.whenReady().then(() => {
   registerTranscriptionIpc()
   registerSaveImageIpc()
   registerAssetIpc()
+  registerMediaIpc()
   registerUpscaleIpc()
   registerPipelineIpc()
   registerBatchPipelineIpc()

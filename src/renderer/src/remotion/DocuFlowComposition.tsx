@@ -150,6 +150,17 @@ const RenderLayer: React.FC<{
           <Video
             src={state.assetUrl}
             style={mediaStyle}
+            onError={(e) => {
+              const target = e.target as HTMLVideoElement;
+              console.error('[DocuFlowComposition] Video playback error:', {
+                src: state.assetUrl,
+                error: target.error,
+                mediaError: target.error ? {
+                  code: target.error.code,
+                  message: target.error.message,
+                } : null,
+              });
+            }}
           />
         </div>
       </Sequence>
@@ -187,6 +198,18 @@ const RenderAudio: React.FC<{
           const currentFrame = track.startFrame + f;
           if (!isAudioActive(track, currentFrame)) return 0;
           return resolveAudioVolume(track, currentFrame);
+        }}
+        onError={(e) => {
+          const target = e.target as HTMLAudioElement;
+          console.error('[DocuFlowComposition] Audio playback error:', {
+            src: track.assetUrl,
+            trackId: track.id,
+            error: target.error,
+            mediaError: target.error ? {
+              code: target.error.code,
+              message: target.error.message,
+            } : null,
+          });
         }}
       />
     </Sequence>
