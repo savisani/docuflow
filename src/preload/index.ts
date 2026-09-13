@@ -386,6 +386,10 @@ const docuflowAPI = {
   proxyExists: (proxyPath: string): Promise<boolean> => {
     return ipcRenderer.invoke('media:proxyExists', proxyPath)
   },
+
+  readFileBuffer: (filePath: string): Promise<{ success: boolean; base64?: string; error?: string }> => {
+    return ipcRenderer.invoke('file:readBuffer', filePath)
+  },
 }
 
 // Always use contextBridge when contextIsolation is on

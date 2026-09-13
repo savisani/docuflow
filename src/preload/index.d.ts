@@ -158,6 +158,11 @@ export interface DocuFlowAPI {
   saveProjectToPath(filePath: string, projectData: any): Promise<{ success: boolean; error?: string }>
   loadProjectFromPath(filePath: string): Promise<{ success: boolean; data?: any; error?: string }>
   onLocalGenerationProgress(callback: (data: { type: string; step?: number; total?: number; percent?: number; message?: string }) => void): (() => void)
+  probeMedia(filePath: string): Promise<{ success: boolean; format?: string; duration?: number; size?: number; videoCodec?: string; videoProfile?: string; videoWidth?: number; videoHeight?: number; videoPixFmt?: string; videoFps?: number; audioCodec?: string; audioProfile?: string; audioSampleRate?: number; audioChannels?: number; audioChannelLayout?: string; error?: string }>
+  convertMedia(params: { inputPath: string; outputPath: string; videoCodec?: string; audioCodec?: string; videoBitrate?: string; audioBitrate?: string; maxWidth?: number; maxHeight?: number; pixelFormat?: string }): Promise<{ success: boolean; outputPath?: string; error?: string }>
+  getProxyDir(projectAssetsDir: string): Promise<string>
+  proxyExists(proxyPath: string): Promise<boolean>
+  readFileBuffer(filePath: string): Promise<{ success: boolean; base64?: string; error?: string }>
 }
 
 declare global {

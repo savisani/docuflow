@@ -20,6 +20,21 @@ import { normalizeError, createLogger, ErrorCode } from '../core/errors'
 
 const ASSET_PROTOCOL = 'docuflow-asset'
 
+// Register the custom scheme as privileged BEFORE app is ready.
+// This enables fetch() and other Web APIs to load docuflow-asset:// URLs.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: ASSET_PROTOCOL,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
+])
+
 const MIME_TYPES: Record<string, string> = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -1610,8 +1625,21 @@ function registerProjectDialogIpc(): void {
   })
 }
 
+function registerFileIpc(): void {
+  ipcMain.handle('file:readBuffer', async (_event, filePath: string) => {
+    try {
+      const buffer = await readFile(filePath)
+      return { success: true, base64: buffer.toString('base64') }
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, ErrorCode.PROJECT_LOAD)
+      return { success: false, error: normalized.message }
+    }
+  })
+}
+
 app.whenReady().then(() => {
   registerAssetProtocol()
+  registerFileIpc()
   registerWindowControls()
   registerProjectIpc()
   registerProjectDialogIpc()

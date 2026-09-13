@@ -285,6 +285,7 @@ export async function importNativeAssets(
       mimeType,
       filePath,
       url,
+      audioRole: assetType === 'audio' ? 'music' : undefined,
     };
 
     try {

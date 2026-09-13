@@ -80,6 +80,7 @@ export const AssetLibrary: React.FC = () => {
           width: metadata.width,
           height: metadata.height,
           duration: metadata.duration,
+          audioRole: metadata.type === 'audio' ? 'music' : undefined,
         };
         existingAssets.push(asset);
         addAsset(asset);

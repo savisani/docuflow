@@ -4,6 +4,31 @@ import { JobManager } from '../../../../core/jobs/JobManager';
 import { WorkerManager } from '../../workers/core/workerManager';
 import type { ExtractPeaksResult } from '../../workers/core/types';
 
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+async function loadAudioData(asset: { url?: string; filePath?: string }): Promise<ArrayBuffer> {
+  if (asset.filePath && window.docuflow?.readFileBuffer) {
+    const result = await window.docuflow.readFileBuffer(asset.filePath);
+    if (result.success && result.base64) {
+      return base64ToArrayBuffer(result.base64);
+    }
+  }
+  if (asset.url) {
+    const response = await fetch(asset.url);
+    return response.arrayBuffer();
+  }
+  throw new Error('No file path or URL available for audio asset');
+}
+
+const audioBufferCache = new Map<string, AudioBuffer>();
+
 export const AudioWaveform: React.FC<{
   assetId: string | undefined;
   width: number;
@@ -16,24 +41,38 @@ export const AudioWaveform: React.FC<{
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !asset?.url || width <= 0) return;
+    if (!canvas || !asset || width <= 0) return;
+
+    const cacheKey = asset.filePath || asset.url || '';
+    if (audioBufferCache.has(cacheKey)) {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      const cached = audioBufferCache.get(cacheKey)!;
+      drawWaveform(ctx, cached, width, height);
+      setReady(true);
+      return;
+    }
 
     const jobManager = jobManagerRef.current;
     let cancelled = false;
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    let audioContext: AudioContext | null = null;
 
     const job = jobManager.run<ExtractPeaksResult>({
       type: 'extract-peaks',
       execute: async ({ signal, reportProgress }: { signal: AbortSignal; reportProgress: (p: number) => void }) => {
         reportProgress(0);
 
-        const response = await fetch(asset.url!);
-        const arrayBuffer = await response.arrayBuffer();
+        const arrayBuffer = await loadAudioData(asset);
         if (signal.aborted) throw new Error('Cancelled');
 
         reportProgress(0.2);
+        audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
         if (signal.aborted) throw new Error('Cancelled');
+
+        if (cacheKey) {
+          audioBufferCache.set(cacheKey, audioBuffer);
+        }
 
         reportProgress(0.4);
         const channelData = audioBuffer.getChannelData(0);
@@ -60,39 +99,25 @@ export const AudioWaveform: React.FC<{
     });
 
     job.promise.then((result: ExtractPeaksResult) => {
-      if (cancelled) { audioContext.close(); return; }
+      if (cancelled) return;
 
       const ctx = canvas.getContext('2d');
-      if (!ctx) { audioContext.close(); return; }
+      if (!ctx) return;
 
-      canvas.width = width;
-      canvas.height = height;
-      ctx.clearRect(0, 0, width, height);
-
-      const numBars = Math.max(1, Math.floor(width / 3));
-      const barW = Math.max(1, width / numBars - 1);
-      const midY = height / 2;
-
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-      for (let i = 0; i < numBars; i++) {
-        const amp = result.peaks[i] / result.peakMax;
-        const barH = Math.max(1, amp * height * 0.85);
-        const x = i * (barW + 1);
-        ctx.fillRect(x, midY - barH / 2, barW, barH);
-      }
-
-      audioContext.close();
+      drawWaveform(ctx, result, width, height);
       setReady(true);
     }).catch(() => {
-      audioContext.close();
+      // silently ignore waveform errors
     });
 
     return () => {
       cancelled = true;
       job.cancel();
-      audioContext.close();
+      if (audioContext && audioContext.state !== 'closed') {
+        audioContext.close().catch(() => {});
+      }
     };
-  }, [asset?.url, width, height]);
+  }, [asset?.filePath, asset?.url, width, height]);
 
   return (
     <canvas
@@ -102,3 +127,21 @@ export const AudioWaveform: React.FC<{
     />
   );
 };
+
+function drawWaveform(ctx: CanvasRenderingContext2D, result: ExtractPeaksResult, width: number, height: number): void {
+  ctx.canvas.width = width;
+  ctx.canvas.height = height;
+  ctx.clearRect(0, 0, width, height);
+
+  const numBars = Math.max(1, Math.floor(width / 3));
+  const barW = Math.max(1, width / numBars - 1);
+  const midY = height / 2;
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+  for (let i = 0; i < numBars; i++) {
+    const amp = result.peaks[i] / result.peakMax;
+    const barH = Math.max(1, amp * height * 0.85);
+    const x = i * (barW + 1);
+    ctx.fillRect(x, midY - barH / 2, barW, barH);
+  }
+}
