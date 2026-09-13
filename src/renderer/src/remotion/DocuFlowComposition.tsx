@@ -3,6 +3,7 @@ import {
   AbsoluteFill,
   Img,
   Audio,
+  Video,
   Sequence,
   useCurrentFrame,
   useVideoConfig,
@@ -122,19 +123,41 @@ const RenderLayer: React.FC<{
 
   const transform = getLayerTransform(state);
 
+  const layerStyle: React.CSSProperties = {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    transformStyle: 'preserve-3d',
+    transform: `translate(-50%, -50%) ${transform}`,
+    transformOrigin: '0 0',
+    opacity: state.opacity,
+    zIndex: layer.zIndex,
+  };
+
+  const mediaStyle: React.CSSProperties = {
+    display: 'block',
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain',
+    filter: filterParts.length > 0 ? filterParts.join(' ') : undefined,
+  };
+
+  if (layer.assetType === 'video') {
+    const durationInFrames = layer.endFrame - layer.startFrame;
+    return (
+      <Sequence from={layer.startFrame} durationInFrames={durationInFrames}>
+        <div style={layerStyle}>
+          <Video
+            src={state.assetUrl}
+            style={mediaStyle}
+          />
+        </div>
+      </Sequence>
+    );
+  }
+
   return (
-    <div
-      style={{
-        position: 'absolute',
-        left: '50%',
-        top: '50%',
-        transformStyle: 'preserve-3d',
-        transform: `translate(-50%, -50%) ${transform}`,
-        transformOrigin: '0 0',
-        opacity: state.opacity,
-        zIndex: layer.zIndex,
-      }}
-    >
+    <div style={layerStyle}>
       <Img
         src={state.assetUrl}
         style={{

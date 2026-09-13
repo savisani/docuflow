@@ -1,7 +1,7 @@
 import { app, BrowserWindow, shell, ipcMain, protocol, dialog } from 'electron'
 import { join, extname } from 'path'
-import { readFile, writeFile } from 'fs/promises'
-import { existsSync, mkdirSync, readdirSync, statSync, readFileSync, writeFileSync } from 'fs'
+import { readFile, writeFile, stat } from 'fs/promises'
+import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
 import { spawn } from 'child_process'
 import { is } from '@electron-toolkit/utils'
 import { tmpdir } from 'os'
@@ -74,10 +74,61 @@ function registerAssetProtocol(): void {
         filePath = filePath.slice(1)
       }
 
+      const mimeType = getMimeType(filePath)
+      const isMedia = mimeType.startsWith('video/') || mimeType.startsWith('audio/')
+
+      // For media files, support range requests for efficient seeking
+      if (isMedia) {
+        const fileStat = await stat(filePath)
+        const fileSize = fileStat.size
+        const rangeHeader = request.headers.get('range')
+
+        if (rangeHeader) {
+          // Parse Range: bytes=start-end
+          const match = rangeHeader.match(/bytes=(\d*)-(\d*)/)
+          if (match) {
+            const start = match[1] ? parseInt(match[1], 10) : 0
+            const end = match[2] ? parseInt(match[2], 10) : fileSize - 1
+            const chunkSize = end - start + 1
+
+            // Stream the requested range using createReadStream
+            const stream = createReadStream(filePath, { start, end })
+            const chunks: Buffer[] = []
+            for await (const chunk of stream) {
+              chunks.push(chunk)
+            }
+            const buffer = Buffer.concat(chunks)
+
+            return new Response(buffer, {
+              status: 206,
+              headers: {
+                'Content-Type': mimeType,
+                'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+                'Content-Length': String(chunkSize),
+                'Accept-Ranges': 'bytes',
+                'Cache-Control': 'no-cache',
+              },
+            })
+          }
+        }
+
+        // No range header: return full file with Accept-Ranges support
+        const buffer = await readFile(filePath)
+        return new Response(buffer, {
+          headers: {
+            'Content-Type': mimeType,
+            'Content-Length': String(fileSize),
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'no-cache',
+          },
+        })
+      }
+
+      // Non-media files: return full content
       const buffer = await readFile(filePath)
       return new Response(buffer, {
         headers: {
-          'Content-Type': getMimeType(filePath),
+          'Content-Type': mimeType,
           'Cache-Control': 'no-cache',
         },
       })

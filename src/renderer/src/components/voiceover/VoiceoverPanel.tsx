@@ -27,30 +27,28 @@ const TRANSCRIPTION_STEPS = [
 ];
 
 export const VoiceoverPanel: React.FC = () => {
-  const {
-    assets,
-    voiceover,
-    transcript,
-    sceneMarkers,
-    transcriptionStatus,
-    transcriptionError,
-    transcriptionStep,
-    transcriptionStepLabel,
-    transcriptionStartedAt,
-    currentTime,
-    setVoiceover,
-    setTranscript,
-    setSceneMarkers,
-    addSceneMarker,
-    removeSceneMarker,
-    setTranscriptionStatus,
-    setTranscriptionError,
-    setTranscriptionStep,
-    resetTranscriptionProgress,
-    setAudioRole,
-    addCommand,
-    setCurrentTime,
-  } = useDocuFlowStore();
+  const assets = useDocuFlowStore((s) => s.assets);
+  const voiceover = useDocuFlowStore((s) => s.voiceover);
+  const transcript = useDocuFlowStore((s) => s.transcript);
+  const sceneMarkers = useDocuFlowStore((s) => s.sceneMarkers);
+  const transcriptionStatus = useDocuFlowStore((s) => s.transcriptionStatus);
+  const transcriptionError = useDocuFlowStore((s) => s.transcriptionError);
+  const transcriptionStep = useDocuFlowStore((s) => s.transcriptionStep);
+  const transcriptionStepLabel = useDocuFlowStore((s) => s.transcriptionStepLabel);
+  const transcriptionStartedAt = useDocuFlowStore((s) => s.transcriptionStartedAt);
+  const currentTime = useDocuFlowStore((s) => s.currentTime);
+  const setVoiceover = useDocuFlowStore((s) => s.setVoiceover);
+  const setTranscript = useDocuFlowStore((s) => s.setTranscript);
+  const setSceneMarkers = useDocuFlowStore((s) => s.setSceneMarkers);
+  const addSceneMarker = useDocuFlowStore((s) => s.addSceneMarker);
+  const removeSceneMarker = useDocuFlowStore((s) => s.removeSceneMarker);
+  const setTranscriptionStatus = useDocuFlowStore((s) => s.setTranscriptionStatus);
+  const setTranscriptionError = useDocuFlowStore((s) => s.setTranscriptionError);
+  const setTranscriptionStep = useDocuFlowStore((s) => s.setTranscriptionStep);
+  const resetTranscriptionProgress = useDocuFlowStore((s) => s.resetTranscriptionProgress);
+  const setAudioRole = useDocuFlowStore((s) => s.setAudioRole);
+  const addCommand = useDocuFlowStore((s) => s.addCommand);
+  const setCurrentTime = useDocuFlowStore((s) => s.setCurrentTime);
 
   const { health, status: serverStatus, serverStarting, startServer, restartServer } = useServerStatus();
   const [selectedLanguage, setSelectedLanguage] = useState('auto');
