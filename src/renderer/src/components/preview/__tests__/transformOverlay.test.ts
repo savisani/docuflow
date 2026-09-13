@@ -1,7 +1,5 @@
 import { describe, test, expect } from 'vitest';
-
-// Pure math functions extracted from TransformOverlay resize logic.
-// These test the coordinate model independent of React/DOM.
+import { LayerState } from '../../../types/timeline';
 
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 10;
@@ -20,61 +18,68 @@ interface ResizeResult {
 
 function computeCornerResize(opts: {
   handle: 'nw' | 'ne' | 'sw' | 'se';
-  origW: number;
-  origH: number;
-  origScale: number;
-  origCX: number;
-  origCY: number;
+  elW: number;
+  elH: number;
+  startScale: number;
+  startX: number;
+  startY: number;
   dxComp: number;
   dyComp: number;
-  naturalW: number;
-  naturalH: number;
 }): ResizeResult {
-  const { handle, origW, origH, origScale, origCX, origCY, dxComp, dyComp, naturalW, naturalH } = opts;
+  const { handle, elW, elH, startScale, startX, startY, dxComp, dyComp } = opts;
 
-  let effectiveDx = dxComp;
-  let effectiveDy = dyComp;
-  if (handle === 'nw' || handle === 'sw') effectiveDx = -dxComp;
-  if (handle === 'nw' || handle === 'ne') effectiveDy = -dyComp;
+  let handleDirX = 0;
+  let handleDirY = 0;
+  if (handle === 'se' || handle === 'ne') handleDirX = 1;
+  if (handle === 'nw' || handle === 'sw') handleDirX = -1;
+  if (handle === 'se' || handle === 'sw') handleDirY = 1;
+  if (handle === 'nw' || handle === 'ne') handleDirY = -1;
 
-  const origDist = Math.sqrt(origW * origW + origH * origH);
-  const newDist = Math.sqrt(
-    (origW + effectiveDx) * (origW + effectiveDx) +
-    (origH + effectiveDy) * (origH + effectiveDy)
-  );
-  const uniformDelta = origDist > 0 ? newDist / origDist : 1;
-  const newScale = clamp(origScale * uniformDelta, MIN_SCALE, MAX_SCALE);
+  const diagLenSq = elW * elW + elH * elH;
+  const delta = diagLenSq > 0
+    ? (dxComp * handleDirX * elW + dyComp * handleDirY * elH) / diagLenSq
+    : 0;
+  const newScale = clamp(startScale + delta, MIN_SCALE, MAX_SCALE);
 
-  const cw = naturalW * newScale;
-  const ch = naturalH * newScale;
+  const anchorOnLeft = handle === 'se' || handle === 'ne';
+  const anchorOnTop = handle === 'se' || handle === 'sw';
+  const anchorX = anchorOnLeft
+    ? startX - elW / 2
+    : startX + elW * (startScale - 0.5);
+  const anchorY = anchorOnTop
+    ? startY - elH / 2
+    : startY + elH * (startScale - 0.5);
 
-  let signX = 0;
-  let signY = 0;
-  if (handle === 'e' || handle === 'ne' || handle === 'se') signX = 1;
-  if (handle === 'w' || handle === 'nw' || handle === 'sw') signX = -1;
-  if (handle === 's' || handle === 'sw' || handle === 'se') signY = 1;
-  if (handle === 'n' || handle === 'nw' || handle === 'ne') signY = -1;
+  const newX = anchorOnLeft
+    ? anchorX + elW / 2
+    : anchorX - elW * (newScale - 0.5);
+  const newY = anchorOnTop
+    ? anchorY + elH / 2
+    : anchorY - elH * (newScale - 0.5);
 
-  const newX = origCX + signX * (cw - origW) / 2;
-  const newY = origCY + signY * (ch - origH) / 2;
+  const w = elW * newScale;
+  const h = elH * newScale;
 
-  return { x: newX, y: newY, scale: newScale, w: cw, h: ch };
+  return { x: newX, y: newY, scale: newScale, w, h };
 }
 
 function computeEdgeResize(opts: {
   handle: 'e' | 'w' | 'n' | 's';
-  origW: number;
-  origH: number;
-  origScale: number;
-  origCX: number;
-  origCY: number;
+  elW: number;
+  elH: number;
+  startScale: number;
+  startX: number;
+  startY: number;
   dxComp: number;
   dyComp: number;
   naturalW: number;
   naturalH: number;
   aspectRatio: number;
 }): ResizeResult {
-  const { handle, origW, origH, origScale, origCX, origCY, dxComp, dyComp, naturalW, naturalH, aspectRatio } = opts;
+  const { handle, elW, elH, startScale, startX, startY, dxComp, dyComp, naturalW, naturalH, aspectRatio } = opts;
+
+  const origW = elW * startScale;
+  const origH = elH * startScale;
 
   let newW: number;
   let newH: number;
@@ -95,183 +100,221 @@ function computeEdgeResize(opts: {
 
   const newScale = clamp(newW / naturalW, MIN_SCALE, MAX_SCALE);
 
-  const cw = naturalW * newScale;
-  const ch = naturalH * newScale;
+  const anchorOnLeft = handle === 'e';
+  const anchorOnTop = handle === 's';
+  const anchorX = anchorOnLeft
+    ? startX - elW / 2
+    : startX + elW * (startScale - 0.5);
+  const anchorY = anchorOnTop
+    ? startY - elH / 2
+    : startY + elH * (startScale - 0.5);
 
-  let signX = 0;
-  let signY = 0;
-  if (handle === 'e') signX = 1;
-  if (handle === 'w') signX = -1;
-  if (handle === 's') signY = 1;
-  if (handle === 'n') signY = -1;
+  const newX = anchorOnLeft
+    ? anchorX + elW / 2
+    : anchorX - elW * (newScale - 0.5);
+  const newY = anchorOnTop
+    ? anchorY + elH / 2
+    : anchorY - elH * (newScale - 0.5);
 
-  const newX = origCX + signX * (cw - origW) / 2;
-  const newY = origCY + signY * (ch - origH) / 2;
+  const w = naturalW * newScale;
+  const h = naturalH * newScale;
 
-  return { x: newX, y: newY, scale: newScale, w: cw, h: ch };
+  return { x: newX, y: newY, scale: newScale, w, h };
 }
 
-// Simulate the screen-to-composition coordinate conversion
 function screenToComp(dxScreen: number, dyScreen: number, displayScale: number) {
   return { dxComp: dxScreen / displayScale, dyComp: dyScreen / displayScale };
+}
+
+function visualNW(x: number, y: number, elW: number) {
+  return { vx: x - elW / 2, vy: y - elW / 2 };
+}
+
+function findLayerForCommand(
+  layers: Record<string, LayerState>,
+  commandId: string
+): LayerState | null {
+  const direct = layers[commandId];
+  if (direct) return direct;
+  for (const layer of Object.values(layers)) {
+    if (layer.assetSegments.some((seg) => seg.commandId === commandId)) {
+      return layer;
+    }
+  }
+  return null;
 }
 
 describe('TransformOverlay resize math', () => {
   const natW = 800;
   const natH = 600;
-  const initialScale = 1;
-  const origW = natW * initialScale;
-  const origH = natH * initialScale;
-  const origCX = 0;
-  const origCY = 0;
+  const elW = natW;
+  const elH = natH;
 
   describe('corner resize preserves aspect ratio', () => {
     test('SE handle: drag 100px right and 75px down maintains 4:3 ratio', () => {
-      const dxComp = 100;
-      const dyComp = 75;
       const result = computeCornerResize({
-        handle: 'se', origW, origH, origScale: initialScale,
-        origCX, origCY, dxComp, dyComp, naturalW: natW, naturalH: natH,
+        handle: 'se', elW, elH, startScale: 1,
+        startX: 0, startY: 0, dxComp: 100, dyComp: 75,
       });
-      // Aspect ratio should be preserved
       expect(result.w / result.h).toBeCloseTo(natW / natH, 6);
-      // Scale should increase (image got bigger)
-      expect(result.scale).toBeGreaterThan(initialScale);
+      expect(result.scale).toBeGreaterThan(1);
     });
 
     test('NW handle: drag -100px left and -75px up maintains 4:3 ratio', () => {
-      const dxComp = -100;
-      const dyComp = -75;
       const result = computeCornerResize({
-        handle: 'nw', origW, origH, origScale: initialScale,
-        origCX, origCY, dxComp, dyComp, naturalW: natW, naturalH: natH,
+        handle: 'nw', elW, elH, startScale: 1,
+        startX: 0, startY: 0, dxComp: -100, dyComp: -75,
       });
       expect(result.w / result.h).toBeCloseTo(natW / natH, 6);
-      expect(result.scale).toBeGreaterThan(initialScale);
+      expect(result.scale).toBeGreaterThan(1);
     });
 
     test('NE handle: drag 100px right and -75px up maintains 4:3 ratio', () => {
-      const dxComp = 100;
-      const dyComp = -75;
       const result = computeCornerResize({
-        handle: 'ne', origW, origH, origScale: initialScale,
-        origCX, origCY, dxComp, dyComp, naturalW: natW, naturalH: natH,
+        handle: 'ne', elW, elH, startScale: 1,
+        startX: 0, startY: 0, dxComp: 100, dyComp: -75,
       });
       expect(result.w / result.h).toBeCloseTo(natW / natH, 6);
-      expect(result.scale).toBeGreaterThan(initialScale);
+      expect(result.scale).toBeGreaterThan(1);
     });
 
     test('SW handle: drag -100px left and 75px down maintains 4:3 ratio', () => {
-      const dxComp = -100;
-      const dyComp = 75;
       const result = computeCornerResize({
-        handle: 'sw', origW, origH, origScale: initialScale,
-        origCX, origCY, dxComp, dyComp, naturalW: natW, naturalH: natH,
+        handle: 'sw', elW, elH, startScale: 1,
+        startX: 0, startY: 0, dxComp: -100, dyComp: 75,
       });
       expect(result.w / result.h).toBeCloseTo(natW / natH, 6);
-      expect(result.scale).toBeGreaterThan(initialScale);
+      expect(result.scale).toBeGreaterThan(1);
     });
   });
 
-  describe('corner resize position anchoring', () => {
-    test('SE handle: NW corner stays fixed', () => {
+  describe('corner resize visual anchor stays fixed', () => {
+    test('SE handle: visual NW corner stays fixed', () => {
+      const sx = 100;
+      const sy = 50;
       const result = computeCornerResize({
-        handle: 'se', origW, origH, origScale: initialScale,
-        origCX: 100, origCY: 50, dxComp: 200, dyComp: 150, naturalW: natW, naturalH: natH,
+        handle: 'se', elW, elH, startScale: 1,
+        startX: sx, startY: sy, dxComp: 200, dyComp: 150,
       });
-      // NW corner of original: (100 - 400, 50 - 300) = (-300, -250)
-      // NW corner of resized: (result.x - result.w/2, result.y - result.h/2)
-      const nwOrigX = 100 - origW / 2;
-      const nwOrigY = 50 - origH / 2;
-      const nwNewX = result.x - result.w / 2;
-      const nwNewY = result.y - result.h / 2;
-      expect(nwNewX).toBeCloseTo(nwOrigX, 4);
-      expect(nwNewY).toBeCloseTo(nwOrigY, 4);
+      const nwOrigVX = sx - elW / 2;
+      const nwOrigVY = sy - elH / 2;
+      const nwNewVX = result.x - elW / 2;
+      const nwNewVY = result.y - elH / 2;
+      expect(nwNewVX).toBeCloseTo(nwOrigVX, 4);
+      expect(nwNewVY).toBeCloseTo(nwOrigVY, 4);
     });
 
-    test('NW handle: SE corner stays fixed', () => {
+    test('NW handle: visual SE corner stays fixed', () => {
+      const sx = 100;
+      const sy = 50;
       const result = computeCornerResize({
-        handle: 'nw', origW, origH, origScale: initialScale,
-        origCX: 100, origCY: 50, dxComp: -200, dyComp: -150, naturalW: natW, naturalH: natH,
+        handle: 'nw', elW, elH, startScale: 1,
+        startX: sx, startY: sy, dxComp: -200, dyComp: -150,
       });
-      // SE corner of original: (100 + 400, 50 + 300) = (500, 350)
-      const seOrigX = 100 + origW / 2;
-      const seOrigY = 50 + origH / 2;
-      const seNewX = result.x + result.w / 2;
-      const seNewY = result.y + result.h / 2;
-      expect(seNewX).toBeCloseTo(seOrigX, 4);
-      expect(seNewY).toBeCloseTo(seOrigY, 4);
+      const seOrigVX = sx + elW * (1 - 0.5);
+      const seOrigVY = sy + elH * (1 - 0.5);
+      const seNewVX = result.x + elW * (result.scale - 0.5);
+      const seNewVY = result.y + elH * (result.scale - 0.5);
+      expect(seNewVX).toBeCloseTo(seOrigVX, 4);
+      expect(seNewVY).toBeCloseTo(seOrigVY, 4);
     });
 
-    test('NE handle: SW corner stays fixed', () => {
+    test('NE handle: visual SW corner stays fixed', () => {
+      const sx = 100;
+      const sy = 50;
       const result = computeCornerResize({
-        handle: 'ne', origW, origH, origScale: initialScale,
-        origCX: 100, origCY: 50, dxComp: 200, dyComp: -150, naturalW: natW, naturalH: natH,
+        handle: 'ne', elW, elH, startScale: 1,
+        startX: sx, startY: sy, dxComp: 200, dyComp: -150,
       });
-      const swOrigX = 100 - origW / 2;
-      const swOrigY = 50 + origH / 2;
-      const swNewX = result.x - result.w / 2;
-      const swNewY = result.y + result.h / 2;
-      expect(swNewX).toBeCloseTo(swOrigX, 4);
-      expect(swNewY).toBeCloseTo(swOrigY, 4);
+      const swOrigVX = sx - elW / 2;
+      const swOrigVY = sy + elH * (1 - 0.5);
+      const swNewVX = result.x - elW / 2;
+      const swNewVY = result.y + elH * (result.scale - 0.5);
+      expect(swNewVX).toBeCloseTo(swOrigVX, 4);
+      expect(swNewVY).toBeCloseTo(swOrigVY, 4);
     });
 
-    test('SW handle: NE corner stays fixed', () => {
+    test('SW handle: visual NE corner stays fixed', () => {
+      const sx = 100;
+      const sy = 50;
       const result = computeCornerResize({
-        handle: 'sw', origW, origH, origScale: initialScale,
-        origCX: 100, origCY: 50, dxComp: -200, dyComp: 150, naturalW: natW, naturalH: natH,
+        handle: 'sw', elW, elH, startScale: 1,
+        startX: sx, startY: sy, dxComp: -200, dyComp: 150,
       });
-      const neOrigX = 100 + origW / 2;
-      const neOrigY = 50 - origH / 2;
-      const neNewX = result.x + result.w / 2;
-      const neNewY = result.y - result.h / 2;
-      expect(neNewX).toBeCloseTo(neOrigX, 4);
-      expect(neNewY).toBeCloseTo(neOrigY, 4);
+      const neOrigVX = sx + elW * (1 - 0.5);
+      const neOrigVY = sy - elH / 2;
+      const neNewVX = result.x + elW * (result.scale - 0.5);
+      const neNewVY = result.y - elH / 2;
+      expect(neNewVX).toBeCloseTo(neOrigVX, 4);
+      expect(neNewVY).toBeCloseTo(neOrigVY, 4);
+    });
+
+    test('SE handle: anchor stays fixed at non-zero position', () => {
+      const sx = 300;
+      const sy = 200;
+      const result = computeCornerResize({
+        handle: 'se', elW, elH, startScale: 1.5,
+        startX: sx, startY: sy, dxComp: 100, dyComp: 75,
+      });
+      const nwOrigVX = sx - elW / 2;
+      const nwOrigVY = sy - elH / 2;
+      const nwNewVX = result.x - elW / 2;
+      const nwNewVY = result.y - elH / 2;
+      expect(nwNewVX).toBeCloseTo(nwOrigVX, 4);
+      expect(nwNewVY).toBeCloseTo(nwOrigVY, 4);
     });
   });
 
   describe('edge resize position anchoring', () => {
-    test('e handle: left edge stays fixed', () => {
+    test('e handle: visual left edge stays fixed', () => {
+      const sx = 100;
+      const sy = 50;
       const result = computeEdgeResize({
-        handle: 'e', origW, origH, origScale: initialScale,
-        origCX: 100, origCY: 50, dxComp: 200, dyComp: 0,
+        handle: 'e', elW, elH, startScale: 1,
+        startX: sx, startY: sy, dxComp: 200, dyComp: 0,
         naturalW: natW, naturalH: natH, aspectRatio: natW / natH,
       });
-      const leftOrig = 100 - origW / 2;
-      const leftNew = result.x - result.w / 2;
+      const leftOrig = sx - elW / 2;
+      const leftNew = result.x - elW / 2;
       expect(leftNew).toBeCloseTo(leftOrig, 4);
     });
 
-    test('w handle: right edge stays fixed', () => {
+    test('w handle: visual right edge stays fixed', () => {
+      const sx = 100;
+      const sy = 50;
       const result = computeEdgeResize({
-        handle: 'w', origW, origH, origScale: initialScale,
-        origCX: 100, origCY: 50, dxComp: -200, dyComp: 0,
+        handle: 'w', elW, elH, startScale: 1,
+        startX: sx, startY: sy, dxComp: -200, dyComp: 0,
         naturalW: natW, naturalH: natH, aspectRatio: natW / natH,
       });
-      const rightOrig = 100 + origW / 2;
-      const rightNew = result.x + result.w / 2;
+      const rightOrig = sx + elW * (1 - 0.5);
+      const rightNew = result.x + elW * (result.scale - 0.5);
       expect(rightNew).toBeCloseTo(rightOrig, 4);
     });
 
-    test('s handle: top edge stays fixed', () => {
+    test('s handle: visual top edge stays fixed', () => {
+      const sx = 100;
+      const sy = 50;
       const result = computeEdgeResize({
-        handle: 's', origW, origH, origScale: initialScale,
-        origCX: 100, origCY: 50, dxComp: 0, dyComp: 150,
+        handle: 's', elW, elH, startScale: 1,
+        startX: sx, startY: sy, dxComp: 0, dyComp: 150,
         naturalW: natW, naturalH: natH, aspectRatio: natW / natH,
       });
-      const topOrig = 50 - origH / 2;
-      const topNew = result.y - result.h / 2;
+      const topOrig = sy - elH / 2;
+      const topNew = result.y - elH / 2;
       expect(topNew).toBeCloseTo(topOrig, 4);
     });
 
-    test('n handle: bottom edge stays fixed', () => {
+    test('n handle: visual bottom edge stays fixed', () => {
+      const sx = 100;
+      const sy = 50;
       const result = computeEdgeResize({
-        handle: 'n', origW, origH, origScale: initialScale,
-        origCX: 100, origCY: 50, dxComp: 0, dyComp: -150,
+        handle: 'n', elW, elH, startScale: 1,
+        startX: sx, startY: sy, dxComp: 0, dyComp: -150,
         naturalW: natW, naturalH: natH, aspectRatio: natW / natH,
       });
-      const bottomOrig = 50 + origH / 2;
-      const bottomNew = result.y + result.h / 2;
+      const bottomOrig = sy + elH * (1 - 0.5);
+      const bottomNew = result.y + elH * (result.scale - 0.5);
       expect(bottomNew).toBeCloseTo(bottomOrig, 4);
     });
   });
@@ -294,127 +337,213 @@ describe('TransformOverlay resize math', () => {
     });
   });
 
+  describe('mostly horizontal/vertical drags', () => {
+    test('SE: mostly horizontal drag gives small scale change for tall image', () => {
+      const tallElW = 200;
+      const tallElH = 800;
+      const result = computeCornerResize({
+        handle: 'se', elW: tallElW, elH: tallElH, startScale: 1,
+        startX: 0, startY: 0, dxComp: 100, dyComp: 0,
+      });
+      expect(result.w / result.h).toBeCloseTo(tallElW / tallElH, 6);
+      expect(result.scale).toBeGreaterThan(1);
+    });
+
+    test('SE: mostly vertical drag gives small scale change for wide image', () => {
+      const wideElW = 800;
+      const wideElH = 200;
+      const result = computeCornerResize({
+        handle: 'se', elW: wideElW, elH: wideElH, startScale: 1,
+        startX: 0, startY: 0, dxComp: 0, dyComp: 100,
+      });
+      expect(result.w / result.h).toBeCloseTo(wideElW / wideElH, 6);
+      expect(result.scale).toBeGreaterThan(1);
+    });
+
+    test('SE: diagonal drag along aspect ratio gives proportional scale', () => {
+      const result = computeCornerResize({
+        handle: 'se', elW: 800, elH: 600, startScale: 1,
+        startX: 0, startY: 0, dxComp: 80, dyComp: 60,
+      });
+      expect(result.scale).toBeCloseTo(1.1, 4);
+    });
+  });
+
   describe('repeated resize does not accumulate error', () => {
-    test('resize 10 times by same delta, result is consistent', () => {
+    test('SE: resize 10 times by same delta, anchor stays fixed', () => {
       let scale = 1;
-      let cx = 0;
-      let cy = 0;
+      let cx = 100;
+      let cy = 50;
       const dxComp = 50;
-      const dyComp = 37.5; // maintains 4:3 ratio
+      const dyComp = 37.5;
 
       for (let i = 0; i < 10; i++) {
-        const ow = natW * scale;
-        const oh = natH * scale;
         const result = computeCornerResize({
-          handle: 'se', origW: ow, origH: oh, origScale: scale,
-          origCX: cx, origCY: cy, dxComp, dyComp, naturalW: natW, naturalH: natH,
+          handle: 'se', elW: natW, elH: natH, startScale: scale,
+          startX: cx, startY: cy, dxComp, dyComp,
         });
         scale = result.scale;
         cx = result.x;
         cy = result.y;
       }
 
-      // After 10 resizes, aspect ratio should still be correct
-      const finalW = natW * scale;
-      const finalH = natH * scale;
-      expect(finalW / finalH).toBeCloseTo(natW / natH, 6);
-
-      // Scale should be monotonically increasing
+      expect(natW / natH).toBeCloseTo(natW / natH, 6);
       expect(scale).toBeGreaterThan(1);
+
+      const nwVX = cx - natW / 2;
+      const nwVY = cy - natH / 2;
+      expect(nwVX).toBeCloseTo(100 - natW / 2, 2);
+      expect(nwVY).toBeCloseTo(50 - natH / 2, 2);
     });
   });
 
   describe('edge cases', () => {
     test('very small image can be resized', () => {
-      const smallNatW = 10;
-      const smallNatH = 10;
-      const smallOrigW = 10;
-      const smallOrigH = 10;
       const result = computeCornerResize({
-        handle: 'se', origW: smallOrigW, origH: smallOrigH, origScale: 0.1,
-        origCX: 0, origCY: 0, dxComp: 100, dyComp: 100,
-        naturalW: smallNatW, naturalH: smallNatH,
+        handle: 'se', elW: 10, elH: 10, startScale: 0.1,
+        startX: 0, startY: 0, dxComp: 100, dyComp: 100,
       });
       expect(result.scale).toBeGreaterThan(0.1);
-      expect(result.w).toBeGreaterThan(smallOrigW);
+      expect(result.w).toBeGreaterThan(1);
     });
 
     test('very large image can be resized', () => {
-      const largeNatW = 4000;
-      const largeNatH = 3000;
-      const largeOrigW = 4000;
-      const largeOrigH = 3000;
       const result = computeCornerResize({
-        handle: 'se', origW: largeOrigW, origH: largeOrigH, origScale: 1,
-        origCX: 0, origCY: 0, dxComp: 200, dyComp: 150,
-        naturalW: largeNatW, naturalH: largeNatH,
+        handle: 'se', elW: 4000, elH: 3000, startScale: 1,
+        startX: 0, startY: 0, dxComp: 200, dyComp: 150,
       });
       expect(result.scale).toBeGreaterThan(1);
-      expect(result.w).toBeCloseTo(largeNatW * result.scale, 2);
+      expect(result.w).toBeCloseTo(4000 * result.scale, 2);
     });
 
     test('dragging inward makes image smaller', () => {
       const result = computeCornerResize({
-        handle: 'se', origW, origH, origScale: initialScale,
-        origCX: 0, origCY: 0, dxComp: -200, dyComp: -150,
-        naturalW: natW, naturalH: natH,
+        handle: 'se', elW, elH, startScale: 1,
+        startX: 0, startY: 0, dxComp: -200, dyComp: -150,
       });
-      expect(result.scale).toBeLessThan(initialScale);
+      expect(result.scale).toBeLessThan(1);
     });
 
     test('image positioned outside composition can still be resized', () => {
+      const sx = -500;
+      const sy = -300;
       const result = computeCornerResize({
-        handle: 'nw', origW, origH, origScale: initialScale,
-        origCX: -500, origCY: -300, dxComp: -100, dyComp: -75,
-        naturalW: natW, naturalH: natH,
+        handle: 'nw', elW, elH, startScale: 1,
+        startX: sx, startY: sy, dxComp: -100, dyComp: -75,
       });
-      // NW handle anchors at SE corner: (-500 + 400, -300 + 300) = (-100, 0)
-      const seNewX = result.x + result.w / 2;
-      const seNewY = result.y + result.h / 2;
-      expect(seNewX).toBeCloseTo(-100, 4);
-      expect(seNewY).toBeCloseTo(0, 4);
+      const seNewVX = result.x + elW * (result.scale - 0.5);
+      const seNewVY = result.y + elH * (result.scale - 0.5);
+      const seOrigVX = sx + elW * (1 - 0.5);
+      const seOrigVY = sy + elH * (1 - 0.5);
+      expect(seNewVX).toBeCloseTo(seOrigVX, 4);
+      expect(seNewVY).toBeCloseTo(seOrigVY, 4);
     });
   });
 
   describe('portrait image', () => {
-    const pNatW = 600;
-    const pNatH = 800;
+    const pElW = 600;
+    const pElH = 800;
 
     test('SE corner resize maintains portrait aspect ratio', () => {
-      const pOrigW = pNatW;
-      const pOrigH = pNatH;
       const result = computeCornerResize({
-        handle: 'se', origW: pOrigW, origH: pOrigH, origScale: 1,
-        origCX: 0, origCY: 0, dxComp: 100, dyComp: 133.33,
-        naturalW: pNatW, naturalH: pNatH,
+        handle: 'se', elW: pElW, elH: pElH, startScale: 1,
+        startX: 0, startY: 0, dxComp: 100, dyComp: 133.33,
       });
-      expect(result.w / result.h).toBeCloseTo(pNatW / pNatH, 6);
-      // NW corner stays fixed
-      const nwNewX = result.x - result.w / 2;
-      const nwNewY = result.y - result.h / 2;
-      expect(nwNewX).toBeCloseTo(-pOrigW / 2, 4);
-      expect(nwNewY).toBeCloseTo(-pOrigH / 2, 4);
+      expect(result.w / result.h).toBeCloseTo(pElW / pElH, 6);
+      const nwNewVX = result.x - pElW / 2;
+      const nwNewVY = result.y - pElH / 2;
+      expect(nwNewVX).toBeCloseTo(-pElW / 2, 4);
+      expect(nwNewVY).toBeCloseTo(-pElH / 2, 4);
     });
   });
 
   describe('square image', () => {
-    const sNatW = 500;
-    const sNatH = 500;
+    const sElW = 500;
+    const sElH = 500;
 
-    test('any corner resize maintains square aspect ratio', () => {
-      const sOrigW = sNatW;
-      const sOrigH = sNatH;
+    test('NE corner resize maintains square aspect ratio', () => {
       const result = computeCornerResize({
-        handle: 'ne', origW: sOrigW, origH: sOrigH, origScale: 1,
-        origCX: 0, origCY: 0, dxComp: 150, dyComp: -150,
-        naturalW: sNatW, naturalH: sNatH,
+        handle: 'ne', elW: sElW, elH: sElH, startScale: 1,
+        startX: 0, startY: 0, dxComp: 150, dyComp: -150,
       });
       expect(result.w / result.h).toBeCloseTo(1, 6);
-      // SW corner stays fixed
-      const swNewX = result.x - result.w / 2;
-      const swNewY = result.y + result.h / 2;
-      expect(swNewX).toBeCloseTo(-sOrigW / 2, 4);
-      expect(swNewY).toBeCloseTo(sOrigH / 2, 4);
+      const swNewVX = result.x - sElW / 2;
+      const swNewVY = result.y + sElH * (result.scale - 0.5);
+      expect(swNewVX).toBeCloseTo(-sElW / 2, 4);
+      expect(swNewVY).toBeCloseTo(sElH * (1 - 0.5), 4);
+    });
+  });
+
+  describe('findLayerForCommand', () => {
+    const mockLayers: Record<string, LayerState> = {
+      'cmd-a': {
+        id: 'cmd-a',
+        assetId: 'asset-1',
+        assetUrl: 'url1',
+        assetType: 'image',
+        visible: true,
+        startFrame: 0,
+        endFrame: 90,
+        x: 0, y: 0, z: 0, scale: 1,
+        rotationX: 0, rotationY: 0, rotationZ: 0,
+        opacity: 1, blur: 0, flipH: false, flipV: false,
+        cropX: 0, cropY: 0, cropWidth: 0, cropHeight: 0,
+        zIndex: 0,
+        animations: [],
+        keyframeTracks: [],
+        assetSegments: [
+          { assetId: 'asset-1', assetUrl: 'url1', assetType: 'image', startFrame: 0, commandId: 'cmd-a' },
+        ],
+      },
+      'cmd-b': {
+        id: 'cmd-b',
+        assetId: 'asset-2',
+        assetUrl: 'url2',
+        assetType: 'image',
+        visible: true,
+        startFrame: 90,
+        endFrame: 180,
+        x: 0, y: 0, z: 0, scale: 1,
+        rotationX: 0, rotationY: 0, rotationZ: 0,
+        opacity: 1, blur: 0, flipH: false, flipV: false,
+        cropX: 0, cropY: 0, cropWidth: 0, cropHeight: 0,
+        zIndex: 1,
+        animations: [],
+        keyframeTracks: [],
+        assetSegments: [
+          { assetId: 'asset-2', assetUrl: 'url2', assetType: 'image', startFrame: 90, commandId: 'cmd-b' },
+        ],
+      },
+    };
+
+    test('finds layer by direct key match', () => {
+      const result = findLayerForCommand(mockLayers, 'cmd-a');
+      expect(result).toBe(mockLayers['cmd-a']);
+    });
+
+    test('finds layer by segment commandId', () => {
+      const layersWithSegment: Record<string, LayerState> = {
+        'layer-1': {
+          ...mockLayers['cmd-a'],
+          id: 'layer-1',
+          assetSegments: [
+            { assetId: 'asset-1', assetUrl: 'url1', assetType: 'image', startFrame: 0, commandId: 'cmd-segment-1' },
+            { assetId: 'asset-2', assetUrl: 'url2', assetType: 'image', startFrame: 90, commandId: 'cmd-segment-2' },
+          ],
+        },
+      };
+      const result = findLayerForCommand(layersWithSegment, 'cmd-segment-2');
+      expect(result).toBe(layersWithSegment['layer-1']);
+    });
+
+    test('returns null for unknown command', () => {
+      const result = findLayerForCommand(mockLayers, 'cmd-unknown');
+      expect(result).toBeNull();
+    });
+
+    test('returns null for empty layers', () => {
+      const result = findLayerForCommand({}, 'cmd-a');
+      expect(result).toBeNull();
     });
   });
 });

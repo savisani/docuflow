@@ -1,6 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { useDocuFlowStore } from '../../app/store';
 import { resolveLayerState } from '../../engine/timeline/resolver';
+import { LayerState } from '../../types/timeline';
 
 interface TransformOverlayProps {
   containerRef: React.RefObject<HTMLDivElement | null>;
@@ -26,6 +27,12 @@ interface DragState {
   startScale: number;
   origW: number;
   origH: number;
+  elW: number;
+  elH: number;
+  anchorX: number;
+  anchorY: number;
+  handleDirX: number;
+  handleDirY: number;
 }
 
 const MIN_SCALE = 0.05;
@@ -33,6 +40,21 @@ const MAX_SCALE = 10;
 
 function clamp(val: number, min: number, max: number) {
   return Math.max(min, Math.min(max, val));
+}
+
+function findLayerForCommand(
+  timeline: { layers: Record<string, LayerState> } | null,
+  commandId: string
+): LayerState | null {
+  if (!timeline) return null;
+  const direct = timeline.layers[commandId];
+  if (direct) return direct;
+  for (const layer of Object.values(timeline.layers)) {
+    if (layer.assetSegments.some((seg) => seg.commandId === commandId)) {
+      return layer;
+    }
+  }
+  return null;
 }
 
 export const TransformOverlay: React.FC<TransformOverlayProps> = ({
@@ -55,7 +77,7 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({
     s.commands.find((c) => c.id === s.selectedCommandId)
   );
 
-  const layer = timeline?.layers[selectedCommandId || ''];
+  const layer = findLayerForCommand(timeline, selectedCommandId || '');
   const isVisual = selectedCommand?.type === 'show' && layer &&
     (layer.assetType === 'image' || layer.assetType === 'video');
 
@@ -125,31 +147,25 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({
       const origW = ds.origW;
       const origH = ds.origH;
       const origScale = ds.startScale;
-      const origCX = ds.startCompX;
-      const origCY = ds.startCompY;
 
       const isCorner = ds.handle === 'nw' || ds.handle === 'ne' || ds.handle === 'sw' || ds.handle === 'se';
-      let newW: number;
-      let newH: number;
+
+      let newScale: number;
 
       if (isCorner) {
-        // Apply direction signs: drag toward handle direction = grow
-        let effectiveDx = dxComp;
-        let effectiveDy = dyComp;
-        if (ds.handle === 'nw' || ds.handle === 'sw') effectiveDx = -dxComp;
-        if (ds.handle === 'nw' || ds.handle === 'ne') effectiveDy = -dyComp;
-
-        // Diagonal scaling: distance from anchor (opposite corner) to mouse
-        const origDist = Math.sqrt(origW * origW + origH * origH);
-        const newDist = Math.sqrt(
-          (origW + effectiveDx) * (origW + effectiveDx) +
-          (origH + effectiveDy) * (origH + effectiveDy)
-        );
-        const uniformDelta = origDist > 0 ? newDist / origDist : 1;
-        const newScale = clamp(origScale * uniformDelta, MIN_SCALE, MAX_SCALE);
-        newW = nW > 0 ? nW * newScale : cW * 0.5 * newScale;
-        newH = nW > 0 ? nH * newScale : newW / aRatio;
+        const elW = ds.elW;
+        const elH = ds.elH;
+        const diagLenSq = elW * elW + elH * elH;
+        if (diagLenSq > 0) {
+          const delta = (dxComp * ds.handleDirX * elW + dyComp * ds.handleDirY * elH) / diagLenSq;
+          newScale = clamp(origScale + delta, MIN_SCALE, MAX_SCALE);
+        } else {
+          newScale = origScale;
+        }
       } else {
+        let newW: number;
+        let newH: number;
+
         if (ds.handle === 'e') {
           newW = Math.max(20, origW + dxComp);
           newH = newW / aRatio;
@@ -163,36 +179,26 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({
           newH = Math.max(20, origH - dyComp);
           newW = newH * aRatio;
         }
+
+        newScale = nW > 0
+          ? clamp(newW / nW, MIN_SCALE, MAX_SCALE)
+          : clamp(newW / (cW * 0.5), MIN_SCALE, MAX_SCALE);
       }
 
-      const newScale = nW > 0
-        ? clamp(newW / nW, MIN_SCALE, MAX_SCALE)
-        : clamp(newW / (cW * 0.5), MIN_SCALE, MAX_SCALE);
+      let newX: number;
+      let newY: number;
 
-      // Position update: anchor is the OPPOSITE side/corner of the handle
-      const cw = nW > 0 ? nW * newScale : cW * 0.5 * newScale;
-      const ch = nW > 0 ? nH * newScale : cw / aRatio;
+      const elW = ds.elW;
+      const elH = ds.elH;
 
-      let signX = 0;
-      let signY = 0;
-      if (ds.handle === 'e' || ds.handle === 'ne' || ds.handle === 'se') signX = 1;
-      if (ds.handle === 'w' || ds.handle === 'nw' || ds.handle === 'sw') signX = -1;
-      if (ds.handle === 's' || ds.handle === 'sw' || ds.handle === 'se') signY = 1;
-      if (ds.handle === 'n' || ds.handle === 'nw' || ds.handle === 'ne') signY = -1;
-
-      let newX = origCX;
-      let newY = origCY;
-
-      if (isCorner) {
-        newX = origCX + signX * (cw - origW) / 2;
-        newY = origCY + signY * (ch - origH) / 2;
-      } else {
-        if (ds.handle === 'e' || ds.handle === 'w') {
-          newX = origCX + signX * (cw - origW) / 2;
-        } else {
-          newY = origCY + signY * (ch - origH) / 2;
-        }
-      }
+      const anchorOnLeft = ds.handle === 'se' || ds.handle === 'ne' || ds.handle === 'e';
+      const anchorOnTop = ds.handle === 'se' || ds.handle === 'sw' || ds.handle === 's';
+      newX = anchorOnLeft
+        ? ds.anchorX + elW / 2
+        : ds.anchorX - elW * (newScale - 0.5);
+      newY = anchorOnTop
+        ? ds.anchorY + elH / 2
+        : ds.anchorY - elH * (newScale - 0.5);
 
       updateCommand(selectedCommand.id, { x: newX, y: newY, scale: newScale } as any);
     }
@@ -220,6 +226,23 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({
     const cw = elW * currentResolved.scale;
     const ch = elH * currentResolved.scale;
 
+    let handleDirX = 0;
+    let handleDirY = 0;
+
+    if (handle === 'se' || handle === 'ne' || handle === 'e') handleDirX = 1;
+    if (handle === 'nw' || handle === 'sw' || handle === 'w') handleDirX = -1;
+    if (handle === 'se' || handle === 'sw' || handle === 's') handleDirY = 1;
+    if (handle === 'nw' || handle === 'ne' || handle === 'n') handleDirY = -1;
+
+    const anchorOnLeft = handle === 'se' || handle === 'ne' || handle === 'e';
+    const anchorOnTop = handle === 'se' || handle === 'sw' || handle === 's';
+    const anchorX = anchorOnLeft
+      ? currentResolved.x - elW / 2
+      : currentResolved.x + elW * (currentResolved.scale - 0.5);
+    const anchorY = anchorOnTop
+      ? currentResolved.y - elH / 2
+      : currentResolved.y + elH * (currentResolved.scale - 0.5);
+
     dragRef.current = {
       mode,
       handle,
@@ -230,6 +253,12 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({
       startScale: currentResolved.scale,
       origW: cw,
       origH: ch,
+      elW,
+      elH,
+      anchorX,
+      anchorY,
+      handleDirX,
+      handleDirY,
     };
 
     window.addEventListener('mousemove', handleMouseMove);
