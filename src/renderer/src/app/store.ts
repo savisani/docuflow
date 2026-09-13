@@ -265,6 +265,7 @@ interface DocuFlowState {
   duplicateCommand: (id: string) => void;
   replaceCommands: (commands: Command[]) => void;
   splitCommandAtPlayhead: (id: string) => void;
+  splitCommandAtTime: (id: string, cutTime: number) => void;
   deleteSelectedCommands: () => void;
   copySelectedCommands: () => void;
   cutSelectedCommands: () => void;
@@ -867,6 +868,36 @@ export const useDocuFlowStore = create<DocuFlowState>((set, get) => ({
     newHistory.push(postSnap);
     if (newHistory.length > MAX_HISTORY) newHistory.shift();
     set({ commands: newCommands, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1, isDirty: true, saveStatus: 'unsaved' });
+  },
+
+  splitCommandAtTime: (id, cutTime) => {
+    const state = get();
+    const cmd = state.commands.find((c) => c.id === id);
+    if (!cmd || !('duration' in cmd) || !(cmd as any).duration) return;
+
+    const fps = state.settings.fps;
+    const cmdStart = cmd.start;
+    const cmdDuration = (cmd as any).duration as number;
+    const cmdEnd = cmdStart + cmdDuration;
+
+    if (cutTime <= cmdStart || cutTime >= cmdEnd) return;
+
+    const splitFrameDuration = Math.round((cmdEnd - cutTime) * fps);
+    const newDuration = splitFrameDuration / fps;
+
+    const secondCmd = { ...cmd, id: uuidv4(), start: cutTime, duration: newDuration } as Command;
+    const firstCmd = { ...cmd, duration: cutTime - cmdStart } as Command;
+
+    const newCommands = state.commands.map((c) => (c.id === id ? firstCmd : c));
+    newCommands.push(secondCmd);
+    newCommands.sort((a, b) => a.start - b.start);
+
+    const tl = buildTimelineFromState(newCommands, state.assets, state.settings, state.voiceover);
+    const postSnap = captureState({ ...state, commands: newCommands, timeline: tl });
+    const newHistory = state.history.slice(0, state.historyIndex + 1);
+    newHistory.push(postSnap);
+    if (newHistory.length > MAX_HISTORY) newHistory.shift();
+    set({ commands: newCommands, timeline: tl, history: newHistory, historyIndex: newHistory.length - 1, isDirty: true, saveStatus: 'unsaved', selectedCommandId: secondCmd.id, selectedCommandIds: [secondCmd.id] });
   },
 
   deleteSelectedCommands: () => {

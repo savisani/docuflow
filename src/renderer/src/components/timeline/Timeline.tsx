@@ -115,6 +115,7 @@ export const Timeline: React.FC = () => {
   const toggleCommandSelection = useDocuFlowStore((s) => s.toggleCommandSelection);
   const setSelectedCommandIds = useDocuFlowStore((s) => s.setSelectedCommandIds);
   const splitCommandAtPlayhead = useDocuFlowStore((s) => s.splitCommandAtPlayhead);
+  const splitCommandAtTime = useDocuFlowStore((s) => s.splitCommandAtTime);
   const deleteSelectedCommands = useDocuFlowStore((s) => s.deleteSelectedCommands);
   const copySelectedCommands = useDocuFlowStore((s) => s.copySelectedCommands);
   const cutSelectedCommands = useDocuFlowStore((s) => s.cutSelectedCommands);
@@ -137,6 +138,12 @@ export const Timeline: React.FC = () => {
   // Visual-only drag offset: pixels moved during drag, not committed to store yet
   const [dragVisualOffset, setDragVisualOffset] = useState<{ clipId: string; dx: number; dy: number } | null>(null);
   const dragVisualOffsetRef = useRef<{ clipId: string; dx: number; dy: number } | null>(null);
+  // Blade tool state
+  const [toolMode, setToolMode] = useState<'select' | 'blade'>('select');
+  const [bladeHoverTime, setBladeHoverTime] = useState<number | null>(null);
+  const [bladeHoverClipId, setBladeHoverClipId] = useState<string | null>(null);
+  const bladeHoverTimeRef = useRef<number | null>(null);
+  const toolModeRef = useRef<'select' | 'blade'>('select');
   // Marquee selection state
   const [marqueeActive, setMarqueeActive] = useState(false);
   const marqueeRef = useRef<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
@@ -292,6 +299,8 @@ export const Timeline: React.FC = () => {
   const handleTimelineBodyClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (dragState || isDraggingPlayhead) return;
+      // In blade mode, clicking empty space does nothing (no seek)
+      if (toolModeRef.current === 'blade') return;
       seekToPosition(e.clientX, e.currentTarget);
     },
     [dragState, isDraggingPlayhead, seekToPosition]
@@ -430,6 +439,25 @@ export const Timeline: React.FC = () => {
       if (e.code === 'KeyB' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         if (selectedCommandId) splitCommandAtPlayhead(selectedCommandId);
+        return;
+      }
+
+      // Blade tool toggle (B key without modifier)
+      if (e.code === 'KeyB' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setToolMode((prev) => {
+          const next = prev === 'blade' ? 'select' : 'blade';
+          toolModeRef.current = next;
+          return next;
+        });
+        return;
+      }
+
+      // Escape exits blade mode
+      if (e.code === 'Escape' && toolModeRef.current === 'blade') {
+        e.preventDefault();
+        setToolMode('select');
+        toolModeRef.current = 'select';
         return;
       }
 
@@ -635,6 +663,18 @@ export const Timeline: React.FC = () => {
       e.preventDefault();
       const cmdId = clip.commandId || clip.id;
 
+      // Blade mode: split the clip at the click position
+      if (toolModeRef.current === 'blade') {
+        const scrollContainer = scrollContainerRef.current;
+        if (!scrollContainer) return;
+        const rect = scrollContainer.getBoundingClientRect();
+        const scrollLeft = scrollContainer.scrollLeft;
+        const x = e.clientX - rect.left + scrollLeft - LABEL_WIDTH;
+        const cutTime = Math.max(0, x / (PIXELS_PER_SECOND * zoomRef.current));
+        splitCommandAtTime(cmdId, cutTime);
+        return;
+      }
+
       if (e.ctrlKey || e.metaKey) {
         toggleCommandSelection(cmdId);
       } else {
@@ -691,7 +731,7 @@ export const Timeline: React.FC = () => {
         offsetToCenterY,
       };
     },
-    [selectedCommandId, selectCommand, toggleCommandSelection, commands, trackLayerMap, assets]
+    [selectedCommandId, selectCommand, toggleCommandSelection, commands, trackLayerMap, assets, splitCommandAtTime]
   );
 
   const dragStateRef = useRef<DragState | null>(null);
@@ -732,6 +772,9 @@ export const Timeline: React.FC = () => {
   useEffect(() => {
     fpsRef.current = fps;
   }, [fps]);
+  useEffect(() => {
+    toolModeRef.current = toolMode;
+  }, [toolMode]);
 
   useEffect(() => {
     // Reset refs when drag ends (but do NOT return early — we must always register handlers)
@@ -1418,6 +1461,17 @@ export const Timeline: React.FC = () => {
             {playing ? <Pause size={13} /> : <Play size={13} />}
           </IconButton>
         </Tooltip>
+        <Tooltip content={toolMode === 'blade' ? 'Blade Tool (B) — Click to cut' : 'Blade Tool (B)'}>
+          <IconButton size="sm" variant={toolMode === 'blade' ? 'primary' : 'ghost'} aria-label="Blade Tool" onClick={() => {
+            setToolMode((prev) => {
+              const next = prev === 'blade' ? 'select' : 'blade';
+              toolModeRef.current = next;
+              return next;
+            });
+          }}>
+            <Scissors size={13} />
+          </IconButton>
+        </Tooltip>
         <div className="flex items-center gap-2">
           <label className="text-df-xs text-df-text-muted shrink-0" style={{ width: '36px' }}>Time</label>
           <span data-timeline-time className="flex-1 text-df-xs text-df-text-primary font-mono">{formatTime(currentTime)}</span>
@@ -1479,6 +1533,8 @@ export const Timeline: React.FC = () => {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onMouseDown={(e) => {
+          // In blade mode, clicking empty space does nothing
+          if (toolModeRef.current === 'blade') return;
           // Start marquee if clicking on empty space (not on a clip or playhead)
           if (e.target === e.currentTarget || (e.target as HTMLElement).closest('.track-row')?.querySelector('.clip-item') === null) {
             const rect = e.currentTarget.getBoundingClientRect();
@@ -1506,6 +1562,52 @@ export const Timeline: React.FC = () => {
               overlay.style.width = `${w}px`;
               overlay.style.height = `${h}px`;
             }
+          }
+          // Blade hover tracking
+          if (toolModeRef.current === 'blade') {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const scrollLeft = e.currentTarget.scrollLeft;
+            const x = e.clientX - rect.left + scrollLeft - LABEL_WIDTH;
+            const time = Math.max(0, x / (PIXELS_PER_SECOND * zoomRef.current));
+            bladeHoverTimeRef.current = time;
+            setBladeHoverTime(time);
+
+            // Find clip under cursor
+            const trackRowsEl = e.currentTarget.querySelector('[data-track-rows]') as HTMLElement;
+            if (trackRowsEl) {
+              const rowsRect = trackRowsEl.getBoundingClientRect();
+              const y = e.clientY - rowsRect.top;
+              const trackIdx = Math.floor(y / TRACK_HEIGHT);
+              let currentIdx = 0;
+              let foundClipId: string | null = null;
+              for (const group of trackGroupsRef.current) {
+                if (trackIdx < 0) break;
+                // Skip group header row
+                currentIdx++;
+                if (trackIdx < currentIdx + group.tracks.length) {
+                  const localIdx = trackIdx - currentIdx;
+                  if (group.tracks[localIdx]) {
+                    const track = group.tracks[localIdx];
+                    for (const clip of track.clips) {
+                      if (time >= clip.start && time <= clip.end) {
+                        foundClipId = clip.commandId;
+                        break;
+                      }
+                    }
+                  }
+                  break;
+                }
+                currentIdx += group.tracks.length;
+              }
+              setBladeHoverClipId(foundClipId);
+            }
+          }
+        }}
+        onMouseLeave={() => {
+          if (toolModeRef.current === 'blade') {
+            bladeHoverTimeRef.current = null;
+            setBladeHoverTime(null);
+            setBladeHoverClipId(null);
           }
         }}
         onMouseUp={() => {
@@ -1542,7 +1644,7 @@ export const Timeline: React.FC = () => {
           marqueeRef.current = null;
           setMarqueeActive(false);
         }}
-        style={dragState ? { userSelect: 'none', WebkitUserSelect: 'none' } : undefined}
+        style={dragState ? { userSelect: 'none', WebkitUserSelect: 'none' } : toolMode === 'blade' ? { cursor: 'crosshair' } : undefined}
       >
         <div className="flex" style={{ width: scrollInnerWidth, minHeight: '100%' }}>
           {/* Left label column */}
@@ -1654,6 +1756,7 @@ export const Timeline: React.FC = () => {
                             dragVisualOffset={dragVisualOffset}
                             dragState={dragState}
                             showWaveforms={showWaveforms}
+                            toolMode={toolMode}
                             onMouseDown={(e, c, type, mode) => handleClipMouseDown(e, c, type, mode)}
                           />
                         );
@@ -1671,6 +1774,18 @@ export const Timeline: React.FC = () => {
             {/* Drop indicator - full height of right content area */}
             {dropTime !== null && (
               <div className="absolute top-0 bottom-0 w-0.5 bg-df-accent pointer-events-none z-20" style={{ left: dropTime * PIXELS_PER_SECOND * zoom }} />
+            )}
+
+            {/* Blade cut line */}
+            {toolMode === 'blade' && bladeHoverTime !== null && (
+              <div
+                className="absolute top-0 bottom-0 w-0.5 pointer-events-none z-20"
+                style={{
+                  left: bladeHoverTime * PIXELS_PER_SECOND * zoom,
+                  backgroundColor: bladeHoverClipId ? '#ef4444' : '#9ca3af',
+                  boxShadow: bladeHoverClipId ? '0 0 8px rgba(239,68,68,0.6)' : 'none',
+                }}
+              />
             )}
 
             {/* Marquee selection overlay */}

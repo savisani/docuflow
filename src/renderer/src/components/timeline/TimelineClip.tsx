@@ -51,6 +51,7 @@ interface TimelineClipProps {
   dragVisualOffset: DragVisualOffset | null;
   dragState: DragState | null;
   showWaveforms: boolean;
+  toolMode: 'select' | 'blade';
   onMouseDown: (e: React.MouseEvent, clip: ClipData, trackType: string, mode: 'move' | 'resize-left' | 'resize-right') => void;
 }
 
@@ -67,6 +68,7 @@ export const TimelineClip: React.FC<TimelineClipProps> = React.memo(({
   dragVisualOffset,
   dragState,
   showWaveforms,
+  toolMode,
   onMouseDown,
 }) => {
   const left = clip.start * PIXELS_PER_SECOND * zoom;
@@ -136,7 +138,8 @@ export const TimelineClip: React.FC<TimelineClipProps> = React.memo(({
   return (
     <div
       className={`
-        absolute top-0.5 bottom-0.5 rounded-df-sm flex items-center overflow-hidden cursor-grab active:cursor-grabbing
+        absolute top-0.5 bottom-0.5 rounded-df-sm flex items-center overflow-hidden
+        ${toolMode === 'blade' ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}
         border border-df-border
         ${isSelected
           ? 'ring-2 ring-df-accent/60 ring-offset-1 ring-offset-df-surface-1 z-10 border-df-accent/40'
@@ -165,18 +168,22 @@ export const TimelineClip: React.FC<TimelineClipProps> = React.memo(({
       <div className="flex-1 px-1 min-w-0 overflow-hidden">
         <span className="text-df-xs leading-none truncate block whitespace-nowrap">{displayName}</span>
       </div>
-      <div
-        className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-white/30 z-20"
-        onMouseDown={(e) => { e.stopPropagation(); onMouseDown(e, clip, trackType, 'resize-left'); }}
-      >
-        <div className="absolute left-0.5 top-1/2 -translate-y-1/2 w-0.5 h-3 bg-white/40 rounded-full" />
-      </div>
-      <div
-        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-white/30 z-20"
-        onMouseDown={(e) => { e.stopPropagation(); onMouseDown(e, clip, trackType, 'resize-right'); }}
-      >
-        <div className="absolute right-0.5 top-1/2 -translate-y-1/2 w-0.5 h-3 bg-white/40 rounded-full" />
-      </div>
+      {toolMode !== 'blade' && (
+        <>
+          <div
+            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-white/30 z-20"
+            onMouseDown={(e) => { e.stopPropagation(); onMouseDown(e, clip, trackType, 'resize-left'); }}
+          >
+            <div className="absolute left-0.5 top-1/2 -translate-y-1/2 w-0.5 h-3 bg-white/40 rounded-full" />
+          </div>
+          <div
+            className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-white/30 z-20"
+            onMouseDown={(e) => { e.stopPropagation(); onMouseDown(e, clip, trackType, 'resize-right'); }}
+          >
+            <div className="absolute right-0.5 top-1/2 -translate-y-1/2 w-0.5 h-3 bg-white/40 rounded-full" />
+          </div>
+        </>
+      )}
     </div>
   );
 });
