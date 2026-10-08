@@ -101,6 +101,7 @@ const docuflowAPI = {
     imageBase64: string;
     filename?: string;
     baseDir?: string;
+    destPath?: string;
   }): Promise<{ success: boolean; path?: string; error?: string }> => {
     return ipcRenderer.invoke('image:saveBytes', params)
   },

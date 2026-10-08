@@ -1,4 +1,5 @@
 import { Command } from '../engine/commands/types';
+import type { SceneLayer, SceneVisualContext, ShotType, CameraIntensity } from '../engine/sceneLayers/types';
 
 export interface ProjectSettings {
   width: number;
@@ -64,6 +65,11 @@ export interface ProjectScene {
   imageUrl?: string;
   imageId?: string;
   error?: string;
+  // -- Layered documentary scene (optional; absent = legacy single-image scene) --
+  layers?: SceneLayer[];
+  shotType?: ShotType;
+  cameraIntensity?: CameraIntensity;
+  visualContext?: SceneVisualContext;
 }
 
 export interface Project {

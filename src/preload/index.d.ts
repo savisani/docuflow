@@ -39,6 +39,7 @@ export interface DocuFlowAPI {
     imageBase64: string;
     filename?: string;
     baseDir?: string;
+    destPath?: string;
   }): Promise<{ success: boolean; path?: string; error?: string }>
   readImageAsBase64(filePath: string): Promise<string>
   deleteFile(filePath: string): Promise<{ success: boolean; error?: string }>

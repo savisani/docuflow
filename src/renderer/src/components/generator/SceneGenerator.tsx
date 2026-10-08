@@ -32,6 +32,9 @@ import {
   type GeminiConnectionTestResult,
 } from '../../utils/geminiApi';
 import { ThinkingInspector } from './ThinkingInspector';
+import { SceneLayerPanel } from './SceneLayerPanel';
+import { hasLayerPlan, composeSceneLayers } from '../../engine/sceneLayers';
+import type { SceneLayer, SceneVisualContext, ShotType, CameraIntensity } from '../../engine/sceneLayers/types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -59,6 +62,11 @@ interface StoryboardScene extends SceneItem {
   imageUrl?: string;
   imageId?: string;
   error?: string;
+  // -- Layered documentary scene (optional; absent = legacy single-image scene) --
+  layers?: SceneLayer[];
+  shotType?: ShotType;
+  cameraIntensity?: CameraIntensity;
+  visualContext?: SceneVisualContext;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,7 +139,7 @@ const CAMERA_MOTIONS = [
 // ---------------------------------------------------------------------------
 
 export const SceneGenerator: React.FC = () => {
-  const { addAsset, addCommand, setActiveTab, projectPath, scenes: storeScenes, setScenes: setStoreScenes, assets, setVoiceover, setTranscript, voiceover: storeVoiceover, transcript: storeTranscript } = useDocuFlowStore();
+  const { addAsset, addCommand, setActiveTab, projectPath, scenes: storeScenes, setScenes: setStoreScenes, assets, setVoiceover, setTranscript, voiceover: storeVoiceover, transcript: storeTranscript, settings: storeSettings } = useDocuFlowStore();
 
   // -- Audio file --
   const [audioFilePath, setAudioFilePath] = useState('');
@@ -301,9 +309,12 @@ export const SceneGenerator: React.FC = () => {
   const step2Done = scenes.length > 0;
   const canTranscribe = audioFilePath && !transcribing;
   const canBreakScenes = step1Done && !breakingScenes;
-  const canGenerateAll = step2Done && scenes.some((s) => s.status !== 'done') && !generatingAll && !buildingTimeline && !generateAndBuildRunning;
+  // Legacy single-image scenes are the ones batch generation can act on;
+  // layered scenes generate per layer inside the Scene Layer panel.
+  const legacyPending = scenes.some((s) => s.status !== 'done' && !hasLayerPlan(s));
+  const canGenerateAll = step2Done && legacyPending && !generatingAll && !buildingTimeline && !generateAndBuildRunning;
   const canBuildTimeline = step2Done && scenes.some((s) => s.status === 'done') && !generatingAll && !buildingTimeline && !generateAndBuildRunning;
-  const canGenerateAndBuild = step2Done && scenes.some((s) => s.status !== 'done') && !generatingAll && !buildingTimeline && !generateAndBuildRunning;
+  const canGenerateAndBuild = step2Done && legacyPending && !generatingAll && !buildingTimeline && !generateAndBuildRunning;
 
   // -----------------------------------------------------------------------
   // Step 1: Transcribe Audio
@@ -479,6 +490,10 @@ export const SceneGenerator: React.FC = () => {
     if (idx === -1) return;
 
     const scene = scenes[idx];
+    if (hasLayerPlan(scene)) {
+      setToast({ message: 'Layered scene — generate each layer from the Scene Layers panel below.', type: 'error' });
+      return;
+    }
     const updated = [...scenes];
     updated[idx] = { ...scene, status: 'generating' };
     setScenes(updated);
@@ -524,7 +539,7 @@ export const SceneGenerator: React.FC = () => {
     const updated = [...scenes];
 
     for (let i = 0; i < updated.length; i++) {
-      if (updated[i].status === 'done') {
+      if (updated[i].status === 'done' || hasLayerPlan(updated[i])) {
         continue;
       }
 
@@ -567,6 +582,40 @@ export const SceneGenerator: React.FC = () => {
   }, [scenes, setStoreScenes, negativePrompt, imageProvider, cloudflareConfig, pollinationsConfig, pollinationsModel, advancedSettings, selectedLocalModel, localDevice, projectPath]);
 
   // -----------------------------------------------------------------------
+  // Layered scenes → show + parallax commands (composed after the legacy
+  // single-image path so z never collides with its explicit layer numbers)
+  // -----------------------------------------------------------------------
+
+  const composeLayeredScenes = useCallback((targetScenes: StoryboardScene[], baseCommands: Command[]) => {
+    const store = useDocuFlowStore.getState();
+    const layered = targetScenes.filter((s) => hasLayerPlan(s) && s.status === 'done');
+    if (layered.length === 0) return { commands: [] as Command[], skipped: 0, sceneCount: 0 };
+
+    const assetDims = new Map<string, { width?: number; height?: number }>();
+    for (const a of store.assets) assetDims.set(a.id, { width: a.width, height: a.height });
+
+    // Sit above every explicit show layer already present in the project.
+    let zBase = 1;
+    for (const c of [...store.commands, ...baseCommands]) {
+      if (c.type === 'show' && typeof c.layer === 'number') {
+        zBase = Math.max(zBase, c.layer + 1);
+      }
+    }
+
+    const width = store.settings.width || 1920;
+    const height = store.settings.height || 1080;
+    const commands: Command[] = [];
+    let skipped = 0;
+    for (const sc of layered) {
+      const res = composeSceneLayers(sc, assetDims, { zBase, width, height });
+      commands.push(...res.commands);
+      skipped += res.skippedLayerIds.length;
+      zBase = res.usedZ;
+    }
+    return { commands, skipped, sceneCount: layered.length };
+  }, []);
+
+  // -----------------------------------------------------------------------
   // Step 3b: Build timeline from completed scenes
   // -----------------------------------------------------------------------
 
@@ -587,14 +636,15 @@ export const SceneGenerator: React.FC = () => {
 
       for (let i = 0; i < scenes.length; i++) {
         const sc = scenes[i];
-        if (sc.status === 'done' && sc.imageUrl) {
+        if (sc.status === 'done' && sc.imageUrl && !hasLayerPlan(sc)) {
           sceneImages.set(i, `scene-${sc.sceneId}.png`);
           completedScenes.push(sc);
         }
       }
       console.log('[DEBUG handleBuildTimeline] completedScenes:', completedScenes.length, JSON.stringify(completedScenes.map(s => ({ sceneId: s.sceneId, imageId: s.imageId }))));
 
-      if (completedScenes.length === 0) {
+      const layeredReady = scenes.some((s) => hasLayerPlan(s) && s.status === 'done');
+      if (completedScenes.length === 0 && !layeredReady) {
         setToast({ message: 'No completed scenes available to build.', type: 'error' });
         return;
       }
@@ -690,19 +740,26 @@ export const SceneGenerator: React.FC = () => {
       }
       console.log('[DEBUG handleBuildTimeline] newCommands:', newCommands.length);
 
+      // Layered scenes: show commands per layer + depth-parallax animations.
+      const layered = composeLayeredScenes(scenes, newCommands);
+      newCommands.push(...layered.commands);
+
       // Commit to store (only commands, since assets already exist)
       store.beginBatch();
       newCommands.forEach((c) => store.addCommand(c));
       store.endBatch();
 
-      setToast({ message: `Timeline built: ${newCommands.length} commands`, type: 'success' });
+      const layeredNote = layered.sceneCount > 0
+        ? ` (${layered.sceneCount} layered scene${layered.sceneCount === 1 ? '' : 's'}${layered.skipped > 0 ? `, ${layered.skipped} layer(s) skipped` : ''})`
+        : '';
+      setToast({ message: `Timeline built: ${newCommands.length} commands${layeredNote}`, type: 'success' });
       setActiveTab('studio');
     } catch (err) {
       setToast({ message: `Build failed: ${err instanceof Error ? err.message : String(err)}`, type: 'error' });
     } finally {
       setBuildingTimeline(false);
     }
-  }, [scenes, transcription, setActiveTab]);
+  }, [scenes, transcription, setActiveTab, composeLayeredScenes]);
 
   // -----------------------------------------------------------------------
   // Step 3c: Generate + Build combined
@@ -720,7 +777,7 @@ export const SceneGenerator: React.FC = () => {
       console.log('[DEBUG handleGenerateAndBuild] Starting image generation for', updated.length, 'scenes');
 
       for (let i = 0; i < updated.length; i++) {
-        if (updated[i].status === 'done') {
+        if (updated[i].status === 'done' || hasLayerPlan(updated[i])) {
           continue;
         }
 
@@ -760,9 +817,10 @@ export const SceneGenerator: React.FC = () => {
       setStoreScenes(updated);
 
       // Phase 2: Verify completed scenes
-      const completedScenes: StoryboardScene[] = updated.filter((s) => s.status === 'done' && s.imageUrl);
+      const completedScenes: StoryboardScene[] = updated.filter((s) => s.status === 'done' && s.imageUrl && !hasLayerPlan(s));
       console.log('[DEBUG handleGenerateAndBuild] Phase 2: completedScenes count:', completedScenes.length, JSON.stringify(completedScenes.map(s => ({ sceneId: s.sceneId, imageId: s.imageId, imageUrl: s.imageUrl }))));
-      if (completedScenes.length === 0) {
+      const layeredReady = updated.some((s) => hasLayerPlan(s) && s.status === 'done');
+      if (completedScenes.length === 0 && !layeredReady) {
         setToast({ message: 'No completed scenes to build timeline.', type: 'error' });
         return;
       }
@@ -875,11 +933,18 @@ export const SceneGenerator: React.FC = () => {
       }
       console.log('[DEBUG handleGenerateAndBuild] newCommands:', newCommands.length);
 
+      // Layered scenes: show commands per layer + depth-parallax animations.
+      const layered = composeLayeredScenes(updated, newCommands);
+      newCommands.push(...layered.commands);
+
       store.beginBatch();
       newCommands.forEach((c) => store.addCommand(c));
       store.endBatch();
 
-      setToast({ message: `Generate + Build complete: ${assetMapByLogicalId.size} scenes, ${newCommands.length} commands`, type: 'success' });
+      const layeredNote = layered.sceneCount > 0
+        ? `, ${layered.sceneCount} layered scene${layered.sceneCount === 1 ? '' : 's'}${layered.skipped > 0 ? ` (${layered.skipped} layer(s) skipped)` : ''}`
+        : '';
+      setToast({ message: `Generate + Build complete: ${assetMapByLogicalId.size} scenes, ${newCommands.length} commands${layeredNote}`, type: 'success' });
       setActiveTab('studio');
     } catch (err) {
       setToast({ message: `Generate + Build failed: ${err instanceof Error ? err.message : String(err)}`, type: 'error' });
@@ -887,7 +952,7 @@ export const SceneGenerator: React.FC = () => {
       setBuildingTimeline(false);
       setGenerateAndBuildRunning(false);
     }
-  }, [scenes, setStoreScenes, negativePrompt, imageProvider, cloudflareConfig, pollinationsConfig, pollinationsModel, advancedSettings, selectedLocalModel, localDevice, transcription, setActiveTab, projectPath]);
+  }, [scenes, setStoreScenes, negativePrompt, imageProvider, cloudflareConfig, pollinationsConfig, pollinationsModel, advancedSettings, selectedLocalModel, localDevice, transcription, setActiveTab, projectPath, composeLayeredScenes]);
 
   // -----------------------------------------------------------------------
   // Edit helpers
@@ -1994,23 +2059,51 @@ export const SceneGenerator: React.FC = () => {
                         />
                       </div>
 
+                      {/* Layered documentary scene controls */}
+                      <SceneLayerPanel
+                        scene={scene}
+                        onUpdate={(updates) => handleUpdateScene(scene.sceneId, updates)}
+                        disabled={
+                          (imageProvider === 'cloudflare' && !cloudflareConfig.workerUrl) ||
+                          (imageProvider === 'pollinations' && !pollinationsConfig.apiKey) ||
+                          (imageProvider === 'local' && !selectedLocalModel)
+                        }
+                        config={{
+                          provider: imageProvider,
+                          cloudflareConfig: imageProvider === 'cloudflare' ? cloudflareConfig : undefined,
+                          pollinationsConfig: imageProvider === 'pollinations' ? pollinationsConfig : undefined,
+                          model: imageProvider === 'pollinations' ? pollinationsModel : advancedSettings.model,
+                          steps: advancedSettings.steps,
+                          localModelPath: imageProvider === 'local' ? selectedLocalModel : undefined,
+                          device: imageProvider === 'local' ? localDevice : undefined,
+                          negativePrompt: negativePrompt || undefined,
+                          projectPath,
+                          settings: {
+                            width: storeSettings.width || 1920,
+                            height: storeSettings.height || 1080,
+                          },
+                        }}
+                      />
+
                       {/* Generate button */}
-                      <div className="flex items-center justify-between">
-                        <span className="text-[9px] text-slate-600">
-                          {scene.status === 'done' ? 'Image ready' : scene.status === 'generating' ? 'Generating...' : ''}
-                        </span>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => handleGenerateSingle(scene.sceneId)}
-                          disabled={scene.status === 'generating' || (imageProvider === 'cloudflare' && !cloudflareConfig.workerUrl) || (imageProvider === 'local' && !selectedLocalModel)}
-                          loading={scene.status === 'generating'}
-                          icon={<ImageIcon size={10} />}
-                          className="px-2.5 py-1 text-[9px] border border-white/10 hover:border-amber-500/30 hover:text-amber-300"
-                        >
-                          {scene.status === 'done' ? 'Regenerate' : 'Generate Image'}
-                        </Button>
-                      </div>
+                      {!hasLayerPlan(scene) && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] text-slate-600">
+                            {scene.status === 'done' ? 'Image ready' : scene.status === 'generating' ? 'Generating...' : ''}
+                          </span>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleGenerateSingle(scene.sceneId)}
+                            disabled={scene.status === 'generating' || (imageProvider === 'cloudflare' && !cloudflareConfig.workerUrl) || (imageProvider === 'local' && !selectedLocalModel)}
+                            loading={scene.status === 'generating'}
+                            icon={<ImageIcon size={10} />}
+                            className="px-2.5 py-1 text-[9px] border border-white/10 hover:border-amber-500/30 hover:text-amber-300"
+                          >
+                            {scene.status === 'done' ? 'Regenerate' : 'Generate Image'}
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}

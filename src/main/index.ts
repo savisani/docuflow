@@ -1,7 +1,7 @@
 import { app, BrowserWindow, shell, ipcMain, protocol, dialog } from 'electron'
-import { join, extname } from 'path'
+import { join, extname, dirname } from 'path'
 import { readFile, writeFile, stat } from 'fs/promises'
-import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
+import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs'
 import { spawn } from 'child_process'
 import { is } from '@electron-toolkit/utils'
 import { tmpdir } from 'os'
@@ -17,6 +17,7 @@ import { registerPipelineIpc } from './ipc/pipeline'
 import { registerMediaIpc } from './ipc/media'
 import { getModelManager, ModelManagerRunner } from './modelManager'
 import { normalizeError, createLogger, ErrorCode } from '../core/errors'
+import { resolveSaveBytesPath } from '../core/io/saveBytesPath'
 
 const ASSET_PROTOCOL = 'docuflow-asset'
 
@@ -1058,29 +1059,35 @@ function registerSaveImageIpc(): void {
     imageBase64: string;
     filename?: string;
     baseDir?: string;
+    destPath?: string;
   }): Promise<{ success: boolean; path?: string; error?: string }> => {
     if (!params || typeof params.imageBase64 !== 'string' || !params.imageBase64) {
       return { success: false, error: 'Invalid params: imageBase64 is required' }
     }
     try {
-      const fileName = params.filename || `docuflow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`
-      let dir: string
-      let filePath: string
-
+      // Callers may pass store.projectPath, which is the .docuflow.json FILE
+      // path - detect that so resolution lands in its containing directory.
+      let baseDirIsFile = false
       if (params.baseDir) {
-        // Save to project-relative generated/images directory for persistence
-        dir = join(params.baseDir, 'generated', 'images')
-        filePath = join(dir, fileName)
-      } else {
-        // Fall back to user data directory (persistent but not temp)
-        const { app } = await import('electron')
-        const userDataPath = app.getPath('userData')
-        dir = join(userDataPath, 'docuflow-generated')
-        filePath = join(dir, fileName)
+        try {
+          baseDirIsFile = existsSync(params.baseDir) && statSync(params.baseDir).isFile()
+        } catch {
+          // If stat fails, treat baseDir as a directory
+        }
       }
 
+      const userDataDir =
+        !params.destPath && !params.baseDir ? app.getPath('userData') : undefined
+
+      const { dir, filePath } = resolveSaveBytesPath({
+        filename: params.filename,
+        baseDir: params.baseDir,
+        baseDirIsFile,
+        destPath: params.destPath,
+        userDataDir,
+      })
+
       if (!existsSync(dir)) {
-        const { mkdirSync } = await import('fs')
         mkdirSync(dir, { recursive: true })
       }
       const buffer = Buffer.from(params.imageBase64, 'base64')

@@ -41,6 +41,51 @@ export const ProjectSceneMarkerSchema = z.object({
   transcriptSegmentIds: z.array(z.string()),
 });
 
+const SceneLayerTransformSchema = z.object({
+  x: z.number().optional(),
+  y: z.number().optional(),
+  scale: z.number().optional(),
+  rotation: z.number().optional(),
+  opacity: z.number().optional(),
+  blur: z.number().optional(),
+});
+
+/**
+ * Layered documentary scene layer. Deliberately lenient (most fields optional)
+ * so saved projects never fail validation on minor shape drift.
+ */
+const SceneLayerSchema = z.object({
+  id: z.string().min(1),
+  type: z.enum(['background', 'midground', 'foreground', 'atmosphere']),
+  name: z.string().optional(),
+  order: z.number().optional(),
+  subject: z.string().optional(),
+  prompt: z.string().optional(),
+  status: z.enum(['pending', 'generating', 'done', 'error']).optional(),
+  assetId: z.string().optional(),
+  error: z.string().optional(),
+  alphaMode: z.enum(['none', 'chroma', 'luminance']).optional(),
+  alphaApplied: z.boolean().optional(),
+  visible: z.boolean().optional(),
+  optional: z.boolean().optional(),
+  transform: SceneLayerTransformSchema.optional(),
+  updatedAt: z.number().optional(),
+});
+
+const SceneVisualContextSchema = z.object({
+  period: z.string().optional(),
+  location: z.string().optional(),
+  lighting: z.string().optional(),
+  weather: z.string().optional(),
+  tone: z.string().optional(),
+  architecture: z.string().optional(),
+  characters: z.string().optional(),
+  clothing: z.string().optional(),
+  cameraStyle: z.string().optional(),
+  environment: z.string().optional(),
+  style: z.string().optional(),
+});
+
 export const ProjectSceneSchema = z.object({
   sceneId: z.number(),
   startTime: z.number(),
@@ -54,6 +99,18 @@ export const ProjectSceneSchema = z.object({
   imageUrl: z.string().optional(),
   imageId: z.string().optional(),
   error: z.string().optional(),
+  // Layered documentary scene — optional so legacy scenes validate unchanged
+  layers: z.array(SceneLayerSchema).optional(),
+  shotType: z.enum([
+    'establishing',
+    'subject',
+    'environment',
+    'historical_reconstruction',
+    'detail',
+    'atmospheric',
+  ]).optional(),
+  cameraIntensity: z.enum(['subtle', 'moderate', 'strong']).optional(),
+  visualContext: SceneVisualContextSchema.optional(),
 });
 
 export const GeneratedImageSchema = z.object({
