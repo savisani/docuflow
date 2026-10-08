@@ -2,7 +2,7 @@ import { app, BrowserWindow, shell, ipcMain, protocol, dialog } from 'electron'
 import { join, extname, dirname } from 'path'
 import { readFile, writeFile, stat } from 'fs/promises'
 import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs'
-import { spawn } from 'child_process'
+import { spawn, spawnSync } from 'child_process'
 import { is } from '@electron-toolkit/utils'
 import { tmpdir } from 'os'
 import {
@@ -18,6 +18,7 @@ import { registerMediaIpc } from './ipc/media'
 import { getModelManager, ModelManagerRunner } from './modelManager'
 import { normalizeError, createLogger, ErrorCode } from '../core/errors'
 import { resolveSaveBytesPath } from '../core/io/saveBytesPath'
+import { resolvePythonExecutable, type PythonResolution } from '../core/io/pythonExecutable'
 
 const ASSET_PROTOCOL = 'docuflow-asset'
 
@@ -392,11 +393,56 @@ function getScriptPath(): string {
   return join(process.resourcesPath, 'scripts/generate_local.py')
 }
 
-function getPythonPath(): string {
+function getVenvPythonPath(): string {
   if (is.dev) {
     return join(__dirname, '../../scripts/.venv/Scripts/python.exe')
   }
   return join(process.resourcesPath, 'scripts/.venv/Scripts/python.exe')
+}
+
+/** Probe an interpreter with --version; rejects broken venv redirectors and Store aliases. */
+function isRunnablePython(exe: string): boolean {
+  try {
+    const result = spawnSync(exe, ['--version'], {
+      encoding: 'utf8',
+      timeout: 10000,
+      windowsHide: true,
+    })
+    const output = `${result.stdout ?? ''}${result.stderr ?? ''}`
+    return result.status === 0 && /Python \d/i.test(output)
+  } catch {
+    return false
+  }
+}
+
+let pythonResolutionCache: PythonResolution | undefined
+
+/**
+ * Resolve a working Python interpreter (cached on success):
+ * DOCUFLOW_PYTHON -> scripts/.venv -> py launcher -> python on PATH.
+ * Every candidate is verified with --version, so a stale venv whose base
+ * interpreter was uninstalled is skipped instead of launched.
+ */
+function resolvePython(): PythonResolution {
+  if (pythonResolutionCache?.ok) return pythonResolutionCache
+  const result = resolvePythonExecutable({
+    configuredPath: process.env.DOCUFLOW_PYTHON,
+    venvPython: getVenvPythonPath(),
+    fallbackCommands: ['py', 'python'],
+    fileExists: existsSync,
+    isRunnablePython,
+    env: process.env,
+  })
+  if (result.ok) pythonResolutionCache = result
+  return result
+}
+
+function getPythonPath(): string {
+  const resolved = resolvePython()
+  // Keep the existing string contract for callers guarded by existsSync;
+  // when nothing runnable exists they surface their standard errors.
+  if (resolved.ok) return resolved.path
+  return getVenvPythonPath()
 }
 
 function getLocalModelPath(): string | null {
@@ -885,6 +931,14 @@ function registerTranscriptionIpc(): void {
       return { success: false, error: err.toSerializable() }
     }
 
+    const resolvedPython = resolvePython()
+    if (!resolvedPython.ok) {
+      const err = normalizeError(resolvedPython.error, ErrorCode.TRANSCRIPTION, {
+        context: { attempted: resolvedPython.attempted },
+      })
+      return { success: false, error: err.toSerializable() }
+    }
+
     return new Promise((resolve) => {
       const scriptPath = getTranscribeScriptPath()
       const args = [
@@ -895,9 +949,9 @@ function registerTranscriptionIpc(): void {
         args.push('--model', params.modelSize)
       }
 
-      const pythonPath = getPythonPath()
+      const pythonPath = resolvedPython.path
       const log = createLogger('transcribe')
-      log.info('Running transcription', { audioPath: params.audioPath, modelSize: params.modelSize })
+      log.info('Running transcription', { audioPath: params.audioPath, modelSize: params.modelSize, pythonPath })
 
       const pythonProcess = spawn(pythonPath, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
